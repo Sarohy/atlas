@@ -1,0 +1,54 @@
+# ──────────────────────────────────────────────────
+# ATLAS monorepo — root .gitignore
+# Per-directory .gitignore files in backend/ and
+# frontend/ handle stack-specific patterns.
+# ──────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.orig
+
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+
+# ── Backend (Python / uv) ─────────────────────────
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/.venv/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+backend/coverage.xml
+backend/dist/
+backend/build/
+backend/*.egg-info/
+
+# ── Frontend (Node / pnpm) ────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+frontend/playwright-report/
+frontend/test-results/
+frontend/.pnpm-debug.log*
+
+# ── Logs ─────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*

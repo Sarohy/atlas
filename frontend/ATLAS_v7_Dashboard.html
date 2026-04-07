@@ -1,0 +1,3414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ATLAS v7.0 — AI Trading Dashboard</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;500;600;700&display=swap');
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: 'Syne', sans-serif;
+        background: #0a0c0f;
+        color: #e2e8f0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .mono {
+        font-family: 'JetBrains Mono', monospace;
+      }
+      .hdr {
+        background: #0d1117;
+        border-bottom: 1px solid #1e2836;
+        padding: 0 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        flex-shrink: 0;
+      }
+      .logo {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        font-weight: 600;
+        color: #38bdf8;
+        letter-spacing: 3px;
+      }
+      .hdr-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .pill {
+        padding: 2px 9px;
+        border-radius: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        font-family: 'JetBrains Mono', monospace;
+      }
+      .p-y {
+        background: #2d2006;
+        color: #fbbf24;
+        border: 1px solid #78490a;
+      }
+      .p-r {
+        background: #2d0a0a;
+        color: #f87171;
+        border: 1px solid #7f1d1d;
+      }
+      .p-g {
+        background: #0d2010;
+        color: #4ade80;
+        border: 1px solid #166534;
+      }
+      .p-b {
+        background: #1e3a5f;
+        color: #38bdf8;
+        border: 1px solid #2d5a8e;
+      }
+      .p-o {
+        background: #1a1008;
+        color: #fb923c;
+        border: 1px solid #7c2d12;
+      }
+      .p-gray {
+        background: #1a1a1a;
+        color: #64748b;
+        border: 1px solid #374151;
+      }
+      .hdr-stat {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: #475569;
+      }
+      .nav {
+        background: #0d1117;
+        border-bottom: 1px solid #1e2836;
+        display: flex;
+        padding: 0 20px;
+      }
+      .ntab {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 10px 14px;
+        cursor: pointer;
+        letter-spacing: 0.5px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: #475569;
+        transition: all 0.12s;
+        white-space: nowrap;
+        background: none;
+        font-family: 'Syne', sans-serif;
+      }
+      .ntab.on {
+        color: #38bdf8;
+        border-bottom: 2px solid #38bdf8;
+      }
+      .ntab:hover:not(.on) {
+        color: #94a3b8;
+      }
+      .app-body {
+        display: flex;
+        flex: 1;
+        min-height: 800px;
+      }
+      .sidebar {
+        width: 240px;
+        background: #0d1117;
+        border-right: 1px solid #1e2836;
+        overflow-y: auto;
+        flex-shrink: 0;
+      }
+      .main {
+        flex: 1;
+        overflow-y: auto;
+      }
+      .rpanel {
+        width: 260px;
+        background: #0d1117;
+        border-left: 1px solid #1e2836;
+        overflow-y: auto;
+        flex-shrink: 0;
+      }
+      .screen {
+        display: none;
+        padding: 18px;
+      }
+      .screen.on {
+        display: block;
+      }
+      .slbl {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        color: #334155;
+        text-transform: uppercase;
+        padding: 14px 14px 6px;
+      }
+      .prow {
+        padding: 7px 14px;
+        border-bottom: 1px solid #0f172a;
+      }
+      .pt {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2px;
+      }
+      .tkr {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 600;
+        color: #e2e8f0;
+      }
+      .pval {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: #94a3b8;
+      }
+      .pbg {
+        background: #1e2836;
+        border-radius: 2px;
+        height: 3px;
+        margin-top: 3px;
+      }
+      .pb {
+        height: 3px;
+        border-radius: 2px;
+      }
+      .pmeta {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: #475569;
+      }
+      .cg {
+        color: #4ade80;
+      }
+      .cy {
+        color: #fbbf24;
+      }
+      .co {
+        color: #fb923c;
+      }
+      .cr {
+        color: #f87171;
+      }
+      .cb {
+        color: #38bdf8;
+      }
+      .kgrid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      .kcard {
+        background: #0d1117;
+        border: 1px solid #1e2836;
+        border-radius: 5px;
+        padding: 12px 14px;
+      }
+      .klbl {
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        color: #475569;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .kval {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 20px;
+        font-weight: 700;
+        color: #e2e8f0;
+        line-height: 1;
+      }
+      .ksub {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: #64748b;
+        margin-top: 3px;
+      }
+      .panel {
+        background: #0d1117;
+        border: 1px solid #1e2836;
+        border-radius: 5px;
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .phdr {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 9px 14px;
+        border-bottom: 1px solid #1e2836;
+      }
+      .ptitle {
+        font-size: 10px;
+        font-weight: 600;
+        color: #94a3b8;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      .g2 {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+      .g3 {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+      .srow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 14px;
+        border-bottom: 1px solid #0f172a;
+      }
+      .sdot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .son {
+        background: #4ade80;
+      }
+      .soff {
+        background: #1e2836;
+      }
+      .stxt {
+        font-size: 10px;
+        color: #64748b;
+      }
+      .sval {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        margin-left: auto;
+      }
+      .fwg {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+      .fwi {
+        padding: 10px 12px;
+        border-right: 1px solid #0f172a;
+        border-bottom: 1px solid #0f172a;
+      }
+      .fwi:nth-child(2n) {
+        border-right: none;
+      }
+      .fwn {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: #334155;
+        margin-bottom: 1px;
+      }
+      .fwlbl {
+        font-size: 9px;
+        color: #64748b;
+        margin-bottom: 3px;
+      }
+      .fws {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .iran-row {
+        padding: 7px 14px;
+        border-bottom: 1px solid #0f172a;
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .iran-k {
+        color: #475569;
+      }
+      .iran-v {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+      }
+      .oz-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 5px;
+      }
+      .oz {
+        padding: 4px 6px;
+        border-radius: 3px;
+        text-align: center;
+        font-size: 8px;
+        font-weight: 700;
+      }
+      .oz-g {
+        background: #0d2010;
+        color: #4ade80;
+        border: 1px solid #166534;
+      }
+      .oz-y {
+        background: #1a1a08;
+        color: #fbbf24;
+        border: 1px solid #713f12;
+      }
+      .oz-o {
+        background: #1a1008;
+        color: #fb923c;
+        border: 1px solid #7c2d12;
+      }
+      .oz-r {
+        background: #1a0808;
+        color: #f87171;
+        border: 1px solid #7f1d1d;
+      }
+      .oz-active {
+        outline: 2px solid #f8fafc;
+        outline-offset: 1px;
+      }
+      .warn-bar {
+        background: #1a1205;
+        border: 1px solid #7c2d12;
+        border-radius: 3px;
+        padding: 7px 10px;
+        margin: 8px 14px;
+        font-size: 9px;
+        color: #fb923c;
+      }
+      .sc-card {
+        background: #0d1117;
+        border: 1px solid #1e2836;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .sc-top2 {
+        padding: 12px 14px;
+        border-bottom: 1px solid #111827;
+      }
+      .sc-fact {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+      }
+      .sc-fn {
+        font-size: 9px;
+        color: #64748b;
+        width: 100px;
+        flex-shrink: 0;
+      }
+      .sc-bg {
+        flex: 1;
+        background: #1e2836;
+        border-radius: 2px;
+        height: 3px;
+      }
+      .sc-b {
+        height: 3px;
+        border-radius: 2px;
+      }
+      .sc-fv {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        width: 14px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .sc-foot2 {
+        padding: 7px 14px;
+        border-top: 1px solid #111827;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .uni-funnel {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        background: #111827;
+        border-radius: 5px;
+        overflow: hidden;
+        margin-bottom: 14px;
+      }
+      .uf {
+        padding: 14px 12px;
+        text-align: center;
+        border-right: 1px solid #1e2836;
+      }
+      .uf:last-child {
+        border-right: none;
+      }
+      .uf-num {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .uf-lbl {
+        font-size: 9px;
+        color: #64748b;
+        font-weight: 600;
+      }
+      .uf-sub {
+        font-size: 9px;
+        color: #334155;
+        margin-top: 3px;
+      }
+      .cat-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 14px;
+        border-bottom: 1px solid #0f172a;
+      }
+      .cat-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .cat-name {
+        font-size: 10px;
+        color: #94a3b8;
+        flex: 1;
+      }
+      .cat-bar-bg {
+        width: 80px;
+        background: #1e2836;
+        border-radius: 2px;
+        height: 4px;
+      }
+      .cat-bar {
+        height: 4px;
+        border-radius: 2px;
+      }
+      .trow {
+        display: grid;
+        grid-template-columns: 72px 52px 62px 80px 90px 1fr 58px;
+        padding: 7px 0;
+        border-bottom: 1px solid #0f172a;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+      }
+      .arow2 {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 9px 14px;
+        border-bottom: 1px solid #0f172a;
+      }
+      .adot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        margin-top: 3px;
+        flex-shrink: 0;
+      }
+      .atxt {
+        font-size: 10px;
+        color: #94a3b8;
+        line-height: 1.5;
+      }
+      .atxt strong {
+        color: #e2e8f0;
+        font-weight: 600;
+      }
+      .ameta {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: #334155;
+        margin-top: 2px;
+      }
+      .bq {
+        font-size: 11px;
+        font-weight: 600;
+        color: #38bdf8;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #1e2836;
+      }
+      .brow {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #0f172a;
+      }
+      .pf-row {
+        display: grid;
+        grid-template-columns: 52px 72px 52px 58px 52px 60px;
+        padding: 7px 0;
+        border-bottom: 1px solid #0f172a;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hdr">
+      <div class="logo">ATLAS v7.0</div>
+      <div class="hdr-meta">
+        <span class="pill p-y">CAUTION</span>
+        <span class="pill p-r">DAY 27 · SAT DEADLINE</span>
+        <span class="pill p-o">OIL $94.80</span>
+        <span class="hdr-stat">VIX 25.33</span>
+        <span class="hdr-stat">NAV $23.90M</span>
+        <span class="hdr-stat">CASH $3.585M · 15%</span>
+        <span class="hdr-stat">BETA 1.09</span>
+        <span class="pill p-b">175 UNIVERSE</span>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button class="ntab on" onclick="show('portfolio', this)">Portfolio</button>
+      <button class="ntab" onclick="show('briefing', this)">Daily Briefing</button>
+      <button class="ntab" onclick="show('radar', this)">Radar</button>
+      <button class="ntab" onclick="show('universe', this)">Universe</button>
+      <button class="ntab" onclick="show('frameworks', this)">Frameworks</button>
+      <button class="ntab" onclick="show('iran', this)">Iran Clock</button>
+      <button class="ntab" onclick="show('history', this)">Trade Log</button>
+    </div>
+
+    <div class="app-body">
+      <!-- SIDEBAR -->
+      <div class="sidebar">
+        <div class="slbl">Holdings — AI Core</div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">MU</span><span class="pval">$2.862M</span></div>
+          <div class="pbg"><div class="pb" style="width: 95%; background: #f87171"></div></div>
+          <div class="pmeta"><span>15.0% · beta 2.39</span><span class="cr">-3.4%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">TSM</span><span class="pval">$2.437M</span></div>
+          <div class="pbg"><div class="pb" style="width: 85%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>12.8% · beta 1.15</span><span class="cg">+1.3%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">COHR</span><span class="pval">$1.814M</span></div>
+          <div class="pbg"><div class="pb" style="width: 63%; background: #fbbf24"></div></div>
+          <div class="pmeta"><span>9.5% · beta 2.02</span><span class="cr">-1.2%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">CIEN</span><span class="pval">$1.480M</span></div>
+          <div class="pbg"><div class="pb" style="width: 51%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>7.7% · beta 1.39</span><span class="cg">+0.8%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">VRT</span><span class="pval">$1.195M</span></div>
+          <div class="pbg"><div class="pb" style="width: 42%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>6.3% · beta 2.10</span><span class="cr">-0.9%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">LITE</span><span class="pval">$1.052M</span></div>
+          <div class="pbg"><div class="pb" style="width: 36%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>5.5% · beta 1.96</span><span class="cg">+2.1%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">NBIS</span><span class="pval">$810K</span></div>
+          <div class="pbg"><div class="pb" style="width: 28%; background: #fbbf24"></div></div>
+          <div class="pmeta"><span>4.2% · beta 2.09</span><span class="cr">-3.0%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">AVGO</span><span class="pval">$657K</span></div>
+          <div class="pbg"><div class="pb" style="width: 23%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>3.4% · beta 1.35</span><span class="cg">+0.2%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">MRVL</span><span class="pval">$561K</span></div>
+          <div class="pbg"><div class="pb" style="width: 19%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>2.9% · beta 1.75</span><span class="cg">+6.6%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">CEG</span><span class="pval">$401K</span></div>
+          <div class="pbg"><div class="pb" style="width: 14%; background: #4ade80"></div></div>
+          <div class="pmeta"><span>2.1% · beta 0.65</span><span class="cg">+0.4%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">SNDK</span><span class="pval">$401K</span></div>
+          <div class="pbg"><div class="pb" style="width: 14%; background: #f87171"></div></div>
+          <div class="pmeta"><span>2.1% · beta 2.74</span><span class="cr">-4.3%</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt"><span class="tkr">NEM</span><span class="pval">$90K</span></div>
+          <div class="pbg"><div class="pb" style="width: 4%; background: #4ade80"></div></div>
+          <div class="pmeta"><span>0.5% · beta 0.40</span><span class="cg">+1.1%</span></div>
+        </div>
+        <div class="slbl" style="margin-top: 4px">Cash</div>
+        <div class="prow">
+          <div class="pt"><span class="tkr cg">CASH</span><span class="pval cg">$3.585M</span></div>
+          <div class="pbg"><div class="pb" style="width: 100%; background: #4ade80"></div></div>
+          <div class="pmeta">
+            <span class="cg">15.0% · floor $2.39M</span><span class="cg">PROTECTED</span>
+          </div>
+        </div>
+        <div class="slbl" style="margin-top: 4px">Tier A Candidates</div>
+        <div class="prow">
+          <div class="pt"><span class="tkr cb">FN</span><span class="pval">GTC $530-560</span></div>
+          <div class="pbg"><div class="pb" style="width: 75%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>Score 92</span><span class="cb">$350-450K</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt">
+            <span class="tkr cb">NBIS+</span><span class="pval">GTC $107-113</span>
+          </div>
+          <div class="pbg"><div class="pb" style="width: 70%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>Score 91</span><span class="cb">$400-500K</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt">
+            <span class="tkr cb">MRVL+</span><span class="pval">GTC $92-96</span>
+          </div>
+          <div class="pbg"><div class="pb" style="width: 75%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>Score 92</span><span class="cb">$250-400K</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt">
+            <span class="tkr cb">LITE+</span><span class="pval">GTC $780-825</span>
+          </div>
+          <div class="pbg"><div class="pb" style="width: 72%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>Score 91</span><span class="cb">$500-700K</span></div>
+        </div>
+        <div class="prow">
+          <div class="pt">
+            <span class="tkr cb">ETN</span><span class="pval">GTC $340-358</span>
+          </div>
+          <div class="pbg"><div class="pb" style="width: 68%; background: #38bdf8"></div></div>
+          <div class="pmeta"><span>Score 84</span><span class="cb">$350-500K</span></div>
+        </div>
+      </div>
+
+      <!-- MAIN -->
+      <div class="main">
+        <!-- PORTFOLIO -->
+        <div id="portfolio" class="screen on">
+          <div class="kgrid">
+            <div class="kcard" style="border-top: 2px solid #38bdf8">
+              <div class="klbl">Total Portfolio NAV</div>
+              <div class="kval">$23.90M</div>
+              <div class="ksub">March 26 2026 · down $420K today</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #4ade80">
+              <div class="klbl">Cash Reserve</div>
+              <div class="kval cg">$3.585M</div>
+              <div class="ksub">15.0% of NAV · floor $2.39M (10%)</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #fbbf24">
+              <div class="klbl">Portfolio Beta</div>
+              <div class="kval">1.09</div>
+              <div class="ksub">total incl. cash · 1.40 invested capital</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #f87171">
+              <div class="klbl">Optics Cluster</div>
+              <div class="kval cr">26.6%</div>
+              <div class="ksub">above 25% warning · hard gate 30%</div>
+            </div>
+          </div>
+          <div class="g2">
+            <div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Oil Scenario Router — Framework #3 and #7</span
+                  ><span class="pill p-o">YELLOW/ORANGE</span>
+                </div>
+                <div style="padding: 12px 14px">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                      color: #475569;
+                      margin-bottom: 5px;
+                    "
+                  >
+                    <span>$60</span><span>$80</span><span>$95</span><span>$108</span
+                    ><span>$130</span>
+                  </div>
+                  <div
+                    style="
+                      background: #1e2836;
+                      border-radius: 3px;
+                      height: 7px;
+                      position: relative;
+                      margin-bottom: 8px;
+                    "
+                  >
+                    <div
+                      style="
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        width: 30%;
+                        height: 7px;
+                        background: #166534;
+                        border-radius: 3px 0 0 3px;
+                        opacity: 0.5;
+                      "
+                    ></div>
+                    <div
+                      style="
+                        position: absolute;
+                        left: 30%;
+                        top: 0;
+                        width: 25%;
+                        height: 7px;
+                        background: #713f12;
+                        opacity: 0.5;
+                      "
+                    ></div>
+                    <div
+                      style="
+                        position: absolute;
+                        left: 55%;
+                        top: 0;
+                        width: 15%;
+                        height: 7px;
+                        background: #7c2d12;
+                        opacity: 0.5;
+                      "
+                    ></div>
+                    <div
+                      style="
+                        position: absolute;
+                        left: 70%;
+                        top: 0;
+                        width: 30%;
+                        height: 7px;
+                        background: #7f1d1d;
+                        border-radius: 0 3px 3px 0;
+                        opacity: 0.5;
+                      "
+                    ></div>
+                    <div
+                      style="
+                        position: absolute;
+                        left: 52%;
+                        top: -5px;
+                        width: 2px;
+                        height: 17px;
+                        background: #f8fafc;
+                        border-radius: 1px;
+                      "
+                    ></div>
+                  </div>
+                  <div class="oz-grid">
+                    <div class="oz oz-g">DEPLOY &lt;$80</div>
+                    <div class="oz oz-y oz-active">CAUTION $80-95</div>
+                    <div class="oz oz-o">PAUSE $95-108</div>
+                    <div class="oz oz-r">HALT &gt;$108</div>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Cluster Concentration</span
+                  ><span class="pill p-r">30% HARD GATE</span>
+                </div>
+                <div style="padding: 4px 0">
+                  <div class="cat-row">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px"
+                      >AI Core Optics</span
+                    >
+                    <div style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px">
+                      <div
+                        style="width: 89%; height: 4px; border-radius: 2px; background: #f87171"
+                      ></div>
+                    </div>
+                    <span class="mono cr" style="font-size: 10px; margin-left: 8px">26.6%</span>
+                  </div>
+                  <div class="cat-row">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px"
+                      >Memory/Storage</span
+                    >
+                    <div style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px">
+                      <div
+                        style="width: 57%; height: 4px; border-radius: 2px; background: #fbbf24"
+                      ></div>
+                    </div>
+                    <span class="mono cy" style="font-size: 10px; margin-left: 8px">17.1%</span>
+                  </div>
+                  <div class="cat-row">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px">Power/Infra</span>
+                    <div style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px">
+                      <div
+                        style="width: 21%; height: 4px; border-radius: 2px; background: #38bdf8"
+                      ></div>
+                    </div>
+                    <span class="mono cb" style="font-size: 10px; margin-left: 8px">6.3%</span>
+                  </div>
+                  <div class="cat-row">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px">AI Cloud</span>
+                    <div style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px">
+                      <div
+                        style="width: 14%; height: 4px; border-radius: 2px; background: #38bdf8"
+                      ></div>
+                    </div>
+                    <span class="mono cb" style="font-size: 10px; margin-left: 8px">4.2%</span>
+                  </div>
+                  <div class="cat-row">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px">Hedge/Stable</span>
+                    <div style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px">
+                      <div
+                        style="width: 8%; height: 4px; border-radius: 2px; background: #4ade80"
+                      ></div>
+                    </div>
+                    <span class="mono cg" style="font-size: 10px; margin-left: 8px">2.6%</span>
+                  </div>
+                  <div class="cat-row" style="border-bottom: none">
+                    <span style="font-size: 10px; color: #94a3b8; width: 110px">Opportunistic</span>
+                    <div
+                      style="flex: 1; background: #1e2836; border-radius: 2px; height: 4px"
+                    ></div>
+                    <span class="mono" style="font-size: 10px; margin-left: 8px; color: #64748b"
+                      >0.0%</span
+                    >
+                  </div>
+                </div>
+                <div class="warn-bar">
+                  Optics 26.6% — above warning gate (25%). No new optics adds until cluster
+                  rebalances.
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">4 Sleeve Allocation — $23.90M</span
+                  ><span class="pill p-b">4 SLEEVES</span>
+                </div>
+                <div style="padding: 10px 14px; border-bottom: 1px solid #0f172a">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #38bdf8"
+                      >AI Core — 7 themes</span
+                    ><span class="mono cb" style="font-size: 10px">$16.18M · 67.7%</span>
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    AI compute · optics · power · cloud · SiPh · custom silicon · energy for AI
+                  </div>
+                </div>
+                <div style="padding: 10px 14px; border-bottom: 1px solid #0f172a">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #4ade80"
+                      >Expansion A — AI Adjacent (~20)</span
+                    ><span class="mono cg" style="font-size: 10px">$502K · 2.1%</span>
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    Utilities w/ AI datacenter contracts · industrial gases · specialty chemicals ·
+                    DC REITs
+                  </div>
+                </div>
+                <div style="padding: 10px 14px; border-bottom: 1px solid #0f172a">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #fbbf24"
+                      >Expansion B — Hedge Monitors (~15)</span
+                    ><span class="mono cy" style="font-size: 10px">$90K · 0.4%</span>
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    NEM/GOLD · XOM/CVX · LMT/RTX · TLT. 5-factor simplified. Weekly eval only.
+                  </div>
+                </div>
+                <div style="padding: 10px 14px">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #64748b"
+                      >Expansion C — Opportunistic (5% cap)</span
+                    ><span class="mono" style="font-size: 10px; color: #64748b"
+                      >$0 · 0.0% · max $1.195M</span
+                    >
+                  </div>
+                  <div style="font-size: 9px; color: #334155">
+                    Human-initiated only · 3-factor check · 2% max per name ($477K)
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Framework Status</span
+                  ><span class="pill p-y">8 ACTIVE FLAGS</span>
+                </div>
+                <div class="fwg">
+                  <div class="fwi">
+                    <div class="fwn">#1 VIX</div>
+                    <div class="fwlbl">Regime</div>
+                    <div class="fws cy">CAUTION</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#2 200-DMA</div>
+                    <div class="fwlbl">S&P level</div>
+                    <div class="fws cy">NEAR</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#3 Oil Map</div>
+                    <div class="fwlbl">Brent $97</div>
+                    <div class="fws co">YLW/ORNG</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#7 Router</div>
+                    <div class="fwlbl">Deploy mode</div>
+                    <div class="fws cy">CATALYST</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#8 Thesis</div>
+                    <div class="fwlbl">MU partial</div>
+                    <div class="fws cr">PARTIAL</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#13 Conc.</div>
+                    <div class="fwlbl">MU 15% cap</div>
+                    <div class="fws cr">AT CAP</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#17 Geo</div>
+                    <div class="fwlbl">Iran Day 27</div>
+                    <div class="fws cr">ACTIVE</div>
+                  </div>
+                  <div class="fwi">
+                    <div class="fwn">#23 Cluster</div>
+                    <div class="fwlbl">Optics 26.6%</div>
+                    <div class="fws cy">WARNING</div>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Capitulation Signals — #29</span
+                  ><span class="pill p-y">3 / 5</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">VIX 5-day average declining</span
+                  ><span class="sval cg">FIRED</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">Oil below 7-day moving average</span
+                  ><span class="sval cg">FIRED</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">S&P futures positive yesterday</span
+                  ><span class="sval cy">PARTIAL</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot soff"></div>
+                  <span class="stxt">2 consecutive closes above 200-DMA</span
+                  ><span class="sval" style="color: #334155">PENDING</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot soff"></div>
+                  <span class="stxt">Put/call ratio normalized</span
+                  ><span class="sval" style="color: #334155">UNKNOWN</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BRIEFING -->
+        <div id="briefing" class="screen">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 16px;
+            "
+          >
+            <div>
+              <div style="font-size: 13px; font-weight: 600; color: #e2e8f0">
+                Morning Briefing — Thursday March 26, 2026
+              </div>
+              <div style="font-size: 10px; color: #475569; margin-top: 2px">
+                Regime: CAUTION · Iran Day 27 · Saturday binary 36h away · NAV $23.90M
+              </div>
+            </div>
+            <span class="pill p-r">DO NOT BUY TODAY</span>
+          </div>
+          <div class="g2">
+            <div>
+              <div style="margin-bottom: 16px">
+                <div class="bq">Q1 — What do I own and is anything broken?</div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >MU</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >TurboQuant partial flag. KV cache only, HBM training untouched. GTC sell $412
+                    active. Do not sell at $373.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cy">PARTIAL FLAG</span>
+                </div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >COHR</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >NVIDIA $2B locked. S&P 500 member. CPO thesis intact. Normal pullback from $300
+                    ATH.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cg">HOLD</span>
+                </div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >LITE</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >Near ATH. Rosenblatt $900 target. Underweight — add target post-Saturday.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cg">HOLD · ADD</span>
+                </div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >CIEN</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >Q1 rev +33% YoY. Direct cloud +76%. Strongest thesis in portfolio.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cg">HOLD · STRONG</span>
+                </div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >NBIS</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >Down 3%. $4B notes, conversion $183 far-dated. Underweight 4.2%.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cy">UNDERWEIGHT</span>
+                </div>
+              </div>
+              <div style="margin-bottom: 16px">
+                <div class="bq">Q2 — What should I buy today?</div>
+                <div
+                  style="
+                    background: #0d2010;
+                    border: 1px solid #166534;
+                    border-radius: 4px;
+                    padding: 12px;
+                    font-size: 10px;
+                    color: #4ade80;
+                    line-height: 1.7;
+                  "
+                >
+                  <strong>NOTHING TODAY.</strong> Oil +5% to $94.80. Framework #7 catalyst-only
+                  mode. Saturday binary in 36 hours. $3.585M cash is the weapon. Deploy after
+                  resolution.
+                </div>
+              </div>
+              <div style="margin-bottom: 16px">
+                <div class="bq">Q3 — What should I sell or trim today?</div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >ANET</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >Thesis broken. Sell at market today. ~$360K proceeds rotate to MRVL.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cr">SELL TODAY</span>
+                </div>
+                <div class="brow">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 11px;
+                      font-weight: 600;
+                      color: #e2e8f0;
+                      width: 55px;
+                    "
+                    >MU</span
+                  ><span style="font-size: 10px; color: #94a3b8; flex: 1; padding: 0 10px"
+                    >GTC SELL $412 — wait for bounce. ~$286-430K trim proceeds.</span
+                  ><span style="font-size: 10px; font-weight: 600" class="cy">GTC ACTIVE</span>
+                </div>
+              </div>
+              <div>
+                <div class="bq">Q5 — What changes this today?</div>
+                <div style="font-size: 10px; color: #64748b; line-height: 1.6">
+                  <div style="padding: 6px 0; border-bottom: 1px solid #0f172a">
+                    <strong style="color: #e2e8f0">Trump confirms Iran talks</strong> — Deploy Phase
+                    1 within 30 min. $1.5-2M off the bench immediately.
+                  </div>
+                  <div style="padding: 6px 0; border-bottom: 1px solid #0f172a">
+                    <strong style="color: #e2e8f0">Brent breaks $100</strong> — Cancel all GTC
+                    limits. Framework #3 goes red. Protect $2.39M floor.
+                  </div>
+                  <div style="padding: 6px 0; border-bottom: 1px solid #0f172a">
+                    <strong style="color: #e2e8f0">MU bounces above $390</strong> — GTC $412 is
+                    closer. Watch for partial fill.
+                  </div>
+                  <div style="padding: 6px 0">
+                    <strong style="color: #e2e8f0">NVDA drops more than 4% intraday</strong> — Kill
+                    switch #19. Cancel all GTC buys today.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div style="margin-bottom: 16px">
+                <div class="bq">Q4 — Pro forma after all actions</div>
+                <div
+                  class="pf-row"
+                  style="
+                    padding-bottom: 6px;
+                    border-bottom: 1px solid #1e2836;
+                    font-size: 8px;
+                    color: #334155;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                  "
+                >
+                  <span>Ticker</span><span>Value</span><span>Wt%</span><span>Cluster</span
+                  ><span>Beta</span><span>Action</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">MU</span><span class="cy">$2.862M</span
+                  ><span class="cr">15.0%</span><span>Memory</span><span>2.39</span
+                  ><span class="cy">TRIM $412</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">TSM</span><span>$2.437M</span
+                  ><span>12.8%</span><span>Compute</span><span>1.15</span
+                  ><span class="cg">HOLD</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">COHR</span><span>$1.814M</span
+                  ><span>9.5%</span><span class="cr">Optics</span><span>2.02</span
+                  ><span class="cg">HOLD</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">CIEN</span><span>$1.480M</span
+                  ><span>7.7%</span><span class="cr">Optics</span><span>1.39</span
+                  ><span class="cg">HOLD</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">VRT</span><span>$1.195M</span
+                  ><span>6.3%</span><span>Power</span><span>2.10</span><span class="cg">HOLD</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">LITE</span><span>$1.052M</span
+                  ><span>5.5%</span><span class="cr">Optics</span><span>1.96</span
+                  ><span class="cb">ADD TARGET</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr" style="font-size: 9px">NBIS</span><span>$810K</span
+                  ><span>4.2%</span><span>Cloud</span><span>2.09</span
+                  ><span class="cb">ADD TARGET</span>
+                </div>
+                <div class="pf-row">
+                  <span class="tkr cg" style="font-size: 9px">CASH</span
+                  ><span class="cg">$3.585M</span><span class="cg">15.0%</span><span>—</span
+                  ><span class="cg">0.00</span><span class="cg">PROTECT</span>
+                </div>
+                <div
+                  style="
+                    border-top: 1px solid #1e2836;
+                    margin-top: 6px;
+                    padding-top: 8px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                  "
+                >
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                    "
+                  >
+                    <span style="color: #64748b">Total NAV</span><span>$23.90M</span>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                    "
+                  >
+                    <span style="color: #64748b">Cash vs floor</span
+                    ><span class="cg">$3.585M vs $2.39M OK</span>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                    "
+                  >
+                    <span style="color: #64748b">Optics cluster</span
+                    ><span class="cr">26.6% WARNING</span>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                    "
+                  >
+                    <span style="color: #64748b">Phase 1 deployable</span
+                    ><span class="cb">$1.5-2.05M</span>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 9px;
+                    "
+                  >
+                    <span style="color: #64748b">Phase 2 deployable</span
+                    ><span class="cb">$1.9-2.78M</span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="bq">Post-Saturday Deploy Plan</div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 6px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 8px;
+                    color: #334155;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    font-family: 'JetBrains Mono', monospace;
+                  "
+                >
+                  <span>Ticker</span><span>Entry</span><span>Size</span><span>Phase</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">NBIS</span
+                  ><span class="mono cb">$107-113</span><span class="mono">$400-500K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 1 · Iran deal</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">FN</span
+                  ><span class="mono cb">$530-560</span><span class="mono">$350-450K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 1 · score 92</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">LITE+</span
+                  ><span class="mono cb">$780-825</span><span class="mono">$500-700K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 1 · add existing</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">ETN</span
+                  ><span class="mono cb">$340-358</span><span class="mono">$350-500K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 2 · post confirm</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">NVT</span
+                  ><span class="mono cb">$125-132</span><span class="mono">$350-480K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 2 · power wave</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 85px 88px 1fr;
+                    padding: 7px 0;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">VICR</span
+                  ><span class="mono cb">$158-162</span><span class="mono">$350-480K</span
+                  ><span style="font-size: 9px; color: #64748b">Phase 2 · 48V Jensen</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RADAR -->
+        <div id="radar" class="screen">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 14px;
+            "
+          >
+            <div style="font-size: 11px; color: #64748b">
+              12-factor scores · Tier A active candidates · $23.90M portfolio scale
+            </div>
+            <div style="display: flex; gap: 6px">
+              <span class="pill p-g">TIER A · 11</span><span class="pill p-y">TIER B · 18</span
+              ><span class="pill p-gray">BLOCKED · 3</span>
+            </div>
+          </div>
+          <div class="g3">
+            <div class="sc-card">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #e2e8f0;
+                      "
+                    >
+                      FN
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">Fabrinet — CPO assembly</div>
+                  </div>
+                  <span class="pill p-g">92 · T1 BUY</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cg"
+                    >92</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Earnings quality</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Zero dilution</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">AI thesis fit</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Beta profile 0.96</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Revenue growth +36%</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Valuation</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #38bdf8"
+                  >
+                    GTC $530-560 · $350-450K
+                  </div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569"
+                  >
+                    beta 0.96 · NVDA 30% revenue · zero dilution
+                  </div>
+                </div>
+                <span class="pill p-b">ACTIVE</span>
+              </div>
+            </div>
+
+            <div class="sc-card">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #e2e8f0;
+                      "
+                    >
+                      NBIS
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">Nebius Group — AI neocloud</div>
+                  </div>
+                  <span class="pill p-g">91 · T1 BUY</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cg"
+                    >91</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Catalyst pipeline</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Revenue growth 479%</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">AI thesis fit</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Institutional backing</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Dilution risk</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Valuation</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #38bdf8"
+                  >
+                    GTC $107-113 · $400-500K
+                  </div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569"
+                  >
+                    beta 2.09 · Meta $27B + NVDA $2B + MSFT $17.4B
+                  </div>
+                </div>
+                <span class="pill p-y">LOWER LIMIT</span>
+              </div>
+            </div>
+
+            <div class="sc-card">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #e2e8f0;
+                      "
+                    >
+                      MRVL
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">
+                      Marvell Technology — optical DSP
+                    </div>
+                  </div>
+                  <span class="pill p-g">92 · T1 BUY</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cg"
+                    >92</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Custom silicon moat</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">AI thesis fit</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Institutional backing</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Revenue growth</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Beta risk 1.75</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Valuation</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #38bdf8"
+                  >
+                    GTC $92-96 · $250-400K
+                  </div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569"
+                  >
+                    beta 1.75 · add to existing $561K position
+                  </div>
+                </div>
+                <span class="pill p-b">ACTIVE</span>
+              </div>
+            </div>
+
+            <div class="sc-card">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #e2e8f0;
+                      "
+                    >
+                      MTSI
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">
+                      MACOM Technology — analog photonics
+                    </div>
+                  </div>
+                  <span class="pill p-b">87 · T2</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cg"
+                    >87</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Forward guidance</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Beta 0.96</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Zero dilution</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">AI thesis fit</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Cluster gate flag</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 50%; background: #f87171"></div>
+                  </div>
+                  <span class="sc-fv cr">5</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Valuation</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 50%; background: #f87171"></div>
+                  </div>
+                  <span class="sc-fv cr">5</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #38bdf8"
+                  >
+                    GTC $225-240 · $250-350K
+                  </div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569"
+                  >
+                    beta 0.96 · add only after optics cluster below 25%
+                  </div>
+                </div>
+                <span class="pill p-y">POST CLUSTER</span>
+              </div>
+            </div>
+
+            <div class="sc-card">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #e2e8f0;
+                      "
+                    >
+                      ETN
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">
+                      Eaton Corp — power infrastructure
+                    </div>
+                  </div>
+                  <span class="pill p-b">84 · T2</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cg"
+                    >84</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Power theme fit</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 100%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">10</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Earnings quality</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Balance sheet</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 90%; background: #4ade80"></div>
+                  </div>
+                  <span class="sc-fv cg">9</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Beta 1.35</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 80%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">8</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Iran exposure</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Valuation</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 70%; background: #fbbf24"></div>
+                  </div>
+                  <span class="sc-fv cy">7</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #38bdf8"
+                  >
+                    GTC $340-358 · $350-500K
+                  </div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569"
+                  >
+                    beta 1.35 · phase 2 after Saturday deal confirmed
+                  </div>
+                </div>
+                <span class="pill p-b">PHASE 2</span>
+              </div>
+            </div>
+
+            <div class="sc-card" style="opacity: 0.5">
+              <div class="sc-top2">
+                <div style="display: flex; justify-content: space-between">
+                  <div>
+                    <div
+                      style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #f87171;
+                      "
+                    >
+                      AAOI
+                    </div>
+                    <div style="font-size: 9px; color: #64748b">
+                      Applied Optoelectronics — BLOCKED
+                    </div>
+                  </div>
+                  <span class="pill p-gray">54 · BLOCKED</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 6px">
+                  <span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 28px;
+                      font-weight: 700;
+                    "
+                    class="cr"
+                    >54</span
+                  ><span style="font-size: 9px; color: #475569">/100</span>
+                </div>
+              </div>
+              <div style="padding: 10px 14px">
+                <div class="sc-fact">
+                  <span class="sc-fn">Dilution risk</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 20%; background: #f87171"></div>
+                  </div>
+                  <span class="sc-fv cr">2</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Beta 3.30</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 10%; background: #f87171"></div>
+                  </div>
+                  <span class="sc-fv cr">1</span>
+                </div>
+                <div class="sc-fact">
+                  <span class="sc-fn">Earnings quality</span>
+                  <div class="sc-bg">
+                    <div class="sc-b" style="width: 40%; background: #f87171"></div>
+                  </div>
+                  <span class="sc-fv cr">4</span>
+                </div>
+              </div>
+              <div class="sc-foot2">
+                <div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #475569"
+                  >
+                    No entry — ATM $500M active
+                  </div>
+                </div>
+                <span class="pill p-gray">BLOCKED</span>
+              </div>
+            </div>
+          </div>
+          <div
+            style="
+              margin-top: 12px;
+              padding: 10px 14px;
+              background: #0d1117;
+              border: 1px solid #1e2836;
+              border-radius: 5px;
+            "
+          >
+            <div
+              style="
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 2px;
+                color: #334155;
+                text-transform: uppercase;
+                margin-bottom: 8px;
+              "
+            >
+              Blocked List — Human Override Required
+            </div>
+            <div
+              style="
+                padding: 7px 0;
+                border-bottom: 1px solid #0f172a;
+                display: flex;
+                justify-content: space-between;
+              "
+            >
+              <span
+                style="
+                  font-family: 'JetBrains Mono', monospace;
+                  font-size: 10px;
+                  font-weight: 600;
+                  color: #f87171;
+                "
+                >AXTI</span
+              ><span style="font-size: 9px; color: #64748b"
+                >CEO + CFO net sold &gt;0.5% in 3 consecutive transactions. Red Team
+                INVALIDATE.</span
+              ><span
+                style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                >Mar 2026</span
+              >
+            </div>
+            <div
+              style="
+                padding: 7px 0;
+                border-bottom: 1px solid #0f172a;
+                display: flex;
+                justify-content: space-between;
+              "
+            >
+              <span
+                style="
+                  font-family: 'JetBrains Mono', monospace;
+                  font-size: 10px;
+                  font-weight: 600;
+                  color: #f87171;
+                "
+                >POET</span
+              ><span style="font-size: 9px; color: #64748b"
+                >Pre-revenue. ADV threshold not met. No institutional 13F filing.</span
+              ><span
+                style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                >Mar 2026</span
+              >
+            </div>
+            <div style="padding: 7px 0; display: flex; justify-content: space-between">
+              <span
+                style="
+                  font-family: 'JetBrains Mono', monospace;
+                  font-size: 10px;
+                  font-weight: 600;
+                  color: #f87171;
+                "
+                >AAOI</span
+              ><span style="font-size: 9px; color: #64748b"
+                >ATM $500M active (&gt;20% market cap). Score cap 54. Tier B max.</span
+              ><span
+                style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                >Mar 2026</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- UNIVERSE -->
+        <div id="universe" class="screen">
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 14px">
+            Complete ticker universe — 4 stages · 4 dynamic ingestion streams · 4 expansion sleeves
+            · $23.90M scale
+          </div>
+          <div class="uni-funnel">
+            <div class="uf">
+              <div class="uf-num" style="color: #64748b">5,000+</div>
+              <div class="uf-lbl">Total market</div>
+              <div class="uf-sub">All listed US equities</div>
+            </div>
+            <div class="uf">
+              <div class="uf-num cy">175</div>
+              <div class="uf-lbl">Static universe</div>
+              <div class="uf-sub">Theme + cap + ADV gates</div>
+            </div>
+            <div class="uf">
+              <div class="uf-num cb">35</div>
+              <div class="uf-lbl">Weekly screen</div>
+              <div class="uf-sub">4 signals · pass 2 of 4</div>
+            </div>
+            <div class="uf">
+              <div class="uf-num" style="color: #a78bfa">12</div>
+              <div class="uf-lbl">Tier A active</div>
+              <div class="uf-sub">Score 80+ · limits live</div>
+            </div>
+            <div class="uf">
+              <div class="uf-num cg">5</div>
+              <div class="uf-lbl">Daily signals</div>
+              <div class="uf-sub">Buy / sell / trim today</div>
+            </div>
+          </div>
+          <div class="g2">
+            <div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Universe Categories — 175 Names</span
+                  ><span class="pill p-b">7 AI THEMES + 3 EXPANSIONS</span>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #38bdf8"></div>
+                  <span class="cat-name">AI compute — GPU, memory, HBM</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >28</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 100%; background: #38bdf8"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #a78bfa"></div>
+                  <span class="cat-name">Optical networking and photonics</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >24</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 86%; background: #a78bfa"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #fb923c"></div>
+                  <span class="cat-name">AI datacenter power and cooling</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >18</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 64%; background: #fb923c"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #4ade80"></div>
+                  <span class="cat-name">AI cloud and neocloud infrastructure</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >16</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 57%; background: #4ade80"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #f472b6"></div>
+                  <span class="cat-name">Silicon photonics foundry and assembly</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >12</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 43%; background: #f472b6"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #fbbf24"></div>
+                  <span class="cat-name">Custom silicon and networking ASICs</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >14</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 50%; background: #fbbf24"></div>
+                  </div>
+                </div>
+                <div class="cat-row">
+                  <div class="cat-dot" style="background: #34d399"></div>
+                  <span class="cat-name">Energy for AI — nuclear and grid</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >10</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 36%; background: #34d399"></div>
+                  </div>
+                </div>
+                <div class="cat-row" style="border-bottom: none">
+                  <div class="cat-dot" style="background: #64748b"></div>
+                  <span class="cat-name">AI adjacent + hedge + opportunistic</span
+                  ><span
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 10px;
+                      color: #64748b;
+                    "
+                    >53</span
+                  >
+                  <div class="cat-bar-bg">
+                    <div class="cat-bar" style="width: 100%; background: #475569"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Expansion Sleeves — $23.90M Scale</span
+                  ><span class="pill p-b">3 ACTIVE</span>
+                </div>
+                <div style="padding: 10px 14px; border-bottom: 1px solid #0f172a">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #4ade80"
+                      >A — AI Adjacent (~20 names)</span
+                    ><span class="pill p-g" style="font-size: 8px">ACTIVE</span>
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    CEG, VST, TLN · industrial gases · specialty chemicals · DC REITs. Modified
+                    12-factor weights. Max 10% = $2.39M.
+                  </div>
+                </div>
+                <div style="padding: 10px 14px; border-bottom: 1px solid #0f172a">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #fbbf24"
+                      >B — Hedge Monitors (~15 names)</span
+                    ><span class="pill p-y" style="font-size: 8px">ACTIVE</span>
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    NEM, GOLD, AEM · XOM, CVX · LMT, RTX · TLT. 5-factor score. Weekly eval only.
+                    $90K deployed.
+                  </div>
+                </div>
+                <div style="padding: 10px 14px">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px">
+                    <span style="font-size: 10px; font-weight: 600; color: #64748b"
+                      >C — Opportunistic (5% cap = $1.195M)</span
+                    ><span class="pill p-gray" style="font-size: 8px">EMPTY</span>
+                  </div>
+                  <div style="font-size: 9px; color: #475569">
+                    Human-initiated only. 3-factor check. Max $477K per name. No auto-promotion.
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Dynamic Ingestion — 4 Streams</span
+                  ><span class="pill p-g">ALWAYS ON</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt"
+                    >Stream 1 — Jensen scanner: NVDA/Meta/MSFT supply announcements auto-ingest
+                    company to Tier C</span
+                  >
+                </div>
+                <div class="srow">
+                  <div class="sdot son" style="background: #fbbf24"></div>
+                  <span class="stxt"
+                    >Stream 2 — Bottleneck Engine: 3 of 5 signals = emerging wave, candidates
+                    auto-ingested</span
+                  >
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt"
+                    >Stream 3 — Velocity scanner: 3+ qualified X/news mentions in 24h triggers
+                    evaluation</span
+                  >
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt"
+                    >Stream 4 — SEC S-1/8-K monitor: SIC codes 3674, 3672, 3679, 7374 watched
+                    continuously</span
+                  >
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Weekly Screen — 4 Signals</span
+                  ><span class="pill p-b">SUNDAY 8PM ET</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">Signal 1 — Momentum: above 50-day moving average?</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">Signal 2 — Earnings: no two consecutive misses?</span>
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt"
+                    >Signal 3 — Unusual Whales flow: unusual activity past 5 sessions?</span
+                  >
+                </div>
+                <div class="srow">
+                  <div class="sdot son"></div>
+                  <span class="stxt">Signal 4 — Analyst coverage activity in past 30 days?</span>
+                </div>
+                <div style="padding: 8px 14px; font-size: 9px; color: #475569">
+                  Pass 2 of 4 = stay active. Fail 3 of 4 = demote to Tier B or C. Ceiling 200 names.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FRAMEWORKS -->
+        <div id="frameworks" class="screen">
+          <div class="kgrid" style="margin-bottom: 14px">
+            <div class="kcard" style="border-top: 2px solid #fbbf24">
+              <div class="klbl">VIX Regime</div>
+              <div class="kval cy">CAUTION</div>
+              <div class="ksub">VIX 25.33 · declining from 30+</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #fb923c">
+              <div class="klbl">Oil Map</div>
+              <div class="kval co">YLW/ORNG</div>
+              <div class="ksub">Brent $97 · spiking today +5%</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #f87171">
+              <div class="klbl">Geopolitical</div>
+              <div class="kval cr">IRAN DAY 27</div>
+              <div class="ksub">Saturday deadline · 36 hours</div>
+            </div>
+            <div class="kcard" style="border-top: 2px solid #38bdf8">
+              <div class="klbl">Capitulation</div>
+              <div class="kval cb">3 / 5</div>
+              <div class="ksub">near green light</div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#1 VIX Regime Gate</span><span class="pill p-y">CAUTION</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  VIX declining from 30+ peak. Below 20 = full green light. Currently 25.33 and
+                  trending down.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: &gt;30 halt all · 20-30 caution only · &lt;20 normal deploy
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#2 200-Day Moving Average</span
+                ><span class="pill p-y">NEAR</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  S&P 6,592 vs 200-DMA 6,630. Two consecutive closes above unlocks Phase 2.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: 2 consecutive closes above 200-DMA = Phase 2 unlocked
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#3 Oil Scenario Map</span
+                ><span class="pill p-o">YLW/ORNG</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Brent $97. Spiking today on Saturday fears. Any buy requires Brent below $100 and
+                  declining.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: &lt;$80 deploy · $80-95 caution · $95-108 pause · &gt;$108 halt
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#7 Oil Router</span><span class="pill p-y">CATALYST-ONLY</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Oil at boundary. Saturday binary determines mode reset. Iran deal = immediate
+                  normal deploy.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: &lt;$95 + declining = normal · &gt;$95 = catalyst-only mode
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#8 Thesis Integrity</span
+                ><span class="pill p-r">MU PARTIAL</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  TurboQuant hits KV cache inference only. HBM training demand untouched. Monitor
+                  for second hyperscaler announcement.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: full flag if 2 hyperscalers confirm HBM compression = exit MU regardless of
+                  price
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#13 Concentration Gate</span
+                ><span class="pill p-r">MU AT 15%</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  MU at 15.0% ceiling. No adds. GTC sell 10-15% at $412 reduces to 12-13%.
+                  ~$286-430K proceeds.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: hard cap 15% single name · score capped 85 above 8% · trim on first bounce
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#17 Geopolitical Monitor</span
+                ><span class="pill p-r">IRAN ACTIVE</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Day 27. 15-pt plan rejected. Saturday deadline. US threatening final blow. FM
+                  immunity granted.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: active war = caution minimum · confirmed ceasefire = Phase 2 within 30
+                  minutes
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#19 NVDA Kill Switch</span><span class="pill p-y">ARMED</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  NVDA drops more than 4% intraday = cancel all GTC buys for the session. Reset next
+                  morning.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: NVDA -4% intraday = all buy orders cancelled that day
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#23 Cluster Gate</span
+                ><span class="pill p-r">OPTICS 26.6%</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  COHR + CIEN + LITE + MRVL + CRDO = 26.6%. Warning 25% breached. Hard gate 30%. FN
+                  add takes to ~28-29%.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: 25% = no new optics names · 30% = sell weakest link
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#28 War Duration Ladder</span
+                ><span class="pill p-y">DAY 27</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Day 27 in 15-30 tier. Historical: most ME conflicts stabilize within 30 days.
+                  Saturday is Day 28 — critical.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: Day 30+ without resolution = full portfolio re-evaluation
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#29 Capitulation Signal</span
+                ><span class="pill p-y">3 / 5</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Fired: VIX declining, oil below 7-DMA, S&P futures positive. Pending: 200-DMA
+                  closes, put/call ratio.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: 3/5 = Phase 1 · 4/5 = Phase 1+2 · 5/5 = full aggressive deploy
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">#31 Data Oracle</span><span class="pill p-g">ACTIVE</span>
+              </div>
+              <div style="padding: 10px 14px">
+                <div style="font-size: 10px; color: #94a3b8; margin-bottom: 6px">
+                  Polygon.io + Alpaca dual-source price verification. 0.5% tolerance gate before any
+                  execution fires.
+                </div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: #334155;
+                    border-top: 1px solid #111827;
+                    padding-top: 6px;
+                    font-style: italic;
+                  "
+                >
+                  Rule: sources diverge &gt;0.5% = block all orders until reconciled
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IRAN CLOCK -->
+        <div id="iran" class="screen">
+          <div class="g2">
+            <div>
+              <div
+                style="
+                  font-size: 9px;
+                  font-weight: 700;
+                  letter-spacing: 2px;
+                  color: #334155;
+                  text-transform: uppercase;
+                  margin-bottom: 10px;
+                "
+              >
+                Saturday Binary — 36 Hours Away
+              </div>
+              <div
+                style="
+                  display: grid;
+                  grid-template-columns: repeat(3, 1fr);
+                  gap: 10px;
+                  margin-bottom: 14px;
+                "
+              >
+                <div
+                  style="
+                    background: #0a1a10;
+                    border: 1px solid #166534;
+                    border-radius: 5px;
+                    padding: 12px;
+                  "
+                >
+                  <div
+                    style="font-size: 10px; font-weight: 700; color: #4ade80; margin-bottom: 4px"
+                  >
+                    DEAL / EXTENSION
+                  </div>
+                  <div
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 22px;
+                      font-weight: 700;
+                      color: #4ade80;
+                      margin-bottom: 6px;
+                    "
+                  >
+                    35%
+                  </div>
+                  <div style="font-size: 9px; color: #86efac; line-height: 1.5">
+                    Islamabad confirmed. Hormuz partial opening. Oil -15%. S&P +3-5%.
+                  </div>
+                  <div
+                    style="
+                      font-size: 9px;
+                      font-weight: 600;
+                      color: #4ade80;
+                      margin-top: 8px;
+                      padding-top: 6px;
+                      border-top: 1px solid #1e2836;
+                    "
+                  >
+                    Deploy $1.5-2M Phase 1+2 immediately.
+                  </div>
+                </div>
+                <div
+                  style="
+                    background: #1a1a08;
+                    border: 1px solid #713f12;
+                    border-radius: 5px;
+                    padding: 12px;
+                  "
+                >
+                  <div
+                    style="font-size: 10px; font-weight: 700; color: #fbbf24; margin-bottom: 4px"
+                  >
+                    STALL / EXTEND
+                  </div>
+                  <div
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 22px;
+                      font-weight: 700;
+                      color: #fbbf24;
+                      margin-bottom: 6px;
+                    "
+                  >
+                    40%
+                  </div>
+                  <div style="font-size: 9px; color: #fde68a; line-height: 1.5">
+                    Another extension. Oil $90-100. Range-bound market.
+                  </div>
+                  <div
+                    style="
+                      font-size: 9px;
+                      font-weight: 600;
+                      color: #fbbf24;
+                      margin-top: 8px;
+                      padding-top: 6px;
+                      border-top: 1px solid #1e2836;
+                    "
+                  >
+                    Hold limits. Wait for next binary.
+                  </div>
+                </div>
+                <div
+                  style="
+                    background: #1a0808;
+                    border: 1px solid #7f1d1d;
+                    border-radius: 5px;
+                    padding: 12px;
+                  "
+                >
+                  <div
+                    style="font-size: 10px; font-weight: 700; color: #f87171; margin-bottom: 4px"
+                  >
+                    ESCALATION
+                  </div>
+                  <div
+                    style="
+                      font-family: 'JetBrains Mono', monospace;
+                      font-size: 22px;
+                      font-weight: 700;
+                      color: #f87171;
+                      margin-bottom: 6px;
+                    "
+                  >
+                    25%
+                  </div>
+                  <div style="font-size: 9px; color: #fca5a5; line-height: 1.5">
+                    Strikes resume. Oil $110-130. S&P -4-8%.
+                  </div>
+                  <div
+                    style="
+                      font-size: 9px;
+                      font-weight: 600;
+                      color: #f87171;
+                      margin-top: 8px;
+                      padding-top: 6px;
+                      border-top: 1px solid #1e2836;
+                    "
+                  >
+                    Cancel all limits. Protect $2.39M floor.
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="phdr">
+                  <span class="ptitle">Live Diplomatic Signals</span
+                  ><span class="pill p-y">MIXED</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">War day</span><span class="iran-v cy">DAY 27</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">5-day pause expires</span
+                  ><span class="iran-v cr">SATURDAY — 36 hours</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">US position</span
+                  ><span class="iran-v cy">Talks + "final blow" threat</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">Iran FM Araghchi</span
+                  ><span class="iran-v cr">Publicly rejecting · privately reviewing</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">Iran FM immunity</span
+                  ><span class="iran-v cg">GRANTED — talks possible</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">UAE intercepts today</span
+                  ><span class="iran-v cr">15 missiles + 11 drones</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">IRGC Navy Commander</span
+                  ><span class="iran-v cr">Tangsiri killed by Israel</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">Pakistan PM</span
+                  ><span class="iran-v cg">Hosting + delivered 15-pt plan</span>
+                </div>
+                <div class="iran-row">
+                  <span class="iran-k">Goldman base case</span
+                  ><span class="iran-v cb">Hormuz normalizes April · Brent &lt;$80 Q3</span>
+                </div>
+                <div class="iran-row" style="border-bottom: none">
+                  <span class="iran-k">Oil today</span
+                  ><span class="iran-v co">+5% to $94.80 on deadline fears</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 9px;
+                  font-weight: 700;
+                  letter-spacing: 2px;
+                  color: #334155;
+                  text-transform: uppercase;
+                  margin-bottom: 10px;
+                "
+              >
+                27-Day Timeline
+              </div>
+              <div style="position: relative; padding-left: 26px">
+                <div
+                  style="
+                    position: absolute;
+                    left: 8px;
+                    top: 0;
+                    bottom: 0;
+                    width: 2px;
+                    background: #1e2836;
+                  "
+                ></div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #f87171;
+                      background: #2d0a0a;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                  >
+                    FEB 28 — DAY 1
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    Operation Epic Fury Begins
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    US-Israel strikes. Khamenei killed. Hundreds of retaliatory missiles. Oil +35%
+                    in 72h. S&P -6%.
+                  </div>
+                </div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #f87171;
+                      background: #2d0a0a;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                  >
+                    MAR 6-10
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    Hormuz Closed · Brent $112
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    Iran mines Strait. Iraq force majeure. Kuwait refinery strikes. VIX 35. S&P -8%.
+                  </div>
+                </div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #38bdf8;
+                      background: #1e3a5f;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                  >
+                    MAR 11-18
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    NVIDIA $2B each into LITE and COHR
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    S&P 500 adds LITE, COHR, VRT. Meta $27B Nebius deal. NBIS promoted Tier C to
+                    Tier A.
+                  </div>
+                </div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #4ade80;
+                      background: #0d2010;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                  >
+                    MAR 23
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    Trump 5-Day Pause Announced
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    Oil -11% in one session. Regime shifts CRISIS to CAUTION. Phase 1 unlocked.
+                  </div>
+                </div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #fbbf24;
+                      background: #2d2006;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #334155"
+                  >
+                    MAR 25
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    15-Point Plan via Pakistan
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    Iran publicly rejects. FM immunity granted. Plan under private review.
+                  </div>
+                </div>
+                <div style="position: relative; margin-bottom: 13px">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #f87171;
+                      background: #2d0a0a;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #f87171"
+                  >
+                    MAR 26 — TODAY
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    UAE Intercepts · US Final Blow Warning
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    Oil +5% to $94.80. IRGC Commander killed. Do not buy today.
+                  </div>
+                </div>
+                <div style="position: relative">
+                  <div
+                    style="
+                      position: absolute;
+                      left: -22px;
+                      top: 3px;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      border: 2px solid #fbbf24;
+                      background: #2d2006;
+                    "
+                  ></div>
+                  <div
+                    style="font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #fbbf24"
+                  >
+                    MAR 28 — SATURDAY — THE BINARY
+                  </div>
+                  <div style="font-size: 10px; font-weight: 600; color: #e2e8f0; margin: 2px 0">
+                    5-Day Pause Expires · Three Outcomes
+                  </div>
+                  <div style="font-size: 9px; color: #64748b">
+                    $3.585M cash ready. Deal = deploy $1.5-2M. Escalation = protect $2.39M floor.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TRADE LOG -->
+        <div id="history" class="screen">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 14px;
+            "
+          >
+            <div style="font-size: 11px; color: #64748b">
+              Full trade log — March 2026 · $23.90M portfolio
+            </div>
+            <div style="display: flex; gap: 6px">
+              <span class="pill p-g">PHASE 1: $1.5-2.05M READY</span
+              ><span class="pill p-b">PHASE 2: $1.9-2.78M READY</span>
+            </div>
+          </div>
+          <div class="panel">
+            <div style="padding: 6px 14px">
+              <div
+                class="trow"
+                style="
+                  padding-bottom: 6px;
+                  border-bottom: 1px solid #1e2836;
+                  font-size: 8px;
+                  color: #334155;
+                  font-weight: 700;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                "
+              >
+                <span>Date</span><span>Ticker</span><span>Action</span><span>Price</span
+                ><span>Size</span
+                ><span style="font-family: 'Syne', sans-serif">Thesis / Reason</span
+                ><span>P&amp;L</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Mar 26</span
+                ><span style="color: #e2e8f0; font-weight: 600">ANET</span
+                ><span><span class="pill p-r" style="font-size: 7px">SELL MKT</span></span
+                ><span class="cy">market</span><span>~$360K</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Thesis broken. Hyperscaler in-house routing silicon absorbing TAM. Score
+                  62.</span
+                ><span class="cy">-2%</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Mar 16</span
+                ><span style="color: #e2e8f0; font-weight: 600">NBIS</span
+                ><span><span class="pill p-b" style="font-size: 7px">ADDED</span></span
+                ><span class="cb">$115</span><span>$810K</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Meta $27B + NVDA $2B + MSFT $17.4B. Full-stack neocloud. Underweight 4.2%.</span
+                ><span class="cr">-3.5%</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Mar 11</span
+                ><span style="color: #e2e8f0; font-weight: 600">CIEN</span
+                ><span><span class="pill p-g" style="font-size: 7px">HOLD</span></span
+                ><span class="cg">$310</span><span>$1.480M</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Q1 rev +33% YoY. Direct cloud +76%. Strongest thesis in portfolio.</span
+                ><span class="cg">+29%</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Mar 6</span
+                ><span style="color: #e2e8f0; font-weight: 600">PLTR</span
+                ><span><span class="pill p-r" style="font-size: 7px">SOLD</span></span
+                ><span class="cr">$155</span><span>$1.35M</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Software theme rotation. IGV -23% YTD. Capital moved to physical AI
+                  infrastructure.</span
+                ><span class="cg">+41%</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Pending</span
+                ><span style="color: #e2e8f0; font-weight: 600">MU</span
+                ><span><span class="pill p-y" style="font-size: 7px">GTC SELL</span></span
+                ><span class="cb">$412</span><span>10-15%</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Reduce from 15% cap. TurboQuant partial flag. Trim on strength. ~$286-430K.</span
+                ><span class="cb">PENDING</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Pending</span
+                ><span style="color: #e2e8f0; font-weight: 600">FN</span
+                ><span><span class="pill p-b" style="font-size: 7px">GTC BUY</span></span
+                ><span class="cb">$530-560</span><span>$350-450K</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Score 92. NVDA 30% revenue. CPO assembly. Beta 0.96. Zero dilution. Satellite
+                  #1.</span
+                ><span class="cb">PENDING</span>
+              </div>
+              <div class="trow">
+                <span style="color: #334155">Pending</span
+                ><span style="color: #e2e8f0; font-weight: 600">NBIS+</span
+                ><span><span class="pill p-b" style="font-size: 7px">GTC BUY</span></span
+                ><span class="cb">$107-113</span><span>$300-400K</span
+                ><span style="font-family: 'Syne', sans-serif; font-size: 9px; color: #64748b"
+                  >Add to existing. Fill to 6% target. Post-Saturday trigger only.</span
+                ><span class="cb">PENDING</span>
+              </div>
+            </div>
+          </div>
+          <div class="g2" style="margin-top: 12px">
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">Session Summary — March 26</span
+                ><span class="pill p-b">$23.90M</span>
+              </div>
+              <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+                <div style="display: flex; justify-content: space-between; font-size: 10px">
+                  <span style="color: #64748b">Total NAV</span
+                  ><span class="mono" style="font-weight: 600">$23.90M</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 10px">
+                  <span style="color: #64748b">Invested capital</span
+                  ><span class="mono">$20.315M (85%)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 10px">
+                  <span style="color: #64748b">Cash reserve</span
+                  ><span class="mono cg">$3.585M (15.0%)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 10px">
+                  <span style="color: #64748b">Cash floor (10%)</span
+                  ><span class="mono cg">$2.39M protected</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 10px;
+                    padding-top: 8px;
+                    border-top: 1px solid #111827;
+                  "
+                >
+                  <span style="color: #94a3b8; font-weight: 600">Phase 1 deployable</span
+                  ><span class="mono cb" style="font-weight: 600">$1.5-2.05M</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 10px">
+                  <span style="color: #94a3b8; font-weight: 600">Phase 2 deployable</span
+                  ><span class="mono cb" style="font-weight: 600">$1.9-2.78M</span>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="phdr">
+                <span class="ptitle">Phase 2 Queue — Locked Until Saturday</span
+                ><span class="pill p-r">SAT TRIGGER</span>
+              </div>
+              <div style="padding: 0">
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    font-size: 8px;
+                    color: #334155;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    border-bottom: 1px solid #0f172a;
+                  "
+                >
+                  <span>Ticker</span><span>Thesis</span><span>Entry</span><span>Size</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">ETN</span
+                  ><span style="color: #64748b">Power · graceful degradation</span
+                  ><span class="mono cb">$340-358</span><span class="mono cb">$350-500K</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">NVT</span
+                  ><span style="color: #64748b">nVent · 48V power delivery</span
+                  ><span class="mono cb">$125-132</span><span class="mono cb">$350-480K</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">VICR</span
+                  ><span style="color: #64748b">Vicor · 48V rack Jensen</span
+                  ><span class="mono cb">$158-162</span><span class="mono cb">$350-480K</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    border-bottom: 1px solid #0f172a;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">ASML</span
+                  ><span style="color: #64748b">Lithography monopoly</span
+                  ><span class="mono cb">$1250-1280</span><span class="mono cb">$350-480K</span>
+                </div>
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 48px 1fr 80px 80px;
+                    padding: 7px 14px;
+                    font-size: 9px;
+                    align-items: center;
+                  "
+                >
+                  <span class="mono" style="color: #e2e8f0; font-weight: 600">IREN</span
+                  ><span style="color: #64748b">MSFT GPU neocloud</span
+                  ><span class="mono cb">$43-47</span><span class="mono cb">$240-360K</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- end main -->
+
+      <!-- RIGHT PANEL -->
+      <div class="rpanel">
+        <div class="slbl">Today's Actions</div>
+        <div class="arow2">
+          <div class="adot" style="background: #38bdf8"></div>
+          <div>
+            <div class="atxt">
+              <strong>HOLD CASH</strong> — $3.585M ready. Saturday binary 36h away. No deploys.
+            </div>
+            <div class="ameta">FRAMEWORK #7 · #17</div>
+          </div>
+        </div>
+        <div class="arow2">
+          <div class="adot" style="background: #f87171"></div>
+          <div>
+            <div class="atxt">
+              <strong>SELL ANET</strong> at market today. Thesis broken. ~$360K proceeds to MRVL.
+            </div>
+            <div class="ameta">SCORE 62 · THESIS BROKEN</div>
+          </div>
+        </div>
+        <div class="arow2">
+          <div class="adot" style="background: #fbbf24"></div>
+          <div>
+            <div class="atxt">
+              <strong>MU GTC SELL</strong> $412 active. 10-15% trim = $286-430K when it bounces.
+            </div>
+            <div class="ameta">FRAMEWORK #13 · TURBOQUANT</div>
+          </div>
+        </div>
+        <div class="arow2">
+          <div class="adot" style="background: #38bdf8"></div>
+          <div>
+            <div class="atxt">
+              <strong>NBIS limit</strong> lowered to $107-110. $400-500K post-Saturday.
+            </div>
+            <div class="ameta">SCORE 91 · UNDERWEIGHT 4.2%</div>
+          </div>
+        </div>
+        <div class="arow2">
+          <div class="adot" style="background: #38bdf8"></div>
+          <div>
+            <div class="atxt">
+              <strong>FN GTC</strong> $530-560. Score 92. $350-450K. Beta 0.96. Zero dilution.
+            </div>
+            <div class="ameta">SCORE 92 · SATELLITE #1</div>
+          </div>
+        </div>
+
+        <div class="slbl" style="margin-top: 4px">Portfolio — $23.90M</div>
+        <div class="iran-row">
+          <span class="iran-k">Total NAV</span><span class="iran-v cb">$23.90M</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Invested</span><span class="iran-v">$20.315M (85%)</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Cash</span><span class="iran-v cg">$3.585M (15.0%)</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Cash floor</span
+          ><span class="iran-v cg">$2.39M (10%) protected</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Phase 1 ready</span><span class="iran-v cb">$1.5-2.05M</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Phase 2 ready</span><span class="iran-v cb">$1.9-2.78M</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Optics cluster</span><span class="iran-v cr">26.6% WARNING</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Beta total</span><span class="iran-v">1.09 · 1.40 invested</span>
+        </div>
+
+        <div class="slbl" style="margin-top: 4px">Iran Clock</div>
+        <div class="iran-row">
+          <span class="iran-k">War day</span><span class="iran-v cy">DAY 27</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Pause expires</span><span class="iran-v cr">SATURDAY 36h</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Oil today</span><span class="iran-v co">+5% to $94.80</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Deal</span><span class="iran-v cg">35% · deploy $1.5-2M</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Escalation</span><span class="iran-v cr">25% · protect $2.39M</span>
+        </div>
+
+        <div class="slbl" style="margin-top: 4px">Universe</div>
+        <div class="iran-row">
+          <span class="iran-k">Total universe</span><span class="iran-v cb">175 names</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Tier A active</span><span class="iran-v cb">12 names</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Tier B watch</span><span class="iran-v cy">18 names</span>
+        </div>
+        <div class="iran-row">
+          <span class="iran-k">Blocked</span><span class="iran-v cr">3 names</span>
+        </div>
+
+        <div class="slbl" style="margin-top: 4px">Color Key</div>
+        <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #38bdf8"></div>
+            <span style="font-size: 9px; color: #64748b"
+              >Blue — info · buy signals · AI thesis</span
+            >
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #4ade80"></div>
+            <span style="font-size: 9px; color: #64748b">Green — safe · confirmed · cash OK</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #fbbf24"></div>
+            <span style="font-size: 9px; color: #64748b">Amber — caution · watch · warning</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #fb923c"></div>
+            <span style="font-size: 9px; color: #64748b">Orange — pause · escalation risk</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #f87171"></div>
+            <span style="font-size: 9px; color: #64748b">Red — halt · danger · broken thesis</span>
+          </div>
+        </div>
+
+        <div class="slbl" style="margin-top: 4px">Developer Notes</div>
+        <div style="padding: 10px 14px; font-size: 9px; color: #475569; line-height: 1.7">
+          <div style="color: #64748b; margin-bottom: 6px">
+            ATLAS v7.0 — static mockup for design reference. All data hardcoded.
+          </div>
+          <div>Font: JetBrains Mono + Syne</div>
+          <div>Canvas: #0a0c0f · Panels: #0d1117</div>
+          <div>Accent: #38bdf8 · Green: #4ade80</div>
+          <div>Amber: #fbbf24 · Orange: #fb923c</div>
+          <div>Red: #f87171 · Border: #1e2836</div>
+          <div>API: claude-sonnet-4-6</div>
+          <div>State: LangGraph · Traces: LangSmith</div>
+          <div>Data: Polygon + Alpaca + UW + SEC</div>
+          <div>NAV: $23.90M · Cash floor: $2.39M</div>
+        </div>
+      </div>
+    </div>
+    <!-- end app-body -->
+
+    <script>
+      function show(id, el) {
+        document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+        document.querySelectorAll('.ntab').forEach((t) => t.classList.remove('on'));
+        document.getElementById(id).classList.add('on');
+        el.classList.add('on');
+      }
+    </script>
+  </body>
+</html>

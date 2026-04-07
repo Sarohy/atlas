@@ -1,0 +1,418 @@
+.atlas-auth-shell {
+  --atlas-auth-bg: #0a0e1a;
+  --atlas-auth-card-bg: #0f1524;
+  --atlas-auth-card-border: #1e2a3f;
+  --atlas-auth-accent: #38bdf8;
+  --atlas-auth-text: #ffffff;
+  --atlas-auth-button-text: #0f1524;
+  --atlas-auth-muted-opacity: 0.5;
+  --atlas-auth-card-width: 455px;
+  --atlas-auth-card-height: 396px;
+  --atlas-auth-card-radius: 12px;
+  --atlas-auth-field-width: 402px;
+  --atlas-auth-field-height: 56px;
+  --atlas-auth-control-radius: 6px;
+  --atlas-auth-brand-margin-bottom: 29px;
+  --atlas-auth-card-padding-inline: 26px;
+  --atlas-auth-card-padding-top: 42px;
+  --atlas-auth-card-padding-bottom: 42px;
+  --atlas-auth-field-label-gap: 10px;
+  --atlas-auth-form-gap: 15px;
+  --atlas-auth-remember-gap: 30px;
+  --atlas-auth-remember-size: 16px;
+  --atlas-auth-remember-icon-gap: 8px;
+  --atlas-auth-button-top-gap: 30px;
+  --atlas-auth-input-inset-inline: 16px;
+  --atlas-auth-eye-inset-inline: 18px;
+  --atlas-auth-error-top-gap: 12px;
+  --atlas-auth-stage-padding-inline: 24px;
+  --atlas-auth-mobile-padding: 20px;
+  --atlas-auth-brand-size: 20.419px;
+  --atlas-auth-brand-tracking: 4.3756px;
+  --atlas-auth-label-size: 16px;
+  --atlas-auth-placeholder-size: 14px;
+  --atlas-auth-remember-font-size: 14px;
+  --atlas-auth-button-font-size: 16px;
+  --atlas-auth-button-shadow: 0px 4px 8px 0px rgba(10, 124, 255, 0.12);
+  --atlas-auth-button-inset-shadow: inset 1px 1px 2px 0px rgba(255, 255, 255, 0.24);
+  --atlas-auth-desktop-left-width: 720px;
+  --atlas-auth-desktop-hero-width: 652.6951293945312px;
+  --atlas-auth-desktop-hero-height: 519.9590454101562px;
+  --atlas-auth-desktop-hero-top: 195px;
+  --atlas-auth-desktop-hero-right: 35.30487060546875px;
+}
+
+.atlas-auth-shell[data-theme='light'] {
+  --atlas-auth-bg: #f3f7fc;
+  --atlas-auth-card-bg: #ffffff;
+  --atlas-auth-card-border: #c8d5e6;
+  --atlas-auth-text: #122033;
+  --atlas-auth-button-text: #0f1524;
+  --atlas-auth-muted-opacity: 0.58;
+}
+
+.atlas-auth-page {
+  background: var(--atlas-auth-bg);
+  color: var(--atlas-auth-text);
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+}
+
+.atlas-auth-desktop,
+.atlas-auth-mobile {
+  inset: 0;
+  position: absolute;
+}
+
+.atlas-auth-desktop {
+  background: var(--atlas-auth-bg);
+  display: flex;
+}
+
+.atlas-auth-desktop-panel {
+  align-items: center;
+  background: var(--atlas-auth-bg);
+  display: flex;
+  justify-content: center;
+  width: var(--atlas-auth-desktop-left-width);
+}
+
+.atlas-auth-desktop-visual {
+  background: var(--atlas-auth-bg);
+  flex: 1 1 auto;
+  overflow: hidden;
+  position: relative;
+}
+
+.atlas-auth-desktop-hero {
+  height: var(--atlas-auth-desktop-hero-height);
+  position: absolute;
+  right: var(--atlas-auth-desktop-hero-right);
+  top: var(--atlas-auth-desktop-hero-top);
+  width: var(--atlas-auth-desktop-hero-width);
+}
+
+.atlas-auth-desktop-hero-image {
+  display: block;
+  height: 100%;
+  max-width: none;
+  width: 100%;
+}
+
+.atlas-auth-mobile {
+  display: none;
+}
+
+.atlas-auth-background {
+  display: block;
+  height: 100%;
+  inset: 0;
+  max-width: none;
+  pointer-events: none;
+  position: absolute;
+  width: 100%;
+}
+
+.atlas-auth-background--grid {
+  mix-blend-mode: screen;
+}
+
+.atlas-auth-stage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100%;
+  padding: 0 var(--atlas-auth-stage-padding-inline);
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.atlas-auth-card {
+  background: var(--atlas-auth-card-bg);
+  border: 1px solid var(--atlas-auth-card-border);
+  border-radius: var(--atlas-auth-card-radius);
+  display: flex;
+  flex-direction: column;
+  min-height: var(--atlas-auth-card-height);
+  padding: var(--atlas-auth-card-padding-top) var(--atlas-auth-card-padding-inline)
+    var(--atlas-auth-card-padding-bottom);
+  width: var(--atlas-auth-card-width);
+}
+
+.atlas-auth-brand {
+  color: var(--atlas-auth-accent);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: var(--atlas-auth-brand-size);
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: var(--atlas-auth-brand-tracking);
+  line-height: normal;
+  margin: 0 0 var(--atlas-auth-brand-margin-bottom);
+  text-align: center;
+}
+
+.atlas-auth-form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--atlas-auth-form-gap);
+}
+
+.atlas-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-auth-field-label-gap);
+}
+
+.atlas-auth-label {
+  color: var(--atlas-auth-text);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: var(--atlas-auth-label-size);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.atlas-auth-input-frame {
+  border-radius: var(--atlas-auth-control-radius);
+  height: var(--atlas-auth-field-height);
+  position: relative;
+  width: var(--atlas-auth-field-width);
+}
+
+.atlas-auth-input-frame::before {
+  background-image: var(--atlas-auth-input-frame-url);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.atlas-auth-input {
+  background: transparent;
+  border: 0;
+  color: var(--atlas-auth-text);
+  font-family: var(--font-inter), sans-serif;
+  font-size: var(--atlas-auth-placeholder-size);
+  font-style: normal;
+  font-weight: 400;
+  height: 100%;
+  inset: 0;
+  line-height: 1.4;
+  padding: 0 calc(var(--atlas-auth-input-inset-inline) * 2 + 20px) 0
+    var(--atlas-auth-input-inset-inline);
+  position: absolute;
+  width: 100%;
+}
+
+.atlas-auth-input::placeholder {
+  color: var(--atlas-auth-text);
+  opacity: var(--atlas-auth-muted-opacity);
+}
+
+.atlas-auth-input:focus {
+  outline: none;
+}
+
+.atlas-auth-input-frame:has(.atlas-auth-input:focus-visible)::after {
+  border: 1px solid color-mix(in srgb, var(--atlas-auth-accent) 60%, transparent);
+  border-radius: var(--atlas-auth-control-radius);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.atlas-auth-visibility {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: var(--atlas-auth-eye-inset-inline);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+}
+
+.atlas-auth-visibility img {
+  display: block;
+  height: 20px;
+  width: 19px;
+}
+
+.atlas-auth-error {
+  color: #ff8b8b;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: var(--atlas-auth-error-top-gap) 0 0;
+}
+
+.atlas-auth-remember {
+  align-items: center;
+  color: var(--atlas-auth-text);
+  cursor: pointer;
+  display: inline-flex;
+  gap: var(--atlas-auth-remember-icon-gap);
+  margin-top: var(--atlas-auth-remember-gap);
+  position: relative;
+  width: fit-content;
+}
+
+.atlas-auth-remember input {
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+}
+
+.atlas-auth-remember:focus-within .atlas-auth-remember-icon {
+  outline: 1px solid color-mix(in srgb, var(--atlas-auth-accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.atlas-auth-remember-icon {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--atlas-auth-text) 75%, transparent);
+  border-radius: 4px;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: var(--atlas-auth-remember-size);
+  position: relative;
+  width: var(--atlas-auth-remember-size);
+}
+
+.atlas-auth-remember[data-state='checked'] .atlas-auth-remember-icon {
+  background: var(--atlas-auth-accent);
+  border-color: var(--atlas-auth-accent);
+}
+
+.atlas-auth-remember[data-state='checked'] .atlas-auth-remember-icon::after {
+  border-bottom: 2px solid var(--atlas-auth-button-text);
+  border-right: 2px solid var(--atlas-auth-button-text);
+  content: '';
+  height: 8px;
+  position: absolute;
+  top: 1px;
+  transform: translate(4px, 1px) rotate(45deg);
+  width: 4px;
+}
+
+.atlas-auth-remember-label {
+  font-family: var(--font-poppins), sans-serif;
+  font-size: var(--atlas-auth-remember-font-size);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.atlas-auth-button {
+  align-items: center;
+  background-image:
+    linear-gradient(90deg, rgb(56, 189, 248) 0%, rgb(56, 189, 248) 100%),
+    linear-gradient(90deg, rgb(2, 208, 242) 0%, rgb(2, 208, 242) 100%);
+  border: 0;
+  border-radius: var(--atlas-auth-control-radius);
+  box-shadow: var(--atlas-auth-button-shadow), var(--atlas-auth-button-inset-shadow);
+  color: var(--atlas-auth-button-text);
+  cursor: pointer;
+  display: inline-flex;
+  height: var(--atlas-auth-field-height);
+  justify-content: center;
+  margin-top: var(--atlas-auth-button-top-gap);
+  position: relative;
+  transition: filter 150ms ease;
+  width: var(--atlas-auth-field-width);
+}
+
+.atlas-auth-button:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.atlas-auth-button:disabled {
+  cursor: progress;
+  opacity: 0.92;
+}
+
+.atlas-auth-button-text {
+  align-items: center;
+  color: var(--atlas-auth-button-text);
+  display: inline-flex;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: var(--atlas-auth-button-font-size);
+  font-style: normal;
+  font-weight: 500;
+  gap: 10px;
+  justify-content: center;
+  line-height: 1.3;
+  text-transform: capitalize;
+}
+
+.atlas-auth-spinner {
+  animation: atlas-auth-spin 900ms linear infinite;
+  border: 2px solid rgba(15, 21, 36, 0.3);
+  border-radius: 9999px;
+  border-top-color: var(--atlas-auth-button-text);
+  display: inline-block;
+  height: 14px;
+  width: 14px;
+}
+
+@keyframes atlas-auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1024px) {
+  .atlas-auth-desktop {
+    display: none;
+  }
+
+  .atlas-auth-mobile {
+    display: block;
+  }
+}
+
+@media (max-width: 640px) {
+  .atlas-auth-stage {
+    padding: 0 var(--atlas-auth-mobile-padding);
+  }
+
+  .atlas-auth-card--mobile {
+    min-height: auto;
+    padding: 32px 18px 24px;
+    width: min(100%, var(--atlas-auth-card-width));
+  }
+
+  .atlas-auth-brand {
+    margin-bottom: 24px;
+  }
+
+  .atlas-auth-button,
+  .atlas-auth-input-frame {
+    width: 100%;
+  }
+
+  .atlas-auth-label {
+    font-size: 15px;
+  }
+
+  .atlas-auth-remember {
+    margin-top: 20px;
+  }
+
+  .atlas-auth-button {
+    margin-top: 24px;
+  }
+}

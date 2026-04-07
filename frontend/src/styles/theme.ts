@@ -1,0 +1,68 @@
+export const AUTH_IMAGES = {
+  backgroundBase: 'http://localhost:3845/assets/f2e729a96706abdad0adb2525234357ed19c5a2a.svg',
+  backgroundGrid: 'http://localhost:3845/assets/4615e255d6a4b069e366a93469e247999f21a536.svg',
+  inputFrame: 'http://localhost:3845/assets/eb2ed673ba9b4de47671f06def6e205cc4c9077a.svg',
+  eye: 'http://localhost:3845/assets/dc210f58a733d1a2ffb54ea9d2ba8718b513c934.svg',
+  checkSquare: 'http://localhost:3845/assets/4bcc15391f74dd84f20fe541f9fc7d48180658d7.svg',
+  heroBase: 'http://localhost:3845/assets/59240d22f0bd2cbbcbf484891b2038116ebbcebf.svg',
+  heroGlow: 'http://localhost:3845/assets/2e09408b4bf1ea728771cc92e0c52b6a132b2e89.svg',
+  heroWorld: 'http://localhost:3845/assets/d5785bfee540d5a7c436674c7960e2c793e1ab63.svg',
+  heroCandles: 'http://localhost:3845/assets/4912f0bca015e1548affb3e3f1e4e4b26b70a4b8.svg',
+} as const;
+
+export const AUTH_THEME = {
+  storageKey: 'atlas-theme',
+  signInDelayMs: 1200,
+  colors: {
+    background: '#0a0e1a',
+    cardBackground: '#0f1524',
+    cardBorder: '#1e2a3f',
+    accent: '#38bdf8',
+    accentGlow: '#02d0f2',
+    text: '#ffffff',
+    buttonText: '#0f1524',
+  },
+  opacity: {
+    mutedText: 0.5,
+  },
+  spacing: {
+    pageMinHeight: '910px',
+    cardWidth: '455px',
+    cardHeight: '396px',
+    cardRadius: '12px',
+    fieldWidth: '402px',
+    fieldHeight: '56px',
+    controlRadius: '6px',
+    brandMarginBottom: '29px',
+    contentPaddingInline: '26px',
+    contentPaddingTop: '42px',
+    contentPaddingBottom: '42px',
+    fieldLabelGap: '10px',
+    formGap: '15px',
+    rememberGap: '30px',
+    rememberSize: '16px',
+    rememberIconGap: '8px',
+    buttonTopGap: '30px',
+    inputInsetInline: '16px',
+    eyeInsetInline: '18px',
+    errorTopGap: '12px',
+    shellPaddingInline: '24px',
+    mobilePadding: '20px',
+    mobileCardWidth: '100%',
+    mobileCardMaxWidth: '455px',
+  },
+  typography: {
+    brandSize: '20.419px',
+    brandTracking: '4.3756px',
+    labelSize: '16px',
+    placeholderSize: '14px',
+    rememberSize: '14px',
+    buttonSize: '16px',
+  },
+  shadows: {
+    button: '0px 4px 8px 0px rgba(10, 124, 255, 0.12)',
+    buttonInset: 'inset 1px 1px 2px 0px rgba(255, 255, 255, 0.24)',
+  },
+} as const;
+
+export type AtlasTheme = 'dark' | 'light';

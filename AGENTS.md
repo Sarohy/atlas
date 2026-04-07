@@ -30,16 +30,16 @@ atlas/
 
 These apply to every change, every file, every agent:
 
-| Rule | Detail |
-|---|---|
-| **TDD first** | Write a failing test before any implementation. No exceptions. |
-| **No secrets in code** | Use env vars / config. `.env` is gitignored. |
-| **No `any`** | TypeScript `any` and Python implicit `Any` are both banned. |
-| **No magic numbers** | Use named constants with a comment explaining the value. |
-| **No commented-out code** | Delete it. Git is the history. |
-| **No `TODO` without a ticket** | `TODO(#42): ...` is fine. Plain `TODO` is not. |
-| **Functions do one thing** | Flag any function over 40 lines for splitting. |
-| **Decision trace is append-only** | Never `UPDATE` or `DELETE` from audit/trace tables. |
+| Rule                              | Detail                                                         |
+| --------------------------------- | -------------------------------------------------------------- |
+| **TDD first**                     | Write a failing test before any implementation. No exceptions. |
+| **No secrets in code**            | Use env vars / config. `.env` is gitignored.                   |
+| **No `any`**                      | TypeScript `any` and Python implicit `Any` are both banned.    |
+| **No magic numbers**              | Use named constants with a comment explaining the value.       |
+| **No commented-out code**         | Delete it. Git is the history.                                 |
+| **No `TODO` without a ticket**    | `TODO(#42): ...` is fine. Plain `TODO` is not.                 |
+| **Functions do one thing**        | Flag any function over 40 lines for splitting.                 |
+| **Decision trace is append-only** | Never `UPDATE` or `DELETE` from audit/trace tables.            |
 
 ---
 
@@ -47,37 +47,37 @@ These apply to every change, every file, every agent:
 
 ### Backend — `backend/`
 
-| Concern | Tool |
-|---|---|
-| Runtime | Python 3.12+ (managed by pyenv + uv) |
-| Framework | FastAPI |
-| Validation | Pydantic v2 |
-| ORM | SQLAlchemy 2 (async only — `asyncpg` driver) |
-| Migrations | Alembic (async) |
-| Logging | structlog (JSON in prod, console in dev) |
-| Tests | pytest + pytest-asyncio + pytest-cov |
-| Lint / format | ruff |
-| Types | mypy (strict) |
-| Dev runner | `uv run` |
+| Concern       | Tool                                         |
+| ------------- | -------------------------------------------- |
+| Runtime       | Python 3.12+ (managed by pyenv + uv)         |
+| Framework     | FastAPI                                      |
+| Validation    | Pydantic v2                                  |
+| ORM           | SQLAlchemy 2 (async only — `asyncpg` driver) |
+| Migrations    | Alembic (async)                              |
+| Logging       | structlog (JSON in prod, console in dev)     |
+| Tests         | pytest + pytest-asyncio + pytest-cov         |
+| Lint / format | ruff                                         |
+| Types         | mypy (strict)                                |
+| Dev runner    | `uv run`                                     |
 
 ### Frontend — `frontend/`
 
-| Concern | Tool |
-|---|---|
-| Runtime | Node 22+ (managed by nvm) |
-| Framework | Next.js 16 App Router |
-| Language | TypeScript 5 strict |
-| Styling | Tailwind CSS 4 |
-| UI primitives | shadcn/ui + Radix UI |
-| Server state | TanStack Query v5 |
-| Client state | Zustand |
-| Forms | React Hook Form + Zod resolver |
-| Validation | Zod v4 |
-| Unit tests | Vitest + Testing Library + MSW |
-| E2E tests | Playwright (Chromium only) |
-| Lint | ESLint flat config |
-| Format | Prettier |
-| Package manager | pnpm |
+| Concern         | Tool                           |
+| --------------- | ------------------------------ |
+| Runtime         | Node 22+ (managed by nvm)      |
+| Framework       | Next.js 16 App Router          |
+| Language        | TypeScript 5 strict            |
+| Styling         | Tailwind CSS 4                 |
+| UI primitives   | shadcn/ui + Radix UI           |
+| Server state    | TanStack Query v5              |
+| Client state    | Zustand                        |
+| Forms           | React Hook Form + Zod resolver |
+| Validation      | Zod v4                         |
+| Unit tests      | Vitest + Testing Library + MSW |
+| E2E tests       | Playwright (Chromium only)     |
+| Lint            | ESLint flat config             |
+| Format          | Prettier                       |
+| Package manager | pnpm                           |
 
 ---
 
@@ -125,11 +125,13 @@ REFACTOR → clean up; keep tests green
 4. Run the full suite — coverage must stay **≥ 90%**.
 
 Backend test structure mirrors source:
+
 ```
 backend/tests/unit/services/test_scoring.py  ↔  backend/src/atlas/services/scoring.py
 ```
 
 Frontend test structure mirrors source:
+
 ```
 frontend/tests/unit/lib/api-client.test.ts   ↔  frontend/src/lib/api/client.ts
 frontend/tests/components/health-status.test.tsx  ↔  frontend/src/components/health-status.tsx
@@ -174,6 +176,7 @@ uv run uvicorn atlas.main:create_app --factory --reload --port 8000
 ```
 
 Required env (copy from `backend/.env.example` → `backend/.env`):
+
 ```
 DATABASE_URL=postgresql+asyncpg://localhost/atlas_dev
 ENVIRONMENT=development
@@ -188,6 +191,7 @@ pnpm dev              # http://localhost:3000
 ```
 
 Required env (copy from `frontend/.env.example` → `frontend/.env.local`):
+
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
@@ -222,6 +226,7 @@ cd frontend && pnpm test:e2e
 **Scope:** `backend` | `frontend` | `infra` | `deps` | `agents` (or a module name)
 
 **Examples:**
+
 ```
 feat(backend): add conviction score endpoint
 fix(frontend): handle empty portfolio in HealthStatus
@@ -230,6 +235,7 @@ chore(deps): bump fastapi to 0.136.0
 ```
 
 Rules:
+
 - Imperative mood, present tense: "add" not "added"
 - No period at the end of the subject line
 - Subject line ≤ 72 characters
@@ -242,29 +248,33 @@ Rules:
 These are business-domain constraints — violating them is a blocking issue.
 
 ### Decision Trace immutability
+
 Any code that writes to the decision trace log must be **append-only**. No `UPDATE` or `DELETE`
 on audit or trace tables/endpoints. Flag immediately if you see one.
 
 ### Safety-critical confirmation flows
+
 Any code touching trade execution, framework override, or position changes must have a
 corresponding e2e test covering the typed-confirmation path before it can be merged.
 
 ### Regime modifier purity
+
 Code computing regime state (Crisis Halt / Caution / Clear from VIX, Brent, escalation prob)
 must be a **pure function** — no side effects, no I/O, no randomness. Unit test it as such.
 
 ### Conviction scores are read-only intraday
+
 No code path may recompute or mutate a conviction score outside the post-close batch job.
 
 ---
 
 ## 10. Sub-agents available in `.claude/agents/`
 
-| Agent | When to invoke |
-|---|---|
-| `architecture-guardian` | Before adding any new module, file, directory, or dependency |
-| `tdd-enforcer` | At the start of every feature, bug fix, or refactor touching business logic |
-| `code-reviewer` | After any implementation work, before committing |
+| Agent                   | When to invoke                                                              |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `architecture-guardian` | Before adding any new module, file, directory, or dependency                |
+| `tdd-enforcer`          | At the start of every feature, bug fix, or refactor touching business logic |
+| `code-reviewer`         | After any implementation work, before committing                            |
 
 ---
 

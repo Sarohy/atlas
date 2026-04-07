@@ -42,6 +42,51 @@ class Position(Base):
         nullable=False,
     )
 
+    # --- Market data columns — populated by the /sync endpoint ---
+
+    # Latest trade price from Polygon session.price or last_trade.price.
+    current_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=15, scale=4),
+        nullable=True,
+    )
+
+    # Prior session close used to calculate intraday change.
+    previous_close: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=15, scale=4),
+        nullable=True,
+    )
+
+    # Intraday dollar change: current_price − previous_close.
+    day_change: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=15, scale=4),
+        nullable=True,
+    )
+
+    # Intraday percentage change (e.g. 1.25 means +1.25 %).
+    day_change_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=8, scale=4),
+        nullable=True,
+    )
+
+    # Position market value: shares × current_price.
+    position_value: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=20, scale=4),
+        nullable=True,
+    )
+
+    # Rolling 1-year beta vs SPY — measures sensitivity to broad market moves.
+    # β > 1: more volatile than market; β < 1: less volatile; β < 0: inverse.
+    beta: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=8, scale=4),
+        nullable=True,
+    )
+
+    # Timestamp of the last successful Polygon sync for this position.
+    synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -7,6 +7,7 @@ import {
   createPosition,
   updatePosition,
   deletePosition,
+  syncPositions,
 } from '@/lib/api/positions';
 import type { PositionResponse } from '@/lib/schemas/position';
 
@@ -47,6 +48,16 @@ export function useDeletePosition() {
       qc.setQueryData<PositionResponse[]>(POSITIONS_KEY, (prev) =>
         (prev ?? []).filter((p) => p.id !== id),
       );
+    },
+  });
+}
+
+export function useSyncPositions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: syncPositions,
+    onSuccess: (updated: PositionResponse[]) => {
+      qc.setQueryData<PositionResponse[]>(POSITIONS_KEY, updated);
     },
   });
 }

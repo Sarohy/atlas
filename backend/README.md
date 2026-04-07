@@ -6,11 +6,11 @@ Decision-support API for active investing — FastAPI · Pydantic v2 · SQLAlche
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Python | 3.12+ | [pyenv](https://github.com/pyenv/pyenv) or [python.org](https://python.org) |
-| uv | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| PostgreSQL | 14+ | `brew install postgresql@16` (macOS) |
+| Tool       | Version | Install                                                                     |
+| ---------- | ------- | --------------------------------------------------------------------------- |
+| Python     | 3.12+   | [pyenv](https://github.com/pyenv/pyenv) or [python.org](https://python.org) |
+| uv         | latest  | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                          |
+| PostgreSQL | 14+     | `brew install postgresql@16` (macOS)                                        |
 
 Ensure PostgreSQL is running and the following databases exist:
 
@@ -70,7 +70,7 @@ Health check: `curl http://localhost:8000/api/v1/health`
 Expected response:
 
 ```json
-{"status": "ok", "service": "atlas-backend"}
+{ "status": "ok", "service": "atlas-backend" }
 ```
 
 ---
@@ -145,6 +145,7 @@ Every feature follows **Red → Green → Refactor**:
 6. Run the full quality gate before committing.
 
 Rules:
+
 - Coverage must stay **≥ 90%** at all times.
 - Every endpoint → integration test. Every schema → unit test. Every service → unit test with mocked deps.
 - Test names are sentences: `test_health_endpoint_returns_ok_status`.

@@ -31,6 +31,10 @@ export function deletePosition(id: number): Promise<void> {
   return apiDelete(`/api/v1/positions/${id}`);
 }
 
+export function syncPositions(): Promise<PositionResponse[]> {
+  return apiPost('/api/v1/positions/sync', z.array(positionResponseSchema), {});
+}
+
 export function searchTickers(query: string): Promise<TickerSearchResult[]> {
   return apiFetch(
     `/api/v1/tickers/search?q=${encodeURIComponent(query)}`,

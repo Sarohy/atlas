@@ -54,5 +54,16 @@ class PositionResponse(BaseModel):
     ticker: str
     company_name: str
     shares: Decimal
+
+    # Market-data fields — None until the first /sync call.
+    current_price: Decimal | None = None
+    previous_close: Decimal | None = None
+    day_change: Decimal | None = None
+    day_change_pct: Decimal | None = None
+    position_value: Decimal | None = None
+    # Rolling 1-year beta vs SPY — None until first sync.
+    beta: Decimal | None = None
+    synced_at: datetime | None = None
+
     created_at: datetime
     updated_at: datetime

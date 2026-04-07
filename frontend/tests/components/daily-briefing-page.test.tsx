@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
@@ -35,5 +37,13 @@ describe('Daily briefing page', () => {
     expect(screen.getByText('Phase 1 · Iran deal')).toBeInTheDocument();
     expect(screen.getByText('Phase 1 · score 92')).toBeInTheDocument();
     expect(screen.getByText('LITE+')).toBeInTheDocument();
+  });
+
+  it('styles daily briefing question headings with the figma cyan accent', () => {
+    const stylesheetPath = join(process.cwd(), 'src/styles/daily-briefing.css');
+    const stylesheet = readFileSync(stylesheetPath, 'utf8');
+
+    expect(stylesheet).toContain('.atlas-briefing-question');
+    expect(stylesheet).toContain('color: #38bdf8;');
   });
 });

@@ -3,6 +3,7 @@
   --atlas-auth-card-bg: #0f1524;
   --atlas-auth-card-border: #1e2a3f;
   --atlas-auth-accent: #38bdf8;
+  --atlas-auth-hero-bg: #151b33;
   --atlas-auth-text: #ffffff;
   --atlas-auth-button-text: #0f1524;
   --atlas-auth-muted-opacity: 0.5;
@@ -79,13 +80,14 @@
 }
 
 .atlas-auth-desktop-visual {
-  background: var(--atlas-auth-bg);
+  background: var(--atlas-auth-hero-bg);
   flex: 1 1 auto;
   overflow: hidden;
   position: relative;
 }
 
 .atlas-auth-desktop-hero {
+  background: var(--atlas-auth-hero-bg);
   height: var(--atlas-auth-desktop-hero-height);
   position: absolute;
   right: var(--atlas-auth-desktop-hero-right);

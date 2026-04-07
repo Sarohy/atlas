@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -56,6 +58,14 @@ describe('Sign-in page', () => {
     expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
     expect(screen.getByTestId('atlas-auth-page')).toHaveTextContent('Remember me');
     expect(screen.getByAltText('ATLAS market globe')).toHaveAttribute('src', '/atlas.svg');
+  });
+
+  it('uses the figma-matched desktop hero background behind the atlas artwork', () => {
+    const stylesheetPath = join(process.cwd(), 'src/styles/auth.css');
+    const stylesheet = readFileSync(stylesheetPath, 'utf8');
+
+    expect(stylesheet).toContain('--atlas-auth-hero-bg: #151b33;');
+    expect(stylesheet).toContain('background: var(--atlas-auth-hero-bg);');
   });
 
   it('uses the mobile layout at 1024px to avoid cropping the atlas hero artwork', () => {

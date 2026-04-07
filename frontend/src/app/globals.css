@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 
 /* ── ATLAS design tokens ────────────────────────────────────────────────────
@@ -6,7 +7,6 @@
    Fonts: IBM Plex Mono (display/numbers) · Inter (body/UI)
    ────────────────────────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
 
 :root {
   /* Background */

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { server } from '../mocks/server';
 import Home from '@/app/page';
 
 function setViewportWidth(width: number) {
@@ -101,5 +103,45 @@ describe('Home sign-in page', () => {
       },
       { timeout: 2500 },
     );
+  });
+
+  it('submits valid credentials to the sign-in api and clears loading state on success', async () => {
+    const user = userEvent.setup();
+
+    render(<Home />);
+
+    await user.type(screen.getByLabelText('Email address'), 'admin@atlas.com');
+    await user.type(screen.getByLabelText('Password'), 'admin@123');
+    await user.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    expect(screen.getByRole('button', { name: 'Signing in' })).toBeDisabled();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Sign In' })).toBeEnabled();
+    });
+
+    expect(screen.getByText('Sign in successful.')).toBeInTheDocument();
+    expect(screen.getByText('Signed in as admin@atlas.com')).toBeInTheDocument();
+    expect(screen.queryByText('Invalid email or password.')).not.toBeInTheDocument();
+  });
+
+  it('shows the api error message when sign-in fails', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('http://localhost:8000/api/v1/auth/sign-in', () => {
+        return HttpResponse.json({ detail: 'Invalid email or password.' }, { status: 401 });
+      }),
+    );
+
+    render(<Home />);
+
+    await user.type(screen.getByLabelText('Email address'), 'admin@atlas.com');
+    await user.type(screen.getByLabelText('Password'), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid email or password.')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeEnabled();
   });
 });

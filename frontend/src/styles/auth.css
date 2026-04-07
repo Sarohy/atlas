@@ -258,6 +258,14 @@
   margin: var(--atlas-auth-error-top-gap) 0 0;
 }
 
+.atlas-auth-success {
+  color: color-mix(in srgb, var(--atlas-auth-accent) 85%, white);
+  font-family: var(--font-inter), sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: var(--atlas-auth-error-top-gap) 0 0;
+}
+
 .atlas-auth-remember {
   align-items: center;
   color: var(--atlas-auth-text);

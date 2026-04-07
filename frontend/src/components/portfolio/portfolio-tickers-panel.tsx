@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 
-import { usePositions } from '@/lib/hooks/use-positions';
+import { useTickers } from '@/lib/hooks/use-tickers';
 import { EditTickersDialog } from './edit-tickers-dialog';
-import type { PositionResponse } from '@/lib/schemas/position';
+import type { TickerResponse } from '@/lib/schemas/ticker';
 
 /** Format a nullable decimal as a dollar price string. */
 function fmtPrice(value: number | null | undefined): string {
@@ -25,7 +25,7 @@ function fmtChange(pct: number | null | undefined): {
   };
 }
 
-function TickerRow({ position }: { position: PositionResponse }) {
+function TickerRow({ position }: { position: TickerResponse }) {
   const change = fmtChange(position.day_change_pct);
   return (
     <article className="atlas-portfolio-ticker">
@@ -44,7 +44,7 @@ function TickerRow({ position }: { position: PositionResponse }) {
 
 export function PortfolioTickersPanel() {
   const [editOpen, setEditOpen] = useState(false);
-  const { data: positions, isLoading } = usePositions();
+  const { data: positions, isLoading } = useTickers();
 
   return (
     <>

@@ -1,4 +1,4 @@
-"""Service for syncing live market data from Polygon.io into position records."""
+"""Service for syncing live market data from Polygon.io into ticker records."""
 
 import asyncio
 import statistics
@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from atlas.models.position import Position
+from atlas.models.ticker import Ticker
 
 # Polygon free-tier daily aggregates endpoint — one request per ticker.
 # Snapshot endpoints (/v2/snapshot, /v3/snapshot) require a paid plan.
@@ -37,20 +37,20 @@ class MarketDataService:
         self._session = session
         self._client = client
 
-    async def sync_positions(self) -> list[Position]:
-        """Fetch quotes and beta for all positions; persist to DB.
+    async def sync_tickers(self) -> list[Ticker]:
+        """Fetch quotes and beta for all tickers; persist to DB.
 
         Strategy:
-          1. Load all positions from DB.
+          1. Load all tickers from DB.
           2. Fetch 365-day daily bars for SPY once (benchmark for beta).
           3. Concurrently fetch 365-day bars per ticker.
           4. For each ticker: extract price data from last 2 bars; compute
              beta by aligning daily returns with SPY returns.
         """
-        result = await self._session.execute(select(Position).order_by(Position.ticker))
-        positions: list[Position] = list(result.scalars().all())
+        result = await self._session.execute(select(Ticker).order_by(Ticker.ticker))
+        tickers: list[Ticker] = list(result.scalars().all())
 
-        if not positions:
+        if not tickers:
             return []
 
         to_date = date.today()
@@ -63,18 +63,18 @@ class MarketDataService:
 
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
 
-        async def fetch_one(position: Position) -> tuple[Position, list[dict]]:  # type: ignore[type-arg]
+        async def fetch_one(ticker: Ticker) -> tuple[Ticker, list[dict]]:  # type: ignore[type-arg]
             async with semaphore:
-                bars = await self._fetch_raw_bars(position.ticker, from_date, to_date)
-            return position, bars
+                bars = await self._fetch_raw_bars(ticker.ticker, from_date, to_date)
+            return ticker, bars
 
-        results_pairs = await asyncio.gather(*(fetch_one(p) for p in positions))
+        results_pairs = await asyncio.gather(*(fetch_one(t) for t in tickers))
 
         now = datetime.now(tz=timezone.utc)
-        for position, bars in results_pairs:
-            self._apply_market_data(position, bars, spy_close_by_ts, now)
+        for ticker, bars in results_pairs:
+            self._apply_market_data(ticker, bars, spy_close_by_ts, now)
 
-        return positions
+        return tickers
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -164,12 +164,12 @@ class MarketDataService:
 
     @staticmethod
     def _apply_market_data(
-        position: Position,
+        ticker: Ticker,
         bars: list[dict],  # type: ignore[type-arg]
         spy_close_by_ts: dict[int, float],
         now: datetime,
     ) -> None:
-        """Write computed market-data and beta onto a Position instance (no flush)."""
+        """Write computed market-data and beta onto a Ticker instance (no flush)."""
 
         def to_dec(value: object) -> Decimal | None:
             if value is None:
@@ -205,10 +205,10 @@ class MarketDataService:
         # --- Beta: full 365-day window aligned with SPY ---
         beta = MarketDataService._compute_beta(bars, spy_close_by_ts)
 
-        position.current_price = current_price
-        position.previous_close = previous_close
-        position.day_change = day_change
-        position.day_change_pct = day_change_pct
-        position.position_value = current_price * position.shares
-        position.beta = beta
-        position.synced_at = now
+        ticker.current_price = current_price
+        ticker.previous_close = previous_close
+        ticker.day_change = day_change
+        ticker.day_change_pct = day_change_pct
+        ticker.position_value = current_price * ticker.shares
+        ticker.beta = beta
+        ticker.synced_at = now

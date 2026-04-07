@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as client from '@/lib/api/client';
 import {
-  fetchPositions,
-  createPosition,
-  updatePosition,
-  deletePosition,
+  fetchTickers,
+  createTicker,
+  updateTicker,
+  deleteTicker,
   searchTickers,
-} from '@/lib/api/positions';
+} from '@/lib/api/tickers';
 
 vi.mock('@/lib/api/client');
 
@@ -18,7 +18,7 @@ const mockApiDelete = vi.mocked(client.apiDelete);
 
 afterEach(() => vi.clearAllMocks());
 
-const POSITION = {
+const TICKER = {
   id: 1,
   ticker: 'AAPL',
   company_name: 'Apple Inc.',
@@ -27,44 +27,44 @@ const POSITION = {
   updated_at: '2026-04-07T00:00:00Z',
 };
 
-describe('fetchPositions', () => {
-  it('calls GET /api/v1/positions and returns a list', async () => {
-    mockApiFetch.mockResolvedValueOnce([POSITION]);
-    const result = await fetchPositions();
-    expect(result).toEqual([POSITION]);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/positions', expect.anything());
+describe('fetchTickers', () => {
+  it('calls GET /api/v1/tickers and returns a list', async () => {
+    mockApiFetch.mockResolvedValueOnce([TICKER]);
+    const result = await fetchTickers();
+    expect(result).toEqual([TICKER]);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/tickers', expect.anything());
   });
 });
 
-describe('createPosition', () => {
-  it('calls POST /api/v1/positions with the payload', async () => {
-    mockApiPost.mockResolvedValueOnce({ ...POSITION, id: 2 });
-    await createPosition({ ticker: 'NVDA', company_name: 'NVIDIA Corp', shares: '25' });
+describe('createTicker', () => {
+  it('calls POST /api/v1/tickers with the payload', async () => {
+    mockApiPost.mockResolvedValueOnce({ ...TICKER, id: 2 });
+    await createTicker({ ticker: 'NVDA', company_name: 'NVIDIA Corp', shares: '25' });
     expect(mockApiPost).toHaveBeenCalledWith(
-      '/api/v1/positions',
+      '/api/v1/tickers',
       expect.anything(),
       expect.objectContaining({ ticker: 'NVDA' }),
     );
   });
 });
 
-describe('updatePosition', () => {
-  it('calls PATCH /api/v1/positions/:id with updated shares', async () => {
-    mockApiPatch.mockResolvedValueOnce({ ...POSITION, shares: '200' });
-    await updatePosition(1, { shares: '200' });
+describe('updateTicker', () => {
+  it('calls PATCH /api/v1/tickers/:id with updated shares', async () => {
+    mockApiPatch.mockResolvedValueOnce({ ...TICKER, shares: '200' });
+    await updateTicker(1, { shares: '200' });
     expect(mockApiPatch).toHaveBeenCalledWith(
-      '/api/v1/positions/1',
+      '/api/v1/tickers/1',
       expect.anything(),
       expect.objectContaining({ shares: '200' }),
     );
   });
 });
 
-describe('deletePosition', () => {
-  it('calls DELETE /api/v1/positions/:id', async () => {
+describe('deleteTicker', () => {
+  it('calls DELETE /api/v1/tickers/:id', async () => {
     mockApiDelete.mockResolvedValueOnce(undefined);
-    await deletePosition(1);
-    expect(mockApiDelete).toHaveBeenCalledWith('/api/v1/positions/1');
+    await deleteTicker(1);
+    expect(mockApiDelete).toHaveBeenCalledWith('/api/v1/tickers/1');
   });
 });
 

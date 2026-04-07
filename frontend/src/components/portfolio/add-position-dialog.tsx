@@ -5,9 +5,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
-import { useCreatePosition, useUpdatePosition } from '@/lib/hooks/use-positions';
+import { useCreateTicker, useUpdateTicker } from '@/lib/hooks/use-tickers';
 import { TickerSearch } from './ticker-search';
-import type { PositionResponse, TickerSearchResult } from '@/lib/schemas/position';
+import type { TickerResponse, TickerSearchResult } from '@/lib/schemas/ticker';
 
 /** Shares-only form schema used in step 2. */
 const sharesFormSchema = z.object({
@@ -22,14 +22,14 @@ interface AddPositionDialogProps {
   open: boolean;
   onClose: () => void;
   /** When provided the dialog runs in edit mode (shares only). */
-  editTarget?: PositionResponse | null;
+  editTarget?: TickerResponse | null;
 }
 
 export function AddPositionDialog({ open, onClose, editTarget }: AddPositionDialogProps) {
   const [selectedTicker, setSelectedTicker] = useState<TickerSearchResult | null>(null);
 
-  const { mutate: create, isPending: creating } = useCreatePosition();
-  const { mutate: update, isPending: updating } = useUpdatePosition();
+  const { mutate: create, isPending: creating } = useCreateTicker();
+  const { mutate: update, isPending: updating } = useUpdateTicker();
   const isPending = creating || updating;
 
   const {

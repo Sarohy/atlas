@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  positionResponseSchema,
-  positionSchema,
-  tickerSearchResultSchema,
-} from '@/lib/schemas/position';
+import { tickerResponseSchema, tickerSchema, tickerSearchResultSchema } from '@/lib/schemas/ticker';
 
 describe('tickerSearchResultSchema', () => {
   it('parses a valid Polygon ticker result', () => {
@@ -24,9 +20,9 @@ describe('tickerSearchResultSchema', () => {
   });
 });
 
-describe('positionSchema', () => {
-  it('parses a valid position create payload', () => {
-    const result = positionSchema.parse({
+describe('tickerSchema', () => {
+  it('parses a valid ticker create payload', () => {
+    const result = tickerSchema.parse({
       ticker: 'AAPL',
       company_name: 'Apple Inc.',
       shares: '150',
@@ -36,20 +32,20 @@ describe('positionSchema', () => {
 
   it('rejects empty ticker', () => {
     expect(() =>
-      positionSchema.parse({ ticker: '', company_name: 'Apple Inc.', shares: '10' }),
+      tickerSchema.parse({ ticker: '', company_name: 'Apple Inc.', shares: '10' }),
     ).toThrow();
   });
 
   it('rejects non-positive shares', () => {
     expect(() =>
-      positionSchema.parse({ ticker: 'AAPL', company_name: 'Apple Inc.', shares: '0' }),
+      tickerSchema.parse({ ticker: 'AAPL', company_name: 'Apple Inc.', shares: '0' }),
     ).toThrow();
   });
 });
 
-describe('positionResponseSchema', () => {
-  it('parses a full position response from the API', () => {
-    const result = positionResponseSchema.parse({
+describe('tickerResponseSchema', () => {
+  it('parses a full ticker response from the API', () => {
+    const result = tickerResponseSchema.parse({
       id: 1,
       ticker: 'MSFT',
       company_name: 'Microsoft Corporation',

@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 
-import { usePositions, useDeletePosition, useSyncPositions } from '@/lib/hooks/use-positions';
-import type { PositionResponse } from '@/lib/schemas/position';
+import { useTickers, useDeleteTicker, useSyncTickers } from '@/lib/hooks/use-tickers';
+import type { TickerResponse } from '@/lib/schemas/ticker';
 import { AddPositionDialog } from './add-position-dialog';
 
 /** Number of skeleton rows to show while loading. */
@@ -66,12 +66,12 @@ function fmtBeta(value: number | null | undefined): { text: string; cls: string 
 }
 
 interface RowProps {
-  position: PositionResponse;
-  onEdit: (position: PositionResponse) => void;
+  position: TickerResponse;
+  onEdit: (position: TickerResponse) => void;
 }
 
 function PositionRow({ position, onEdit }: RowProps) {
-  const { mutate: deletePosition, isPending } = useDeletePosition();
+  const { mutate: deletePosition, isPending } = useDeleteTicker();
   const pct = fmtPct(position.day_change_pct);
   const chg = fmtChange(position.day_change);
   const betaFmt = fmtBeta(position.beta);
@@ -122,12 +122,12 @@ function PositionRow({ position, onEdit }: RowProps) {
 }
 
 export function PortfolioTable() {
-  const { data: positions, isLoading } = usePositions();
-  const { mutate: sync, isPending: isSyncing, error: syncError } = useSyncPositions();
+  const { data: positions, isLoading } = useTickers();
+  const { mutate: sync, isPending: isSyncing, error: syncError } = useSyncTickers();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<PositionResponse | null>(null);
+  const [editTarget, setEditTarget] = useState<TickerResponse | null>(null);
 
-  function openEdit(position: PositionResponse) {
+  function openEdit(position: TickerResponse) {
     setEditTarget(position);
     setDialogOpen(true);
   }

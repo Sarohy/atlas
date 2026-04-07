@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 
 import { useTickerSearch } from '@/lib/hooks/use-ticker-search';
-import type { TickerSearchResult } from '@/lib/schemas/position';
+import type { TickerSearchResult } from '@/lib/schemas/ticker';
 
 interface TickerSearchProps {
   onSelect: (ticker: TickerSearchResult) => void;

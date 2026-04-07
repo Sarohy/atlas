@@ -1,49 +1,59 @@
-"""Service for searching tickers via the Polygon.io Reference API."""
+"""Business logic for managing portfolio tickers."""
 
-import httpx
+from decimal import Decimal
 
-from atlas.schemas.position import TickerSearchResult
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# Polygon reference tickers endpoint — stable v3 path.
-_POLYGON_SEARCH_URL = "https://api.polygon.io/v3/reference/tickers"
-
-# Maximum results to request per search query — keeps the response lean.
-_MAX_RESULTS = 10
+from atlas.models.ticker import Ticker
+from atlas.schemas.ticker import TickerCreate
 
 
 class TickerService:
-    """Thin wrapper around the Polygon.io REST API for ticker look-ups."""
+    """All database interactions for the tickers feature live here."""
 
-    def __init__(self, api_key: str, client: httpx.AsyncClient) -> None:
-        self._api_key = api_key
-        self._client = client
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
 
-    async def search(self, query: str) -> list[TickerSearchResult]:
-        """Search for active tickers matching *query*.
+    async def list_tickers(self) -> list[Ticker]:
+        """Return all tickers ordered alphabetically by ticker symbol."""
+        result = await self._session.execute(select(Ticker).order_by(Ticker.ticker))
+        return list(result.scalars().all())
 
-        Returns up to ``_MAX_RESULTS`` results.
-        Raises ``httpx.HTTPStatusError`` on non-2xx responses.
-        """
-        response = await self._client.get(
-            _POLYGON_SEARCH_URL,
-            params={
-                "search": query,
-                "active": "true",
-                "limit": _MAX_RESULTS,
-                "apiKey": self._api_key,
-            },
+    async def get_by_ticker(self, ticker: str) -> Ticker | None:
+        """Fetch a ticker by its symbol (case-insensitive)."""
+        result = await self._session.execute(
+            select(Ticker).where(Ticker.ticker == ticker.upper())
         )
-        response.raise_for_status()
+        return result.scalar_one_or_none()
 
-        payload: dict = response.json()  # type: ignore[type-arg]
-        raw_results: list[dict] = payload.get("results", [])  # type: ignore[type-arg]
+    async def create_ticker(self, data: TickerCreate) -> Ticker:
+        """Insert a new ticker and return the persisted record."""
+        ticker = Ticker(
+            ticker=data.ticker,
+            company_name=data.company_name,
+            shares=data.shares,
+        )
+        self._session.add(ticker)
+        await self._session.flush()
+        await self._session.refresh(ticker)
+        return ticker
 
-        return [
-            TickerSearchResult(
-                ticker=r.get("ticker", ""),
-                name=r.get("name", ""),
-                market=r.get("market", ""),
-                type=r.get("type", ""),
-            )
-            for r in raw_results
-        ]
+    async def update_shares(self, ticker_id: int, shares: Decimal) -> Ticker | None:
+        """Update the share count for a ticker. Returns None if not found."""
+        ticker = await self._session.get(Ticker, ticker_id)
+        if ticker is None:
+            return None
+        ticker.shares = shares
+        await self._session.flush()
+        await self._session.refresh(ticker)
+        return ticker
+
+    async def delete_ticker(self, ticker_id: int) -> bool:
+        """Delete a ticker by id. Returns True on success, False if not found."""
+        ticker = await self._session.get(Ticker, ticker_id)
+        if ticker is None:
+            return False
+        await self._session.delete(ticker)
+        await self._session.flush()
+        return True

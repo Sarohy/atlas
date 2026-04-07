@@ -9,14 +9,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from atlas.db.base import Base
 
 
-class Position(Base):
+class Ticker(Base):
     """A single holding in the ATLAS portfolio.
 
     ``ticker`` is unique — one record per symbol at all times.
     ``shares`` is stored with 4 decimal places for fractional-share accuracy.
     """
 
-    __tablename__ = "positions"
+    __tablename__ = "tickers"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
@@ -100,4 +100,4 @@ class Position(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Position ticker={self.ticker!r} shares={self.shares}>"
+        return f"<Ticker ticker={self.ticker!r} shares={self.shares}>"

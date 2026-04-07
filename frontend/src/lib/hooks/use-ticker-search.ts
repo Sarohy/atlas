@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 
-import { searchTickers } from '@/lib/api/positions';
+import { searchTickers } from '@/lib/api/tickers';
 
 /** Minimum query length before triggering a ticker search. */
 const MIN_SEARCH_LENGTH = 1;

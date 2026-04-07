@@ -4,11 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { AddPositionDialog } from '@/components/portfolio/add-position-dialog';
-import type { PositionResponse } from '@/lib/schemas/position';
+import type { TickerResponse } from '@/lib/schemas/ticker';
 
-vi.mock('@/lib/api/positions', () => ({
-  fetchPositions: vi.fn().mockResolvedValue([]),
-  createPosition: vi.fn().mockResolvedValue({
+vi.mock('@/lib/api/tickers', () => ({
+  fetchTickers: vi.fn().mockResolvedValue([]),
+  createTicker: vi.fn().mockResolvedValue({
     id: 2,
     ticker: 'NVDA',
     company_name: 'NVIDIA Corporation',
@@ -16,7 +16,7 @@ vi.mock('@/lib/api/positions', () => ({
     created_at: '2026-04-07T00:00:00Z',
     updated_at: '2026-04-07T00:00:00Z',
   }),
-  updatePosition: vi.fn().mockResolvedValue({
+  updateTicker: vi.fn().mockResolvedValue({
     id: 1,
     ticker: 'AAPL',
     company_name: 'Apple Inc.',
@@ -24,7 +24,7 @@ vi.mock('@/lib/api/positions', () => ({
     created_at: '2026-04-07T00:00:00Z',
     updated_at: '2026-04-07T00:00:00Z',
   }),
-  deletePosition: vi.fn().mockResolvedValue(undefined),
+  deleteTicker: vi.fn().mockResolvedValue(undefined),
   searchTickers: vi
     .fn()
     .mockResolvedValue([
@@ -34,7 +34,7 @@ vi.mock('@/lib/api/positions', () => ({
 
 afterEach(() => vi.clearAllMocks());
 
-const EDIT_TARGET: PositionResponse = {
+const EDIT_TARGET: TickerResponse = {
   id: 1,
   ticker: 'AAPL',
   company_name: 'Apple Inc.',

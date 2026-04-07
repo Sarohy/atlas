@@ -8,8 +8,8 @@ export const handlers = [
     return HttpResponse.json({ status: 'ok', service: 'atlas-backend' });
   }),
 
-  // ── Positions ────────────────────────────────────────────────────────────
-  http.get(`${BASE}/api/v1/positions`, () => {
+  // ── Tickers ────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/tickers`, () => {
     return HttpResponse.json([
       {
         id: 1,
@@ -22,7 +22,7 @@ export const handlers = [
     ]);
   }),
 
-  http.post(`${BASE}/api/v1/positions`, () => {
+  http.post(`${BASE}/api/v1/tickers`, () => {
     return HttpResponse.json(
       {
         id: 2,
@@ -36,7 +36,7 @@ export const handlers = [
     );
   }),
 
-  http.patch(`${BASE}/api/v1/positions/:id`, () => {
+  http.patch(`${BASE}/api/v1/tickers/:id`, () => {
     return HttpResponse.json({
       id: 1,
       ticker: 'AAPL',
@@ -47,7 +47,7 @@ export const handlers = [
     });
   }),
 
-  http.delete(`${BASE}/api/v1/positions/:id`, () => {
+  http.delete(`${BASE}/api/v1/tickers/:id`, () => {
     return new HttpResponse(null, { status: 204 });
   }),
 

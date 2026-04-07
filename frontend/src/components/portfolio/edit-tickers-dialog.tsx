@@ -6,13 +6,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import {
-  usePositions,
-  useUpdatePosition,
-  useDeletePosition,
-  useCreatePosition,
-} from '@/lib/hooks/use-positions';
+  useTickers,
+  useUpdateTicker,
+  useDeleteTicker,
+  useCreateTicker,
+} from '@/lib/hooks/use-tickers';
 import { TickerSearch } from './ticker-search';
-import type { PositionResponse, TickerSearchResult } from '@/lib/schemas/position';
+import type { TickerResponse, TickerSearchResult } from '@/lib/schemas/ticker';
 
 interface EditTickersDialogProps {
   open: boolean;
@@ -129,12 +129,12 @@ function IconPlus({ className }: { className?: string }) {
 
 // ─── Position card ───────────────────────────────────────────────────────────
 
-function PositionCard({ position, index }: { position: PositionResponse; index: number }) {
+function PositionCard({ position, index }: { position: TickerResponse; index: number }) {
   const [mode, setMode] = useState<'view' | 'edit' | 'confirmDelete'>('view');
   const [sharesInput, setSharesInput] = useState(String(position.shares));
   const inputRef = useRef<HTMLInputElement>(null);
-  const { mutate: update, isPending: saving } = useUpdatePosition();
-  const { mutate: del, isPending: deleting } = useDeletePosition();
+  const { mutate: update, isPending: saving } = useUpdateTicker();
+  const { mutate: del, isPending: deleting } = useDeleteTicker();
   const accent = ACCENTS[index % ACCENTS.length];
 
   useEffect(() => {
@@ -316,7 +316,7 @@ function AddPositionPanel() {
   const [open, setOpen] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState<TickerSearchResult | null>(null);
   const sharesRef = useRef<HTMLInputElement | null>(null);
-  const { mutate: create, isPending } = useCreatePosition();
+  const { mutate: create, isPending } = useCreateTicker();
 
   const {
     register,
@@ -455,7 +455,7 @@ function AddPositionPanel() {
 // ─── Main dialog ─────────────────────────────────────────────────────────────
 
 export function EditTickersDialog({ open, onClose }: EditTickersDialogProps) {
-  const { data: positions, isLoading } = usePositions();
+  const { data: positions, isLoading } = useTickers();
   const count = positions?.length ?? 0;
 
   if (!open) return null;

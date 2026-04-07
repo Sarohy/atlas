@@ -31,7 +31,7 @@ describe('PortfolioTable', () => {
   });
 
   it('renders the empty state when no positions are returned', async () => {
-    server.use(http.get('http://localhost:8000/api/v1/positions', () => HttpResponse.json([])));
+    server.use(http.get('http://localhost:8000/api/v1/tickers', () => HttpResponse.json([])));
     render(<PortfolioTable />, { wrapper });
     await waitFor(() => expect(screen.getByText(/No positions/i)).toBeInTheDocument());
   });

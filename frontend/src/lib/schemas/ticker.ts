@@ -7,17 +7,17 @@ export const tickerSearchResultSchema = z.object({
   type: z.string(),
 });
 
-export const positionSchema = z.object({
+export const tickerSchema = z.object({
   ticker: z.string().min(1).max(20),
   company_name: z.string().min(1),
   shares: z.coerce.number().gt(0),
 });
 
-export const positionUpdateSchema = z.object({
+export const tickerUpdateSchema = z.object({
   shares: z.coerce.number().gt(0),
 });
 
-export const positionResponseSchema = z.object({
+export const tickerResponseSchema = z.object({
   id: z.number(),
   ticker: z.string(),
   company_name: z.string(),
@@ -35,6 +35,6 @@ export const positionResponseSchema = z.object({
 });
 
 export type TickerSearchResult = z.infer<typeof tickerSearchResultSchema>;
-export type Position = z.infer<typeof positionSchema>;
-export type PositionUpdate = z.infer<typeof positionUpdateSchema>;
-export type PositionResponse = z.infer<typeof positionResponseSchema>;
+export type Ticker = z.infer<typeof tickerSchema>;
+export type TickerUpdate = z.infer<typeof tickerUpdateSchema>;
+export type TickerResponse = z.infer<typeof tickerResponseSchema>;

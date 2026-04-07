@@ -1,4 +1,4 @@
-"""Pydantic schemas for portfolio positions and Polygon ticker search."""
+"""Pydantic schemas for portfolio tickers and Polygon ticker search."""
 
 from datetime import datetime
 from decimal import Decimal
@@ -15,8 +15,8 @@ class TickerSearchResult(BaseModel):
     type: str
 
 
-class PositionCreate(BaseModel):
-    """Payload to create a new portfolio position."""
+class TickerCreate(BaseModel):
+    """Payload to create a new portfolio ticker."""
 
     ticker: str = Field(min_length=1, max_length=20)
     company_name: str = Field(min_length=1, max_length=200)
@@ -39,14 +39,14 @@ class PositionCreate(BaseModel):
         return stripped
 
 
-class PositionUpdate(BaseModel):
-    """Payload to update the share count for an existing position."""
+class TickerUpdate(BaseModel):
+    """Payload to update the share count for an existing ticker."""
 
     shares: Decimal = Field(gt=Decimal("0"))
 
 
-class PositionResponse(BaseModel):
-    """API response shape for a portfolio position."""
+class TickerResponse(BaseModel):
+    """API response shape for a portfolio ticker."""
 
     model_config = ConfigDict(from_attributes=True)
 

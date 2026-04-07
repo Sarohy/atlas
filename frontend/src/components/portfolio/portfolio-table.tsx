@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { useTickers, useDeleteTicker, useSyncTickers } from '@/lib/hooks/use-tickers';
+import { useTickers, useDeleteTicker } from '@/lib/hooks/use-tickers';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 import { AddPositionDialog } from './add-position-dialog';
 
@@ -123,7 +123,6 @@ function PositionRow({ position, onEdit }: RowProps) {
 
 export function PortfolioTable() {
   const { data: positions, isLoading } = useTickers();
-  const { mutate: sync, isPending: isSyncing, error: syncError } = useSyncTickers();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TickerResponse | null>(null);
 
@@ -154,33 +153,7 @@ export function PortfolioTable() {
             ? `Last synced: ${new Date(lastSynced).toLocaleTimeString()}`
             : 'Market data not yet synced'}
         </span>
-        <button
-          onClick={() => sync()}
-          disabled={isSyncing || isLoading}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-bold bg-[#1e2a3f] border border-[#2d3f5c] text-[#4a90d9] rounded hover:bg-[#253450] transition-colors disabled:opacity-40"
-        >
-          <svg
-            className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-          {isSyncing ? 'Syncing…' : 'Sync Prices'}
-        </button>
       </div>
-
-      {syncError && (
-        <p className="mb-2 text-xs text-[#f87171]">
-          Sync failed: {syncError instanceof Error ? syncError.message : 'Unknown error'}
-        </p>
-      )}
 
       <div className="rounded border border-[#1e2a3f] overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">

@@ -18,7 +18,7 @@ export function PortfolioScreen({ data }: PortfolioScreenProps) {
       <AtlasHeader appTitle={data.appTitle} />
       <AtlasNavigation labels={data.navItems} />
       <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail sections={data.holdingsSections} />
+        <AtlasHoldingsRail />
         <main className="atlas-portfolio-main">
           <AtlasMetricsGrid cards={data.metricCards} />
           <div className="atlas-portfolio-main-grid">

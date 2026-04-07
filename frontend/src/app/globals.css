@@ -1,95 +1,29 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 @import '../styles/auth.css';
 @import '../styles/daily-briefing.css';
 @import '../styles/frameworks.css';
 @import '../styles/portfolio.css';
 
-/* ── ATLAS design tokens ────────────────────────────────────────────────────
-   All colours from Color_Palette_Design_Direction.md v1.0
-   Base spacing unit: 4px (xs=4, sm=8, md=16, lg=24, xl=32, 2xl=48)
-   Fonts: IBM Plex Mono (display/numbers) · Inter (body/UI)
-   ────────────────────────────────────────────────────────────────────────── */
-
 :root {
-  /* Background */
-  --atlas-bg-primary: #0a0e1a;
-  --atlas-bg-secondary: #0f1524;
-  --atlas-bg-tertiary: #161d2f;
-  --atlas-bg-elevated: #1c2438;
-
-  /* Text */
-  --atlas-text-primary: #e8edf5;
-  --atlas-text-secondary: #8a95a8;
-  --atlas-text-muted: #4a5568;
-  --atlas-text-inverse: #0a0e1a;
-
-  /* Status — carry framework meaning, never use decoratively */
-  --atlas-crisis-red: #e53e3e;
-  --atlas-crisis-red-bg: #2d1515;
-  --atlas-caution-amber: #dd6b20;
-  --atlas-caution-amber-bg: #2d1f0f;
-  --atlas-partial-yellow: #d69e2e;
-  --atlas-partial-yellow-bg: #2d250a;
-  --atlas-deploy-green: #38a169;
-  --atlas-deploy-green-bg: #0f2318;
-
-  /* Data */
-  --atlas-price-up: #48bb78;
-  --atlas-price-down: #fc8181;
-  --atlas-neutral: #a0aec0;
-  --atlas-conviction-high: #4299e1;
-  --atlas-conviction-mid: #ecc94b;
-  --atlas-conviction-low: #fc8181;
-
-  /* Borders */
-  --atlas-border-subtle: #1e2a3f;
-  --atlas-border-emphasis: #2d3f5c;
-  --atlas-border-accent: #4a6fa5;
-
-  /* Accents */
-  --atlas-accent: #4a90d9;
-  --atlas-accent-hover: #3a7bc8;
-  --atlas-accent-secondary: #667eea;
-
-  /* Typography */
-  --font-display: 'IBM Plex Mono', monospace;
-  --font-body: 'Inter', system-ui, sans-serif;
-
-  /* Tailwind v4 theme overrides */
-  --color-background: var(--atlas-bg-primary);
-  --color-foreground: var(--atlas-text-primary);
-  --font-sans: var(--font-body);
-  --font-mono: var(--font-display);
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
-/* ── Base styles ────────────────────────────────────────────────────────── */
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
-html {
-  background-color: var(--atlas-bg-primary);
-  color: var(--atlas-text-primary);
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
 }
 
 body {
-  font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.5;
-  background-color: var(--atlas-bg-primary);
-  color: var(--atlas-text-primary);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* Numbers, tickers, and prices use the monospace display font */
-.font-mono,
-.tabular-nums {
-  font-family: var(--font-display);
   background: #0b1120;
   color: var(--foreground);
   font-family: var(--font-inter), Arial, Helvetica, sans-serif;

@@ -7,9 +7,10 @@ import type { TickerSearchResult } from '@/lib/schemas/position';
 
 interface TickerSearchProps {
   onSelect: (ticker: TickerSearchResult) => void;
+  autoFocus?: boolean;
 }
 
-export function TickerSearch({ onSelect }: TickerSearchProps) {
+export function TickerSearch({ onSelect, autoFocus }: TickerSearchProps) {
   const [query, setQuery] = useState('');
   const { data: results, isFetching } = useTickerSearch(query);
 
@@ -27,6 +28,7 @@ export function TickerSearch({ onSelect }: TickerSearchProps) {
         className="w-full px-3 py-2 bg-[#0d1421] border border-[#2d3f5c] rounded text-[#e8edf5] placeholder-[#4a5568] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors"
         autoComplete="off"
         spellCheck={false}
+        autoFocus={autoFocus}
       />
       {isFetching && (
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4a5568] text-xs">…</span>

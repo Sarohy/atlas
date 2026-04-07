@@ -5,7 +5,8 @@ import {
   AtlasNavigation,
 } from '@/components/atlas/atlas-chrome';
 import { cn } from '@/lib/utils';
-import type { PortfolioMetricCard, PortfolioScreenData, PortfolioTicker } from '@/types/portfolio';
+import type { PortfolioMetricCard, PortfolioScreenData } from '@/types/portfolio';
+import { PortfolioTickersPanel } from './portfolio-tickers-panel';
 
 type PortfolioScreenProps = {
   data: PortfolioScreenData;
@@ -21,11 +22,7 @@ export function PortfolioScreen({ data }: PortfolioScreenProps) {
         <main className="atlas-portfolio-main">
           <AtlasMetricsGrid cards={data.metricCards} />
           <div className="atlas-portfolio-main-grid">
-            <TickerPanel
-              editorLabel={data.tickerEditorLabel}
-              tickers={data.tickers}
-              title={data.tickerPanelTitle}
-            />
+            <PortfolioTickersPanel />
             <CashPanel
               actionLabel={data.cashPanel.actionLabel}
               balanceLabel={data.cashPanel.balanceLabel}
@@ -63,47 +60,6 @@ function AtlasMetricsGrid({ cards }: { cards: readonly PortfolioMetricCard[] }) 
           <p className="atlas-portfolio-metric-detail">{card.detail}</p>
         </article>
       ))}
-    </section>
-  );
-}
-
-function TickerPanel({
-  editorLabel,
-  tickers,
-  title,
-}: {
-  editorLabel: string;
-  tickers: readonly PortfolioTicker[];
-  title: string;
-}) {
-  return (
-    <section className="atlas-portfolio-panel">
-      <div className="atlas-portfolio-panel-header">
-        <h2 className="atlas-portfolio-panel-title">{title}</h2>
-        <button className="atlas-portfolio-link" type="button">
-          {editorLabel}
-        </button>
-      </div>
-      <div className="atlas-portfolio-ticker-list">
-        {tickers.map((ticker, index) => (
-          <article
-            className="atlas-portfolio-ticker"
-            key={`${ticker.symbol}-${ticker.label}-${index}`}
-          >
-            <div className="atlas-portfolio-ticker-badge">{ticker.symbol.slice(0, 1)}</div>
-            <div className="atlas-portfolio-ticker-copy">
-              <p className="atlas-portfolio-ticker-symbol">{ticker.symbol}</p>
-              <p className="atlas-portfolio-ticker-label">{ticker.label}</p>
-            </div>
-            <div className="atlas-portfolio-ticker-metrics">
-              <p className="atlas-portfolio-ticker-price">{ticker.price}</p>
-              <p className={cn('atlas-portfolio-ticker-change', `is-${ticker.changeTone}`)}>
-                {ticker.change}
-              </p>
-            </div>
-          </article>
-        ))}
-      </div>
     </section>
   );
 }

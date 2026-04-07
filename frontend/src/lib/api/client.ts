@@ -52,10 +52,7 @@ export async function apiFetch<T>(
       // Fall back to the HTTP status message when no JSON body is available.
     }
 
-    throw new ApiError(
-      response.status,
-      errorMessage,
-    );
+    throw new ApiError(response.status, errorMessage);
   }
 
   const json: unknown = await response.json();

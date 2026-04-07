@@ -2,7 +2,6 @@
 
 from pydantic import BaseModel, Field, field_validator
 
-
 EMAIL_SEPARATOR = "@"
 
 
@@ -26,4 +25,10 @@ class SignInResponse(BaseModel):
     """Response payload for a successful sign-in."""
 
     email: str
+    message: str
+
+
+class LogoutResponse(BaseModel):
+    """Response payload for a successful logout."""
+
     message: str

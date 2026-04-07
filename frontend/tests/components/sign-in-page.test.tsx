@@ -3,7 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import Home from '@/app/page';
+import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
+import SignInPage from '@/app/auth/sign-in/page';
 
 function setViewportWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', {
@@ -32,13 +33,21 @@ function setViewportWidth(width: number) {
   });
 }
 
-describe('Home sign-in page', () => {
+describe('Sign-in page', () => {
   beforeEach(() => {
     setViewportWidth(1280);
   });
 
+  function renderPage() {
+    return render(
+      <AuthSessionProvider>
+        <SignInPage />
+      </AuthSessionProvider>,
+    );
+  }
+
   it('renders the ATLAS sign-in experience and hero artwork', () => {
-    render(<Home />);
+    renderPage();
 
     expect(screen.getByTestId('atlas-auth-page')).toBeInTheDocument();
     expect(screen.getByText('ATLAS v7.0')).toBeInTheDocument();
@@ -52,7 +61,7 @@ describe('Home sign-in page', () => {
   it('uses the mobile layout at 1024px to avoid cropping the atlas hero artwork', () => {
     setViewportWidth(1024);
 
-    render(<Home />);
+    renderPage();
 
     expect(screen.queryByAltText('ATLAS market globe')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
@@ -62,7 +71,7 @@ describe('Home sign-in page', () => {
   it('validates email, toggles password visibility, remembers the user, and shows loading state', async () => {
     const user = userEvent.setup();
 
-    render(<Home />);
+    renderPage();
 
     await user.type(screen.getByLabelText('Email address'), 'invalid-email');
     await user.type(screen.getByLabelText('Password'), 'topsecret');
@@ -108,7 +117,7 @@ describe('Home sign-in page', () => {
   it('submits valid credentials to the sign-in api and clears loading state on success', async () => {
     const user = userEvent.setup();
 
-    render(<Home />);
+    renderPage();
 
     await user.type(screen.getByLabelText('Email address'), 'admin@atlas.com');
     await user.type(screen.getByLabelText('Password'), 'admin@123');
@@ -133,7 +142,7 @@ describe('Home sign-in page', () => {
       }),
     );
 
-    render(<Home />);
+    renderPage();
 
     await user.type(screen.getByLabelText('Email address'), 'admin@atlas.com');
     await user.type(screen.getByLabelText('Password'), 'wrong-password');

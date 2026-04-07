@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { InputField } from '@/components/ui/input-field';
+import { useAuthSession } from '@/components/auth/auth-session-provider';
 import { useSignIn } from '@/lib/hooks/use-sign-in';
 
 const signInSchema = z.object({
@@ -18,6 +19,18 @@ export function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [validationMessage, setValidationMessage] = useState('');
   const { clearError, errorMessage, isSubmitting, signInResponse, submit } = useSignIn();
+  const { signIn } = useAuthSession();
+
+  useEffect(() => {
+    if (signInResponse === null) {
+      return;
+    }
+
+    void signIn({
+      email: signInResponse.email,
+      rememberMe,
+    });
+  }, [rememberMe, signIn, signInResponse]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

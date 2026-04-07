@@ -1,5 +1,8 @@
-import { SignInScreen } from '@/components/auth/sign-in-screen';
+import { PortfolioScreen } from '@/components/portfolio/portfolio-screen';
+import { loadPortfolioScreenData } from '@/lib/api/portfolio';
 
-export default function Home() {
-  return <SignInScreen />;
+export default async function Home() {
+  const portfolioScreenData = await loadPortfolioScreenData();
+
+  return <PortfolioScreen data={portfolioScreenData} />;
 }

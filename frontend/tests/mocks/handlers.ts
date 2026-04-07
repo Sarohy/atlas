@@ -17,4 +17,11 @@ export const handlers = [
 
     return HttpResponse.json({ detail: 'Invalid email or password.' }, { status: 401 });
   }),
+  http.post('http://localhost:8000/api/v1/auth/logout', async () => {
+    await delay(100);
+
+    return HttpResponse.json({
+      message: 'Logout successful.',
+    });
+  }),
 ];

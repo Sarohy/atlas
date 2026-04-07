@@ -62,3 +62,17 @@ async def test_sign_in_rejects_invalid_credentials() -> None:
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid email or password."}
+
+
+async def test_logout_returns_success_message() -> None:
+    """POST /api/v1/auth/logout returns a successful logout response."""
+    app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post("/api/v1/auth/logout")
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "Logout successful."}

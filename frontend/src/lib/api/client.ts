@@ -22,12 +22,16 @@ export class ApiValidationError extends Error {
 const BASE_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:8000';
 
 /**
- * Typed fetch wrapper.
+ * Typed GET / POST / PATCH fetch wrapper.
  * Throws ApiError on non-2xx responses, ApiValidationError on schema mismatch.
  */
-export async function apiFetch<T>(path: string, schema: ZodSchema<T>): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  schema: ZodSchema<T>,
+  options?: RequestInit,
+): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const response = await fetch(url);
+  const response = await fetch(url, options);
 
   if (!response.ok) {
     throw new ApiError(
@@ -44,4 +48,43 @@ export async function apiFetch<T>(path: string, schema: ZodSchema<T>): Promise<T
   }
 
   return parsed.data;
+}
+
+/**
+ * Mutation wrapper for endpoints that return no body (e.g. DELETE → 204).
+ * Throws ApiError on non-2xx responses.
+ */
+export async function apiFetchEmpty(path: string, options?: RequestInit): Promise<void> {
+  const url = `${BASE_URL}${path}`;
+  const response = await fetch(url, options);
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      `Request failed: ${response.status} ${response.statusText}`,
+    );
+  }
+}
+
+/** Convenience: POST with a JSON body, expecting a typed response. */
+export function apiPost<T>(path: string, schema: ZodSchema<T>, body: unknown): Promise<T> {
+  return apiFetch(path, schema, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Convenience: PATCH with a JSON body, expecting a typed response. */
+export function apiPatch<T>(path: string, schema: ZodSchema<T>, body: unknown): Promise<T> {
+  return apiFetch(path, schema, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Convenience: DELETE with no request body, no response body. */
+export function apiDelete(path: string): Promise<void> {
+  return apiFetchEmpty(path, { method: 'DELETE' });
 }

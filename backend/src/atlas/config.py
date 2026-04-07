@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")
     database_url: str = Field(default="postgresql+asyncpg://localhost:5432/atlas_dev")
 
+    # Polygon.io API key — required for ticker search
+    polygon_api_key: str = Field(default="")
+
 
 def get_settings() -> Settings:
     """Return a Settings instance (cached via dependency injection in prod)."""

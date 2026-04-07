@@ -1,11 +1,21 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import FrameworksPage from '@/app/frameworks/page';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
 
+function wrapper(children: React.ReactNode) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <AuthSessionProvider>{children}</AuthSessionProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe('Frameworks page', () => {
   async function renderPage() {
-    render(<AuthSessionProvider>{await FrameworksPage()}</AuthSessionProvider>);
+    render(wrapper(await FrameworksPage()));
   }
 
   it('renders the frameworks shell with the frameworks nav item active', async () => {

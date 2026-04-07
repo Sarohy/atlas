@@ -21,7 +21,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
       <AtlasHeader appTitle={data.appTitle} />
       <AtlasNavigation labels={data.navItems} />
       <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail sections={data.holdingsSections} />
+        <AtlasHoldingsRail />
         <main className="atlas-portfolio-main atlas-frameworks-main">
           <section className="atlas-frameworks-overview">
             {data.overviewCards.map((card) => (
@@ -35,12 +35,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
             ))}
           </section>
         </main>
-        <AtlasActionsRail
-          actions={data.actions}
-          summaryRows={data.summaryRows}
-          summaryTitle={data.summaryTitle}
-          title={data.actionsTitle}
-        />
+        <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
       </div>
     </div>
   );

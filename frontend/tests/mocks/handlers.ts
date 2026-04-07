@@ -51,7 +51,7 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // ── Ticker search ─────────────────────────────────────────────────────────
+  // ── Ticker search ─────────────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/tickers/search`, () => {
     return HttpResponse.json([
       { ticker: 'AAPL', name: 'Apple Inc.', market: 'stocks', type: 'CS' },
@@ -59,6 +59,38 @@ export const handlers = [
     ]);
   }),
 
+  // ── Portfolio ─────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/portfolio/summary`, () => {
+    return HttpResponse.json({
+      total_nav: 23900000,
+      invested_value: 20315000,
+      invested_pct: 85.0,
+      cash_balance: 3585000,
+      cash_pct: 15.0,
+      cash_floor: 2390000,
+      cash_floor_pct: 10.0,
+      deployable: 1195000,
+      day_change: -420000,
+      beta_total: 1.09,
+      beta_invested: 1.4,
+    });
+  }),
+
+  http.get(`${BASE}/api/v1/portfolio/cash`, () => {
+    return HttpResponse.json({
+      cash_balance: 3585000,
+      cash_floor_pct: 0.1,
+    });
+  }),
+
+  http.put(`${BASE}/api/v1/portfolio/cash`, () => {
+    return HttpResponse.json({
+      cash_balance: 3585000,
+      cash_floor_pct: 0.1,
+    });
+  }),
+
+  // ── Auth ──────────────────────────────────────────────────────────────────────
   http.post('http://localhost:8000/api/v1/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
     await delay(150);

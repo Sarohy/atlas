@@ -2,12 +2,22 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
 import DailyBriefingPage from '@/app/daily-briefing/page';
 
+function wrapper(children: React.ReactNode) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <AuthSessionProvider>{children}</AuthSessionProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe('Daily briefing page', () => {
   async function renderPage() {
-    render(<AuthSessionProvider>{await DailyBriefingPage()}</AuthSessionProvider>);
+    render(wrapper(await DailyBriefingPage()));
   }
 
   it('renders the daily briefing shell with the daily briefing nav item active', async () => {

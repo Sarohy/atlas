@@ -99,6 +99,15 @@ export function apiPatch<T>(path: string, schema: ZodSchema<T>, body: unknown): 
   });
 }
 
+/** Convenience: PUT with a JSON body, expecting a typed response. */
+export function apiPut<T>(path: string, schema: ZodSchema<T>, body: unknown): Promise<T> {
+  return apiFetch(path, schema, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 /** Convenience: DELETE with no request body, no response body. */
 export function apiDelete(path: string): Promise<void> {
   return apiFetchEmpty(path, { method: 'DELETE' });

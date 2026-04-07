@@ -24,7 +24,7 @@ export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
       <AtlasHeader appTitle={data.appTitle} />
       <AtlasNavigation labels={data.navItems} />
       <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail sections={data.holdingsSections} />
+        <AtlasHoldingsRail />
         <main className="atlas-portfolio-main atlas-briefing-main">
           <section className="atlas-briefing-hero">
             <div>
@@ -104,12 +104,7 @@ export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
             </div>
           </div>
         </main>
-        <AtlasActionsRail
-          actions={data.actions}
-          summaryRows={data.summaryRows}
-          summaryTitle={data.summaryTitle}
-          title={data.actionsTitle}
-        />
+        <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
       </div>
     </div>
   );

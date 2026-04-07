@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '../styles/auth.css';
+@import '../styles/daily-briefing.css';
 @import '../styles/portfolio.css';
 
 :root {

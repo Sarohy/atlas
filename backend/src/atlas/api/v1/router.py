@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter
 
-from atlas.api.v1 import health, positions, tickers
+from atlas.api.v1 import auth, health, positions, tickers
 
 router = APIRouter()
+router.include_router(auth.router, tags=["auth"])
 router.include_router(health.router, tags=["health"])
 router.include_router(positions.router)
 router.include_router(tickers.router)

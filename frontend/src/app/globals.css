@@ -1,6 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 @import '../styles/auth.css';
+@import '../styles/daily-briefing.css';
+@import '../styles/frameworks.css';
+@import '../styles/portfolio.css';
 
 /* ── ATLAS design tokens ────────────────────────────────────────────────────
    All colours from Color_Palette_Design_Direction.md v1.0
@@ -87,4 +90,7 @@ body {
 .font-mono,
 .tabular-nums {
   font-family: var(--font-display);
+  background: #0b1120;
+  color: var(--foreground);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
 }

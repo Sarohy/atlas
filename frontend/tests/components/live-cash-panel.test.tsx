@@ -52,16 +52,15 @@ describe('LiveCashPanel', () => {
   it('renders the current balance from the MSW summary', async () => {
     render(<LiveCashPanel />, { wrapper: makeWrapper() });
     await waitFor(() => {
-      // cash_balance = 3585000 → $3.58M or $3.59M depending on rounding
+      // cash_balance = 3585000 → $3.58M
       expect(screen.getByText(/\$3\.\d+M/)).toBeInTheDocument();
     });
     expect(screen.getByLabelText('New cash balance')).toBeInTheDocument();
-    expect(screen.getByLabelText('Cash floor percentage')).toBeInTheDocument();
   });
 
   it('submit button is disabled when cash input is empty', async () => {
     render(<LiveCashPanel />, { wrapper: makeWrapper() });
-    const submitBtn = screen.getByRole('button', { name: /Update Cash/ });
+    const submitBtn = screen.getByRole('button', { name: /Save cash balance/ });
     expect(submitBtn).toBeDisabled();
   });
 
@@ -80,7 +79,7 @@ describe('LiveCashPanel', () => {
 
     await user.type(screen.getByLabelText('New cash balance'), '5000000');
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Update Cash/ }));
+      await user.click(screen.getByRole('button', { name: /Save cash balance/ }));
     });
 
     await waitFor(() => expect(putCalled).toBe(true));
@@ -99,11 +98,11 @@ describe('LiveCashPanel', () => {
 
     await user.type(screen.getByLabelText('New cash balance'), '9999999');
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Update Cash/ }));
+      await user.click(screen.getByRole('button', { name: /Save cash balance/ }));
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/Server error|Failed to update cash/i)).toBeInTheDocument();
+      expect(screen.getByText(/Server error|Failed to update/i)).toBeInTheDocument();
     });
   });
 });

@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
 import { apiFetch, apiPost, apiDelete } from '@/lib/api/client';
-import {
-  watchlistItemResponseSchema,
-  type WatchlistItemResponse,
-} from '@/lib/schemas/watchlist';
+import { watchlistItemResponseSchema, type WatchlistItemResponse } from '@/lib/schemas/watchlist';
 
 export function fetchWatchlist(): Promise<WatchlistItemResponse[]> {
   return apiFetch('/api/v1/watchlist', z.array(watchlistItemResponseSchema));

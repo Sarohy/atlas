@@ -72,9 +72,7 @@ function WatchlistRow({ item }: RowProps) {
 
   return (
     <tr className="border-b border-[#1e2a3f] hover:bg-[#111827] transition-colors">
-      <td className="px-4 py-3 font-mono font-bold tracking-wider text-[#e8edf5]">
-        {item.ticker}
-      </td>
+      <td className="px-4 py-3 font-mono font-bold tracking-wider text-[#e8edf5]">{item.ticker}</td>
       <td className="px-4 py-3 text-[#8a95a8] text-sm">{item.company_name}</td>
       <td className="px-4 py-3 font-mono text-right text-[#e8edf5]">
         {fmtPrice(item.current_price)}
@@ -176,10 +174,7 @@ export function WatchlistTable() {
               items.map((item) => <WatchlistRow key={item.id} item={item} />)
             ) : (
               <tr>
-                <td
-                  colSpan={COLUMN_COUNT}
-                  className="px-4 py-12 text-center text-[#4a5568]"
-                >
+                <td colSpan={COLUMN_COUNT} className="px-4 py-12 text-center text-[#4a5568]">
                   No tickers on the watchlist — add one to start monitoring.
                 </td>
               </tr>

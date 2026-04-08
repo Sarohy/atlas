@@ -21,10 +21,7 @@ export function AddWatchlistDialog({ open, onClose }: AddWatchlistDialogProps) {
 
   function handleAdd() {
     if (!selected) return;
-    add(
-      { ticker: selected.ticker, company_name: selected.name },
-      { onSuccess: handleClose },
-    );
+    add({ ticker: selected.ticker, company_name: selected.name }, { onSuccess: handleClose });
   }
 
   if (!open) return null;

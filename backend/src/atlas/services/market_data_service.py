@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.models.ticker import Ticker
+from atlas.models.watchlist import WatchlistItem
 
 # ---------------------------------------------------------------------------
 # Polygon endpoint templates
@@ -119,6 +120,44 @@ class MarketDataService:
             self._apply_market_data(ticker, snap, agg_bars, beta, now)
 
         return tickers
+
+    async def sync_watchlist_items(self) -> list[WatchlistItem]:
+        """Fetch live quotes + beta for all watchlist items; persist to DB.
+
+        Uses the same two-phase strategy as ``sync_tickers``:
+          Phase 1: batch snapshot for current price, previous close, day change.
+          Phase 2: 365-day daily agg bars for SPY and each ticker for beta.
+        """
+        result = await self._session.execute(select(WatchlistItem).order_by(WatchlistItem.ticker))
+        items: list[WatchlistItem] = list(result.scalars().all())
+
+        if not items:
+            return []
+
+        to_date = date.today()
+        from_date = to_date - timedelta(days=_LOOKBACK_DAYS)
+
+        snapshot_map = await self._fetch_snapshot_batch([i.ticker for i in items])
+
+        spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
+        spy_close_by_ts = self._build_close_map(spy_bars)
+
+        semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+        async def _fetch_one(item: WatchlistItem) -> tuple[WatchlistItem, list[dict]]:  # type: ignore[type-arg]
+            async with semaphore:
+                bars = await self._fetch_raw_bars(item.ticker, from_date, to_date)
+            return item, bars
+
+        agg_pairs = await asyncio.gather(*(_fetch_one(i) for i in items))
+
+        now = datetime.now(tz=timezone.utc)
+        for item, agg_bars in agg_pairs:
+            snap = snapshot_map.get(item.ticker)
+            beta = self._compute_beta(agg_bars, spy_close_by_ts)
+            self._apply_watchlist_market_data(item, snap, agg_bars, beta, now)
+
+        return items
 
     # ------------------------------------------------------------------
     # Private helpers — network
@@ -348,3 +387,71 @@ class MarketDataService:
         ticker.day_change = day_change
         ticker.day_change_pct = day_change_pct
         ticker.position_value = current_price * ticker.shares
+
+    @staticmethod
+    def _apply_watchlist_market_data(
+        item: WatchlistItem,
+        snapshot: dict | None,  # type: ignore[type-arg]
+        agg_bars: list[dict],  # type: ignore[type-arg]
+        beta: Decimal | None,
+        now: datetime,
+    ) -> None:
+        """Write price data and beta onto a WatchlistItem instance (no flush).
+
+        Identical price-source priority to ``_apply_market_data`` except there
+        is no position value to compute (watchlist items carry no share count).
+        """
+
+        def to_dec(value: object) -> Decimal | None:
+            if value is None:
+                return None
+            try:
+                return Decimal(str(value))
+            except InvalidOperation:
+                return None
+
+        current_price: Decimal | None = None
+        previous_close: Decimal | None = None
+        day_change: Decimal | None = None
+        day_change_pct: Decimal | None = None
+
+        if snapshot is not None:
+            day = snapshot.get("day") or {}
+            prev_day = snapshot.get("prevDay") or {}
+
+            current_price = to_dec(day.get("c"))
+            previous_close = to_dec(prev_day.get("c"))
+            day_change = to_dec(snapshot.get("todaysChange"))
+            day_change_pct = to_dec(snapshot.get("todaysChangePerc"))
+
+            if current_price is None and agg_bars:
+                current_price = to_dec(agg_bars[-1].get("c"))
+
+        elif agg_bars:
+            latest = agg_bars[-1]
+            current_price = to_dec(latest.get("c"))
+            previous_close = (
+                to_dec(agg_bars[-2].get("c"))
+                if len(agg_bars) >= 2
+                else to_dec(latest.get("o"))
+            )
+
+        if (
+            day_change is None
+            and current_price is not None
+            and previous_close is not None
+            and previous_close != 0
+        ):
+            day_change = current_price - previous_close
+            day_change_pct = to_dec(float(day_change / previous_close * 100))
+
+        item.beta = beta
+        item.synced_at = now
+
+        if current_price is None:
+            return
+
+        item.current_price = current_price
+        item.previous_close = previous_close
+        item.day_change = day_change
+        item.day_change_pct = day_change_pct

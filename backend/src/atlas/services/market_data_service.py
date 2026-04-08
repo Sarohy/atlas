@@ -1,4 +1,17 @@
-"""Service for syncing live market data from Polygon.io into ticker records."""
+"""Service for syncing live market data from Polygon.io into ticker records.
+
+Paid-tier strategy (two phases):
+
+  Phase 1 — Quotes (⌈N / 250⌉ HTTP requests):
+    Batch snapshot calls return real-time price, previous close and today's
+    change for up to 250 tickers per request.  Paid-tier snapshots reflect
+    the most-recent trade rather than the prior session's close.
+
+  Phase 2 — Beta (N + 1 HTTP requests, concurrency-limited):
+    365-day daily aggregate bars are fetched for SPY (benchmark) and each
+    ticker.  β = Cov(r_ticker, r_spy) / Var(r_spy) is computed on the
+    aligned daily simple-return series using sample statistics (n − 1).
+"""
 
 import asyncio
 import statistics
@@ -11,41 +24,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.models.ticker import Ticker
 
-# Polygon free-tier daily aggregates endpoint — one request per ticker.
-# Snapshot endpoints (/v2/snapshot, /v3/snapshot) require a paid plan.
-_POLYGON_AGGS_URL = "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+# ---------------------------------------------------------------------------
+# Polygon endpoint templates
+# ---------------------------------------------------------------------------
+
+# Paid-tier batch snapshot — returns real-time price, prev close, day change.
+# Accepts up to _SNAPSHOT_BATCH_SIZE comma-separated tickers per request.
+_POLYGON_SNAPSHOT_URL = (
+    "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
+)
+
+# Daily aggregate bars — used exclusively for the rolling beta calculation.
+_POLYGON_AGGS_URL = (
+    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+)
+
+# ---------------------------------------------------------------------------
+# Named constants
+# ---------------------------------------------------------------------------
 
 # 365 calendar days ≈ 252 trading sessions — the standard 1-year beta window.
-# Also provides enough bars for current price (last 2 sessions).
 _LOOKBACK_DAYS = 365
 
-# Market benchmark used for beta calculation.
+# S&P 500 ETF used as the broad-market benchmark in beta calculations.
 _BENCHMARK_TICKER = "SPY"
 
-# Max concurrent Polygon requests — stays within free-tier rate limits.
-_MAX_CONCURRENCY = 5
+# Polygon hard limit on symbols per batch snapshot request.
+_SNAPSHOT_BATCH_SIZE = 250
 
-# Minimum number of aligned return pairs needed to produce a meaningful beta.
+# Max concurrent aggregate requests — paid tier supports substantially higher
+# throughput than the free tier (previously limited to 5 requests/minute).
+_MAX_CONCURRENCY = 20
+
+# Minimum aligned return pairs for a statistically meaningful beta estimate.
+# 30 pairs ≈ 6 weeks of daily data; below this the estimate is unreliable.
 _MIN_RETURN_PAIRS = 30
 
 
 class MarketDataService:
-    """Fetches delayed daily quotes + computes 1-year beta from Polygon free tier."""
+    """Fetches real-time quotes and computes 1-year rolling beta via Polygon."""
 
-    def __init__(self, api_key: str, session: AsyncSession, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        session: AsyncSession,
+        client: httpx.AsyncClient,
+    ) -> None:
         self._api_key = api_key
         self._session = session
         self._client = client
 
-    async def sync_tickers(self) -> list[Ticker]:
-        """Fetch quotes and beta for all tickers; persist to DB.
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        Strategy:
-          1. Load all tickers from DB.
-          2. Fetch 365-day daily bars for SPY once (benchmark for beta).
-          3. Concurrently fetch 365-day bars per ticker.
-          4. For each ticker: extract price data from last 2 bars; compute
-             beta by aligning daily returns with SPY returns.
+    async def sync_tickers(self) -> list[Ticker]:
+        """Fetch live quotes + beta for all tickers; persist to DB.
+
+        Phase 1: batch snapshot call(s) for current price, previous close
+                 and today's dollar/percent change.
+        Phase 2: 365-day daily agg bars for SPY and each ticker to compute
+                 rolling 1-year beta.
         """
         result = await self._session.execute(select(Ticker).order_by(Ticker.ticker))
         tickers: list[Ticker] = list(result.scalars().all())
@@ -56,37 +95,78 @@ class MarketDataService:
         to_date = date.today()
         from_date = to_date - timedelta(days=_LOOKBACK_DAYS)
 
-        # Fetch SPY benchmark first — used by every beta calculation.
-        spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
-        # Build a timestamp → close map for fast O(1) alignment.
-        spy_close_by_ts: dict[int, float] = {b["t"]: b["c"] for b in spy_bars if "t" in b and "c" in b}
+        # Phase 1: batch snapshot — ⌈N/250⌉ requests cover all tickers.
+        snapshot_map = await self._fetch_snapshot_batch([t.ticker for t in tickers])
 
+        # Phase 2: SPY daily bars first (needed by every beta calculation).
+        spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
+        spy_close_by_ts = self._build_close_map(spy_bars)
+
+        # Fetch each ticker's agg bars concurrently (rate-limited by semaphore).
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
 
-        async def fetch_one(ticker: Ticker) -> tuple[Ticker, list[dict]]:  # type: ignore[type-arg]
+        async def _fetch_one(t: Ticker) -> tuple[Ticker, list[dict]]:  # type: ignore[type-arg]
             async with semaphore:
-                bars = await self._fetch_raw_bars(ticker.ticker, from_date, to_date)
-            return ticker, bars
+                bars = await self._fetch_raw_bars(t.ticker, from_date, to_date)
+            return t, bars
 
-        results_pairs = await asyncio.gather(*(fetch_one(t) for t in tickers))
+        agg_pairs = await asyncio.gather(*(_fetch_one(t) for t in tickers))
 
         now = datetime.now(tz=timezone.utc)
-        for ticker, bars in results_pairs:
-            self._apply_market_data(ticker, bars, spy_close_by_ts, now)
+        for ticker, agg_bars in agg_pairs:
+            snap = snapshot_map.get(ticker.ticker)
+            beta = self._compute_beta(agg_bars, spy_close_by_ts)
+            self._apply_market_data(ticker, snap, agg_bars, beta, now)
 
         return tickers
 
     # ------------------------------------------------------------------
-    # Private helpers
+    # Private helpers — network
     # ------------------------------------------------------------------
+
+    async def _fetch_snapshot_batch(
+        self, symbols: list[str]
+    ) -> dict[str, dict]:  # type: ignore[type-arg]
+        """Return a {ticker: snapshot_dict} map via Polygon batch snapshot.
+
+        Splits into ⌈N / _SNAPSHOT_BATCH_SIZE⌉ requests.  Symbols that are
+        not returned by Polygon (e.g. invalid tickers, HTTP errors) are
+        silently omitted from the result dict.
+        """
+        result: dict[str, dict] = {}  # type: ignore[type-arg]
+        for i in range(0, len(symbols), _SNAPSHOT_BATCH_SIZE):
+            chunk = await self._fetch_snapshot_chunk(symbols[i : i + _SNAPSHOT_BATCH_SIZE])
+            result.update(chunk)
+        return result
+
+    async def _fetch_snapshot_chunk(
+        self, symbols: list[str]
+    ) -> dict[str, dict]:  # type: ignore[type-arg]
+        """Fetch one batch snapshot request; return {ticker: snapshot_dict}."""
+        try:
+            response = await self._client.get(
+                _POLYGON_SNAPSHOT_URL,
+                params={"tickers": ",".join(symbols), "apiKey": self._api_key},
+                timeout=15.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            return {}
+
+        payload: dict = response.json()  # type: ignore[type-arg]
+        return {
+            snap["ticker"]: snap
+            for snap in payload.get("tickers", [])
+            if "ticker" in snap
+        }
 
     async def _fetch_raw_bars(
         self, ticker: str, from_date: date, to_date: date
     ) -> list[dict]:  # type: ignore[type-arg]
-        """Return raw OHLCV bar dicts from Polygon for the given date range.
+        """Return OHLCV bar dicts from Polygon daily aggregates endpoint.
 
-        Each bar dict contains at minimum: ``t`` (ms timestamp), ``c`` (close),
-        ``o`` (open). Returns an empty list on any error.
+        Bars are sorted ascending by timestamp (``sort=asc``).  Returns an
+        empty list on any HTTP error so callers degrade gracefully.
         """
         url = _POLYGON_AGGS_URL.format(
             ticker=ticker,
@@ -96,7 +176,12 @@ class MarketDataService:
         try:
             response = await self._client.get(
                 url,
-                params={"adjusted": "true", "sort": "asc", "limit": "500", "apiKey": self._api_key},
+                params={
+                    "adjusted": "true",
+                    "sort": "asc",
+                    "limit": "500",
+                    "apiKey": self._api_key,
+                },
                 timeout=15.0,
             )
             response.raise_for_status()
@@ -104,38 +189,64 @@ class MarketDataService:
             return []
 
         payload: dict = response.json()  # type: ignore[type-arg]
-        return payload.get("results", [])  # type: ignore[type-arg]
+        return payload.get("results", [])
+
+    # ------------------------------------------------------------------
+    # Private helpers — computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_close_map(
+        bars: list[dict],  # type: ignore[type-arg]
+    ) -> dict[int, float]:
+        """Build a {unix_ms_timestamp: close_price} map from daily agg bars."""
+        close_map: dict[int, float] = {}
+        for bar in bars:
+            ts = bar.get("t")
+            close = bar.get("c")
+            if ts is not None and close is not None:
+                close_map[int(ts)] = float(close)
+        return close_map
 
     @staticmethod
     def _compute_beta(
         ticker_bars: list[dict],  # type: ignore[type-arg]
         spy_close_by_ts: dict[int, float],
     ) -> Decimal | None:
-        """Compute rolling 1-year beta vs SPY using daily log-like returns.
+        """Compute rolling 1-year beta vs SPY using daily simple returns.
 
-        Beta = Cov(ticker_returns, spy_returns) / Var(spy_returns)
+        β = Cov(r_ticker, r_spy) / Var(r_spy)
 
-        Only trading days present in *both* series are used (inner join on
-        timestamp). Returns None if fewer than _MIN_RETURN_PAIRS pairs exist.
+        Uses ``statistics.covariance`` and ``statistics.variance`` (both use
+        the sample / Bessel-corrected n − 1 denominator), so the estimator is
+        consistent regardless of the number of aligned trading days.
+
+        Only days present in *both* series are included (inner join on the
+        Polygon millisecond timestamp).  Returns None when:
+          - fewer than _MIN_RETURN_PAIRS aligned pairs exist, or
+          - the SPY return variance is zero (flat/missing benchmark data).
         """
-        # Build an ordered list of (ticker_close, spy_close) for matching days.
-        aligned: list[tuple[float, float]] = []
+        # Inner join: only include closes present in both ticker and SPY.
+        ticker_closes: list[float] = []
+        spy_closes: list[float] = []
         for bar in ticker_bars:
             ts = bar.get("t")
-            tc = bar.get("c")
-            sc = spy_close_by_ts.get(ts)  # type: ignore[arg-type]
-            if ts is not None and tc is not None and sc is not None:
-                aligned.append((float(tc), float(sc)))
+            close = bar.get("c")
+            if ts is None or close is None:
+                continue
+            spy_close = spy_close_by_ts.get(int(ts))
+            if spy_close is None:
+                continue
+            ticker_closes.append(float(close))
+            spy_closes.append(spy_close)
 
         # Need at least _MIN_RETURN_PAIRS + 1 closes to produce that many returns.
-        if len(aligned) < _MIN_RETURN_PAIRS + 1:
+        if len(ticker_closes) < _MIN_RETURN_PAIRS + 1:
             return None
 
-        ticker_closes = [p[0] for p in aligned]
-        spy_closes = [p[1] for p in aligned]
-
-        # Daily simple returns: (P_t - P_{t-1}) / P_{t-1}
         n = len(ticker_closes)
+
+        # Daily simple returns: (P_t − P_{t−1}) / P_{t−1}
         ticker_rets = [
             (ticker_closes[i] - ticker_closes[i - 1]) / ticker_closes[i - 1]
             for i in range(1, n)
@@ -145,17 +256,14 @@ class MarketDataService:
             for i in range(1, n)
         ]
 
+        # statistics.variance uses sample variance (n − 1 denominator).
         var_spy = statistics.variance(spy_rets)
         if var_spy == 0:
             return None
 
-        n_ret = len(ticker_rets)
-        ticker_mean = statistics.mean(ticker_rets)
-        spy_mean = statistics.mean(spy_rets)
-        cov = sum(
-            (t - ticker_mean) * (s - spy_mean)
-            for t, s in zip(ticker_rets, spy_rets)
-        ) / (n_ret - 1)
+        # statistics.covariance also uses n − 1; the denominators cancel in
+        # the ratio so the (n − 1) correction has no net effect on the result.
+        cov = statistics.covariance(ticker_rets, spy_rets)
 
         try:
             return Decimal(str(round(cov / var_spy, 4)))
@@ -165,11 +273,19 @@ class MarketDataService:
     @staticmethod
     def _apply_market_data(
         ticker: Ticker,
-        bars: list[dict],  # type: ignore[type-arg]
-        spy_close_by_ts: dict[int, float],
+        snapshot: dict | None,  # type: ignore[type-arg]
+        agg_bars: list[dict],  # type: ignore[type-arg]
+        beta: Decimal | None,
         now: datetime,
     ) -> None:
-        """Write computed market-data and beta onto a Ticker instance (no flush)."""
+        """Write price data and beta onto a Ticker instance (no flush).
+
+        Price source priority:
+          1. Polygon batch snapshot — real-time price, prev close, day change.
+          2. Last two daily agg bars — fallback when snapshot is unavailable.
+
+        Only ``beta`` and ``synced_at`` are written when no price data exists.
+        """
 
         def to_dec(value: object) -> Decimal | None:
             if value is None:
@@ -179,36 +295,56 @@ class MarketDataService:
             except InvalidOperation:
                 return None
 
-        if not bars:
-            return
+        current_price: Decimal | None = None
+        previous_close: Decimal | None = None
+        day_change: Decimal | None = None
+        day_change_pct: Decimal | None = None
 
-        # --- Price data: last 2 bars ---
-        latest = bars[-1]
-        current_price = to_dec(latest.get("c"))
-        if current_price is None:
-            return
+        if snapshot is not None:
+            day = snapshot.get("day") or {}
+            prev_day = snapshot.get("prevDay") or {}
 
-        if len(bars) >= 2:
-            previous_close = to_dec(bars[-2].get("c"))
-        else:
-            previous_close = to_dec(latest.get("o"))
+            current_price = to_dec(day.get("c"))
+            previous_close = to_dec(prev_day.get("c"))
 
-        if previous_close is not None and previous_close != 0:
-            day_change = current_price - previous_close
-            day_change_pct = to_dec(
-                float((day_change / previous_close) * 100)
+            # Polygon snapshot provides the computed day change directly.
+            day_change = to_dec(snapshot.get("todaysChange"))
+            day_change_pct = to_dec(snapshot.get("todaysChangePerc"))
+
+            # If the current session has no close yet, fall back to last agg bar.
+            if current_price is None and agg_bars:
+                current_price = to_dec(agg_bars[-1].get("c"))
+
+        elif agg_bars:
+            # Snapshot unavailable — derive from the last two daily agg bars.
+            latest = agg_bars[-1]
+            current_price = to_dec(latest.get("c"))
+            previous_close = (
+                to_dec(agg_bars[-2].get("c"))
+                if len(agg_bars) >= 2
+                else to_dec(latest.get("o"))
             )
-        else:
-            day_change = None
-            day_change_pct = None
 
-        # --- Beta: full 365-day window aligned with SPY ---
-        beta = MarketDataService._compute_beta(bars, spy_close_by_ts)
+        # Re-derive day change locally when Polygon did not include it.
+        if (
+            day_change is None
+            and current_price is not None
+            and previous_close is not None
+            and previous_close != 0
+        ):
+            day_change = current_price - previous_close
+            day_change_pct = to_dec(float(day_change / previous_close * 100))
+
+        # Always write the beta and audit timestamp.
+        ticker.beta = beta
+        ticker.synced_at = now
+
+        if current_price is None:
+            # No price data available — skip price-related fields.
+            return
 
         ticker.current_price = current_price
         ticker.previous_close = previous_close
         ticker.day_change = day_change
         ticker.day_change_pct = day_change_pct
         ticker.position_value = current_price * ticker.shares
-        ticker.beta = beta
-        ticker.synced_at = now

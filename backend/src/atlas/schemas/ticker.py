@@ -22,6 +22,8 @@ class TickerCreate(BaseModel):
     company_name: str = Field(min_length=1, max_length=200)
     # Shares must be strictly positive; 4 decimal places stored in DB.
     shares: Decimal = Field(gt=Decimal("0"))
+    # Optional cluster assignment at creation time.
+    cluster_id: int | None = Field(None, description="ID of the cluster to assign to.")
 
     @field_validator("ticker", mode="before")
     @classmethod
@@ -54,6 +56,9 @@ class TickerResponse(BaseModel):
     ticker: str
     company_name: str
     shares: Decimal
+
+    # Optional cluster assignment.
+    cluster_id: int | None = None
 
     # Market-data fields — None until the first /sync call.
     current_price: Decimal | None = None

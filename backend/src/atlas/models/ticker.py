@@ -1,12 +1,18 @@
 """SQLAlchemy ORM model for a portfolio position."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Numeric, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from atlas.db.base import Base
+
+if TYPE_CHECKING:
+    from atlas.models.cluster import Cluster
 
 
 class Ticker(Base):
@@ -79,6 +85,18 @@ class Ticker(Base):
     beta: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=8, scale=4),
         nullable=True,
+    )
+
+    # Optional cluster assignment — NULL if unassigned. ON DELETE SET NULL.
+    cluster_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clusters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    cluster: Mapped[Cluster | None] = relationship(
+        "Cluster",
+        back_populates="tickers",
+        lazy="joined",
     )
 
     # Timestamp of the last successful Polygon sync for this position.

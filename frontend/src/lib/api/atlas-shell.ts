@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/daily-briefing', label: 'Daily Briefing' },
   { href: '/', label: 'Portfolio' },
   { href: '/frameworks', label: 'Frameworks' },
+  { href: '/clusters', label: 'Clusters' },
 ] as const;
 
 const HOLDING_SECTIONS: readonly PortfolioHoldingSection[] = [

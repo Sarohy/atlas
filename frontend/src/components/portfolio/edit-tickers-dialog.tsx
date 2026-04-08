@@ -468,7 +468,11 @@ function AddPositionPanel() {
             </button>
           </div>
         ) : (
-          <TickerSearch onSelect={setSelectedTicker} autoFocus excludeTickers={excludedPortfolioTickers} />
+          <TickerSearch
+            onSelect={setSelectedTicker}
+            autoFocus
+            excludeTickers={excludedPortfolioTickers}
+          />
         )}
 
         {/* Shares + cluster + submit */}

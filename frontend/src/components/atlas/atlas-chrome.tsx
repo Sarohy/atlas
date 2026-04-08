@@ -272,8 +272,14 @@ function ClusterRow({
   count: number;
 }) {
   return (
-    <div className="atlas-portfolio-summary-row" style={{ alignItems: 'flex-start', paddingBlock: '5px' }}>
-      <span className="atlas-portfolio-summary-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+    <div
+      className="atlas-portfolio-summary-row"
+      style={{ alignItems: 'flex-start', paddingBlock: '5px' }}
+    >
+      <span
+        className="atlas-portfolio-summary-label"
+        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+      >
         <span
           style={{
             display: 'inline-block',
@@ -404,9 +410,7 @@ export function AtlasActionsRail({
         </div>
       </section>
 
-      {clusters && tickers && (
-        <ClusterSummarySection clusters={clusters} tickers={tickers} />
-      )}
+      {clusters && tickers && <ClusterSummarySection clusters={clusters} tickers={tickers} />}
     </aside>
   );
 }

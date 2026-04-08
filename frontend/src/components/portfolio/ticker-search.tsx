@@ -16,9 +16,7 @@ export function TickerSearch({ onSelect, autoFocus, excludeTickers }: TickerSear
   const [query, setQuery] = useState('');
   const { data: rawResults, isFetching } = useTickerSearch(query);
 
-  const results = rawResults?.filter(
-    (r) => !excludeTickers?.has(r.ticker.toUpperCase()),
-  );
+  const results = rawResults?.filter((r) => !excludeTickers?.has(r.ticker.toUpperCase()));
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);

@@ -354,9 +354,7 @@ export function LiveCashPanel() {
 
   const delta = deltaInput !== '' ? parseFloat(deltaInput) : null;
   const previewBalance =
-    delta !== null && !isNaN(delta) && summary
-      ? Math.max(0, summary.cash_balance + delta)
-      : null;
+    delta !== null && !isNaN(delta) && summary ? Math.max(0, summary.cash_balance + delta) : null;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

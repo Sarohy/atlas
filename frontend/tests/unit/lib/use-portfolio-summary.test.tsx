@@ -3,7 +3,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import * as summaryApi from '@/lib/api/portfolio-summary';
-import { useAdjustCash, usePortfolioSummary, useUpdateCash } from '@/lib/hooks/use-portfolio-summary';
+import {
+  useAdjustCash,
+  usePortfolioSummary,
+  useUpdateCash,
+} from '@/lib/hooks/use-portfolio-summary';
 import type { PortfolioSummary, CashResponse } from '@/lib/schemas/portfolio-summary';
 
 vi.mock('@/lib/api/portfolio-summary');

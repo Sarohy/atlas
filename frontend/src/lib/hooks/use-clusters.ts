@@ -2,12 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import {
-  createCluster,
-  deleteCluster,
-  fetchClusters,
-  updateCluster,
-} from '@/lib/api/clusters';
+import { createCluster, deleteCluster, fetchClusters, updateCluster } from '@/lib/api/clusters';
 import type { ClusterCreate, ClusterResponse, ClusterUpdate } from '@/lib/schemas/cluster';
 
 const CLUSTERS_KEY = ['clusters'] as const;

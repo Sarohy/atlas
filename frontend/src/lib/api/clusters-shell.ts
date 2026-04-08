@@ -3,7 +3,13 @@ import type { PortfolioScreenData } from '@/types/portfolio';
 
 export type ClustersScreenData = Pick<
   PortfolioScreenData,
-  'appTitle' | 'logoutLabel' | 'navItems' | 'actions' | 'actionsTitle' | 'summaryRows' | 'summaryTitle'
+  | 'appTitle'
+  | 'logoutLabel'
+  | 'navItems'
+  | 'actions'
+  | 'actionsTitle'
+  | 'summaryRows'
+  | 'summaryTitle'
 >;
 
 export async function loadClustersScreenData(): Promise<ClustersScreenData> {

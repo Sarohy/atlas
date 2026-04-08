@@ -17,16 +17,29 @@ import {
   useUpdateCluster,
   useDeleteCluster,
 } from '@/lib/hooks/use-clusters';
-import { clusterCreateSchema, type ClusterCreate, type ClusterResponse } from '@/lib/schemas/cluster';
+import {
+  clusterCreateSchema,
+  type ClusterCreate,
+  type ClusterResponse,
+} from '@/lib/schemas/cluster';
 import type { ClustersScreenData } from '@/lib/api/clusters-shell';
 
 // ─── Pre-set palette swatches ─────────────────────────────────────────────────
 
 /** 12 suggested colours matching the ATLAS dark-blue design system. */
 const PALETTE = [
-  '#4a90d9', '#38bdf8', '#4ade80', '#fbbf24',
-  '#f472b6', '#a78bfa', '#fb923c', '#f87171',
-  '#2dd4bf', '#e879f9', '#818cf8', '#34d399',
+  '#4a90d9',
+  '#38bdf8',
+  '#4ade80',
+  '#fbbf24',
+  '#f472b6',
+  '#a78bfa',
+  '#fb923c',
+  '#f87171',
+  '#2dd4bf',
+  '#e879f9',
+  '#818cf8',
+  '#34d399',
 ] as const;
 
 // ─── Singleton QueryClient ────────────────────────────────────────────────────
@@ -37,18 +50,38 @@ const queryClient = new QueryClient();
 
 function IconPencil({ className }: { className?: string }) {
   return (
-    <svg className={className} width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" />
+    <svg
+      className={className}
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }
 
 function IconTrash({ className }: { className?: string }) {
   return (
-    <svg className={className} width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <svg
+      className={className}
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
       <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
     </svg>
   );
@@ -56,8 +89,17 @@ function IconTrash({ className }: { className?: string }) {
 
 function IconCheck({ className }: { className?: string }) {
   return (
-    <svg className={className} width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
@@ -65,22 +107,26 @@ function IconCheck({ className }: { className?: string }) {
 
 function IconX({ className }: { className?: string }) {
   return (
-    <svg className={className} width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+    <svg
+      className={className}
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </svg>
   );
 }
 
 // ─── Colour picker ────────────────────────────────────────────────────────────
 
-function ColorPicker({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (c: string) => void;
-}) {
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -137,12 +183,15 @@ function CreateClusterForm() {
   });
 
   function onSubmit(data: ClusterCreate) {
-    create({ ...data, color }, {
-      onSuccess: () => {
-        reset();
-        setColor('#4a90d9');
+    create(
+      { ...data, color },
+      {
+        onSuccess: () => {
+          reset();
+          setColor('#4a90d9');
+        },
       },
-    });
+    );
   }
 
   return (
@@ -165,9 +214,7 @@ function CreateClusterForm() {
           className="w-full px-3 py-2 bg-[#111827] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors"
           aria-label="Cluster name"
         />
-        {errors.name && (
-          <p className="mt-1 text-[11px] text-[#f87171]">{errors.name.message}</p>
-        )}
+        {errors.name && <p className="mt-1 text-[11px] text-[#f87171]">{errors.name.message}</p>}
       </div>
 
       <div>
@@ -196,13 +243,7 @@ function CreateClusterForm() {
 
 // ─── Edit cluster inline ──────────────────────────────────────────────────────
 
-function EditClusterRow({
-  cluster,
-  onCancel,
-}: {
-  cluster: ClusterResponse;
-  onCancel: () => void;
-}) {
+function EditClusterRow({ cluster, onCancel }: { cluster: ClusterResponse; onCancel: () => void }) {
   const [color, setColor] = useState(cluster.color);
   const { mutate: update, isPending } = useUpdateCluster();
 
@@ -250,9 +291,7 @@ function EditClusterRow({
           <IconX />
         </button>
       </div>
-      {errors.name && (
-        <p className="text-[11px] text-[#f87171]">{errors.name.message}</p>
-      )}
+      {errors.name && <p className="text-[11px] text-[#f87171]">{errors.name.message}</p>}
       <ColorPicker value={color} onChange={setColor} />
     </form>
   );

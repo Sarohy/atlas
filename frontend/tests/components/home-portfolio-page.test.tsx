@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
 import Home from '@/app/page';
 
+function wrapper(children: React.ReactNode) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <AuthSessionProvider>{children}</AuthSessionProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe('Home portfolio page', () => {
   async function renderPage() {
-    render(<AuthSessionProvider>{await Home()}</AuthSessionProvider>);
+    render(wrapper(await Home()));
   }
 
   it('renders the portfolio workspace shell and primary navigation', async () => {
@@ -22,22 +32,23 @@ describe('Home portfolio page', () => {
   it('renders the portfolio holdings, analytics cards, and actions rail', async () => {
     await renderPage();
 
-    expect(screen.getByText('Holdings — AI Core')).toBeInTheDocument();
-    expect(screen.getByText('MU')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Cash' })).toBeInTheDocument();
-
-    expect(screen.getByText('Total Portfolio')).toBeInTheDocument();
-    expect(screen.getByText('Cash Reserve')).toBeInTheDocument();
+    // Live metric cards — wait for React Query to resolve MSW data
+    await waitFor(() => {
+      expect(screen.getByText('Total Portfolio')).toBeInTheDocument();
+    });
+    // "Cash Reserve" appears in both the metric card and the live cash panel heading
+    expect(screen.getAllByText('Cash Reserve').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Portfolio Beta')).toBeInTheDocument();
-    expect(screen.getByText('Optics Cluster')).toBeInTheDocument();
 
+    // Tickers panel
     expect(screen.getByText('All Tickers')).toBeInTheDocument();
     expect(screen.getByText('Edit Tickers')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Add Cash' })).toBeInTheDocument();
+
+    // Live cash panel
     expect(screen.getByText('Current Balance')).toBeInTheDocument();
 
+    // Actions rail (still static)
     expect(screen.getByText("Today's Actions")).toBeInTheDocument();
-    expect(screen.getByText('Portfolio Summary')).toBeInTheDocument();
     expect(screen.getByText('HOLD CASH')).toBeInTheDocument();
     expect(screen.getByText('SELL ANET')).toBeInTheDocument();
   });

@@ -11,6 +11,7 @@ dependencies = [
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
     "fastapi>=0.135.3",
+    "httpx>=0.28.1",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "sqlalchemy[asyncio]>=2.0.49",
@@ -42,7 +43,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF"]
-ignore = []
+# B008: FastAPI's Depends() in function defaults is idiomatic and intentional.
+ignore = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

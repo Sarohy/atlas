@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+
 import { Geist, Geist_Mono, IBM_Plex_Mono, Inter, Poppins } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';

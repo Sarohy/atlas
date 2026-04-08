@@ -8,11 +8,17 @@ from atlas.config import get_settings
 from atlas.core.logging import configure_logging, get_logger
 
 
+def _parse_allowed_origins(raw_allowed_origins: str) -> list[str]:
+    """Return a normalized list of allowed CORS origins from a CSV env var."""
+    return [origin.strip() for origin in raw_allowed_origins.split(",") if origin.strip()]
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     settings = get_settings()
     configure_logging(settings.environment)
     logger = get_logger(__name__)
+    allowed_origins = _parse_allowed_origins(settings.allowed_origins)
 
     app = FastAPI(
         title="ATLAS Backend",
@@ -23,7 +29,7 @@ def create_app() -> FastAPI:
     # CORS — allow the Next.js dev server
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="atlas-backend")
     environment: str = Field(default="development")
     database_url: str = Field(default="postgresql+asyncpg://localhost:5432/atlas_dev")
+    allowed_origins: str = Field(default="http://localhost:3000")
 
     # Polygon.io API key — required for ticker search
     polygon_api_key: str = Field(default="")

@@ -345,36 +345,24 @@ export function LiveMetricsGrid() {
 
 // ─── Live cash panel ──────────────────────────────────────────────────────────
 
-const CASH_FLOOR_PCT_TO_FRACTION = 100; // display is 0–100; API expects 0–1
-
 /** Cash panel that reads live balance and allows the user to update it. */
 export function LiveCashPanel() {
   const { data: summary, isLoading } = usePortfolioSummary();
   const { mutate: updateCash, isPending, isError, error } = useUpdateCash();
 
   const [cashInput, setCashInput] = useState('');
-  const [floorInput, setFloorInput] = useState('');
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const cashBalance = parseFloat(cashInput);
     if (isNaN(cashBalance) || cashBalance < 0) return;
 
-    const currentFloorFraction = summary
-      ? summary.cash_floor_pct / CASH_FLOOR_PCT_TO_FRACTION
-      : 0.1;
-    const cashFloorPct = floorInput
-      ? parseFloat(floorInput) / CASH_FLOOR_PCT_TO_FRACTION
-      : currentFloorFraction;
+    // Keep the existing floor fraction — only the balance is editable here.
+    const currentFloorFraction = summary ? summary.cash_floor_pct / 100 : 0.1;
 
     updateCash(
-      { cash_balance: cashBalance, cash_floor_pct: cashFloorPct },
-      {
-        onSuccess: () => {
-          setCashInput('');
-          setFloorInput('');
-        },
-      },
+      { cash_balance: cashBalance, cash_floor_pct: currentFloorFraction },
+      { onSuccess: () => setCashInput('') },
     );
   }
 
@@ -382,7 +370,7 @@ export function LiveCashPanel() {
   const floorText = isLoading
     ? '…'
     : summary
-      ? `${fmtM(summary.cash_floor)} (${summary.cash_floor_pct.toFixed(1)}%)`
+      ? `${fmtM(summary.cash_floor)} · ${summary.cash_floor_pct.toFixed(1)}% floor`
       : '—';
 
   return (
@@ -396,42 +384,38 @@ export function LiveCashPanel() {
         </div>
         <p className="atlas-portfolio-cash-label">Current Balance</p>
         <p className="atlas-portfolio-cash-value">{balanceText}</p>
-        <p className="mt-1 font-mono text-xs text-[#8a95a8]">Floor {floorText}</p>
-      </div>
-      <form className="flex flex-col gap-2 px-3 pt-2 pb-3" onSubmit={handleSubmit}>
-        <input
-          aria-label="New cash balance"
-          className="atlas-portfolio-cash-input w-full"
-          disabled={isPending}
-          min="0"
-          onChange={(e) => setCashInput(e.target.value)}
-          placeholder="New balance (e.g. 3500000)"
-          step="any"
-          type="number"
-          value={cashInput}
-        />
-        <input
-          aria-label="Cash floor percentage"
-          className="atlas-portfolio-cash-input w-full"
-          disabled={isPending}
-          max="100"
-          min="0"
-          onChange={(e) => setFloorInput(e.target.value)}
-          placeholder="Floor % (e.g. 10)"
-          step="0.1"
-          type="number"
-          value={floorInput}
-        />
-        <button
-          className="atlas-portfolio-cash-submit w-full"
-          disabled={isPending || !cashInput}
-          type="submit"
+        <p
+          className="atlas-portfolio-cash-label"
+          style={{ marginTop: '0.4rem', fontSize: '0.7rem' }}
         >
-          {isPending ? 'Saving…' : 'Update Cash'}
-        </button>
+          {floorText}
+        </p>
+      </div>
+      <form onSubmit={handleSubmit}>
+        <div className="atlas-portfolio-cash-input-row">
+          <input
+            aria-label="New cash balance"
+            className="atlas-portfolio-cash-input"
+            disabled={isPending}
+            min="0"
+            onChange={(e) => setCashInput(e.target.value)}
+            placeholder="New balance…"
+            step="any"
+            type="number"
+            value={cashInput}
+          />
+          <button
+            aria-label="Save cash balance"
+            className="atlas-portfolio-cash-submit"
+            disabled={isPending || !cashInput}
+            type="submit"
+          >
+            {isPending ? '…' : '›'}
+          </button>
+        </div>
         {isError && (
-          <p className="font-mono text-xs text-red-400">
-            {error instanceof Error ? error.message : 'Failed to update cash.'}
+          <p className="font-mono px-1 pt-1" style={{ fontSize: '0.65rem', color: '#f87171' }}>
+            {error instanceof Error ? error.message : 'Failed to update.'}
           </p>
         )}
       </form>

@@ -6,10 +6,12 @@ import { useTickers } from '@/lib/hooks/use-tickers';
 import { EditTickersDialog } from './edit-tickers-dialog';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 
-/** Format a nullable decimal as a dollar price string. */
-function fmtPrice(value: number | null | undefined): string {
+/** Format a position value compactly: $X.XXM, $XXXK, or — if null. */
+function fmtPositionValue(value: number | null | undefined): string {
   if (value == null) return '—';
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${Math.round(value / 1_000)}K`;
+  return `$${Math.round(value)}`;
 }
 
 /** Format a nullable percentage value and return value + tone. */
@@ -35,7 +37,7 @@ function TickerRow({ position }: { position: TickerResponse }) {
         <p className="atlas-portfolio-ticker-label">{position.company_name ?? position.ticker}</p>
       </div>
       <div className="atlas-portfolio-ticker-metrics">
-        <p className="atlas-portfolio-ticker-price">{fmtPrice(position.current_price)}</p>
+        <p className="atlas-portfolio-ticker-price">{fmtPositionValue(position.position_value)}</p>
         <p className={`atlas-portfolio-ticker-change is-${change.tone}`}>{change.text}</p>
       </div>
     </article>

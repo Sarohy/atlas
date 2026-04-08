@@ -6,6 +6,7 @@ import { useAdjustCash, usePortfolioSummary } from '@/lib/hooks/use-portfolio-su
 import { useTickers, useSyncTickers } from '@/lib/hooks/use-tickers';
 import { useClusters } from '@/lib/hooks/use-clusters';
 import type { PortfolioSummary } from '@/lib/schemas/portfolio-summary';
+import type { ClusterResponse } from '@/lib/schemas/cluster';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 import { cn } from '@/lib/utils';
 import type {
@@ -254,6 +255,111 @@ export function AtlasHoldingsRail() {
   );
 }
 
+// ─── Cluster summary section ─────────────────────────────────────────────────
+
+/** Per-cluster allocation row rendered inside the right rail. */
+function ClusterRow({
+  label,
+  color,
+  value,
+  pct,
+  count,
+}: {
+  label: string;
+  color: string;
+  value: number;
+  pct: number;
+  count: number;
+}) {
+  return (
+    <div className="atlas-portfolio-summary-row" style={{ alignItems: 'flex-start', paddingBlock: '5px' }}>
+      <span className="atlas-portfolio-summary-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span
+          style={{
+            display: 'inline-block',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: color,
+            flexShrink: 0,
+          }}
+        />
+        <span>{label}</span>
+        <span style={{ fontSize: '0.6rem', color: '#3a4a5e', marginLeft: '2px' }}>
+          {count} {count === 1 ? 'ticker' : 'tickers'}
+        </span>
+      </span>
+      <span className="atlas-portfolio-summary-value" style={{ textAlign: 'right' }}>
+        {value >= 1_000_000
+          ? `$${(value / 1_000_000).toFixed(2)}M`
+          : value >= 1_000
+            ? `$${Math.round(value / 1_000)}K`
+            : `$${Math.round(value)}`}
+        <span style={{ display: 'block', fontSize: '0.6rem', color: '#4a5568' }}>
+          {pct.toFixed(1)}%
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** Breaks down portfolio value by cluster + unassigned row. */
+function ClusterSummarySection({
+  clusters,
+  tickers,
+}: {
+  clusters: ClusterResponse[];
+  tickers: TickerResponse[];
+}) {
+  const totalValue = tickers.reduce((s, t) => s + (t.position_value ?? 0), 0);
+
+  // Build a set of ticker ids that belong to at least one cluster.
+  const assignedIds = new Set(clusters.flatMap((c) => c.tickers.map((t) => t.id)));
+
+  const unassigned = tickers.filter((t) => !assignedIds.has(t.id));
+  const unassignedValue = unassigned.reduce((s, t) => s + (t.position_value ?? 0), 0);
+
+  const rows = clusters
+    .map((c) => ({
+      id: c.id,
+      label: c.name,
+      color: c.color,
+      value: c.tickers.reduce((s, t) => s + (t.position_value ?? 0), 0),
+      count: c.tickers.length,
+    }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.value - a.value);
+
+  if (rows.length === 0 && unassigned.length === 0) return null;
+
+  return (
+    <section className="atlas-portfolio-side-section">
+      <h2 className="atlas-portfolio-side-title">Cluster Breakdown</h2>
+      <div>
+        {rows.map((r) => (
+          <ClusterRow
+            key={r.id}
+            label={r.label}
+            color={r.color}
+            value={r.value}
+            pct={totalValue > 0 ? (r.value / totalValue) * 100 : 0}
+            count={r.count}
+          />
+        ))}
+        {unassigned.length > 0 && (
+          <ClusterRow
+            label="Unassigned"
+            color="#3a4a5e"
+            value={unassignedValue}
+            pct={totalValue > 0 ? (unassignedValue / totalValue) * 100 : 0}
+            count={unassigned.length}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function AtlasActionsRail({
   actions,
   title,
@@ -262,6 +368,8 @@ export function AtlasActionsRail({
   title: string;
 }) {
   const { data: summary, isLoading } = usePortfolioSummary();
+  const { data: clusters } = useClusters();
+  const { data: tickers } = useTickers();
   const summaryRows = summary ? buildSummaryRows(summary) : [];
 
   return (
@@ -295,6 +403,10 @@ export function AtlasActionsRail({
             : summaryRows.map((row) => <SummaryRow key={row.label} row={row} />)}
         </div>
       </section>
+
+      {clusters && tickers && (
+        <ClusterSummarySection clusters={clusters} tickers={tickers} />
+      )}
     </aside>
   );
 }

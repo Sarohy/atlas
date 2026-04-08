@@ -361,6 +361,11 @@ function AddPositionPanel() {
   const sharesRef = useRef<HTMLInputElement | null>(null);
   const { mutate: create, isPending } = useCreateTicker();
   const { data: clusters } = useClusters();
+  const { data: existingTickers } = useTickers();
+
+  const excludedPortfolioTickers = new Set(
+    (existingTickers ?? []).map((t) => t.ticker.toUpperCase()),
+  );
 
   const {
     register,
@@ -463,7 +468,7 @@ function AddPositionPanel() {
             </button>
           </div>
         ) : (
-          <TickerSearch onSelect={setSelectedTicker} autoFocus />
+          <TickerSearch onSelect={setSelectedTicker} autoFocus excludeTickers={excludedPortfolioTickers} />
         )}
 
         {/* Shares + cluster + submit */}

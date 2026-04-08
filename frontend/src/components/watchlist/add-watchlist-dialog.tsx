@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useAddToWatchlist } from '@/lib/hooks/use-watchlist';
+import { useAddToWatchlist, useWatchlist } from '@/lib/hooks/use-watchlist';
+import { useTickers } from '@/lib/hooks/use-tickers';
 import { TickerSearch } from '@/components/portfolio/ticker-search';
 import type { TickerSearchResult } from '@/lib/schemas/ticker';
 
@@ -13,6 +14,13 @@ interface AddWatchlistDialogProps {
 export function AddWatchlistDialog({ open, onClose }: AddWatchlistDialogProps) {
   const [selected, setSelected] = useState<TickerSearchResult | null>(null);
   const { mutate: add, isPending, error } = useAddToWatchlist();
+  const { data: portfolioTickers } = useTickers();
+  const { data: watchlistItems } = useWatchlist();
+
+  const excludedTickers = new Set([
+    ...(portfolioTickers ?? []).map((t) => t.ticker.toUpperCase()),
+    ...(watchlistItems ?? []).map((w) => w.ticker.toUpperCase()),
+  ]);
 
   function handleClose() {
     setSelected(null);
@@ -66,7 +74,7 @@ export function AddWatchlistDialog({ open, onClose }: AddWatchlistDialogProps) {
                 </button>
               </div>
             ) : (
-              <TickerSearch onSelect={setSelected} autoFocus />
+              <TickerSearch onSelect={setSelected} autoFocus excludeTickers={excludedTickers} />
             )}
           </div>
 

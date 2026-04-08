@@ -31,7 +31,15 @@ export function useCreateTicker() {
 export function useUpdateTicker() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, shares }: { id: number; shares: string }) => updateTicker(id, { shares }),
+    mutationFn: ({
+      id,
+      shares,
+      cluster_id,
+    }: {
+      id: number;
+      shares: string;
+      cluster_id?: number | null;
+    }) => updateTicker(id, { shares, cluster_id }),
     onSuccess: (updated: TickerResponse) => {
       qc.setQueryData<TickerResponse[]>(TICKERS_KEY, (prev) =>
         (prev ?? []).map((t) => (t.id === updated.id ? updated : t)),

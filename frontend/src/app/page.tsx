@@ -1,8 +1,5 @@
-import { PortfolioScreen } from '@/components/portfolio/portfolio-screen';
-import { loadPortfolioScreenData } from '@/lib/api/portfolio';
+import { redirect } from 'next/navigation';
 
-export default async function Home() {
-  const portfolioScreenData = await loadPortfolioScreenData();
-
-  return <PortfolioScreen data={portfolioScreenData} />;
+export default function Home() {
+  redirect('/portfolio');
 }

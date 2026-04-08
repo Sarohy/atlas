@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
-import Home from '@/app/page';
+import PortfolioPage from '@/app/portfolio/page';
 
 function wrapper(children: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -15,7 +15,7 @@ function wrapper(children: React.ReactNode) {
 
 describe('Home portfolio page', () => {
   async function renderPage() {
-    render(wrapper(await Home()));
+    render(wrapper(await PortfolioPage()));
   }
 
   it('renders the portfolio workspace shell and primary navigation', async () => {

@@ -40,12 +40,18 @@ class TickerService:
         await self._session.refresh(ticker)
         return ticker
 
-    async def update_shares(self, ticker_id: int, shares: Decimal) -> Ticker | None:
-        """Update the share count for a ticker. Returns None if not found."""
+    async def update_shares(
+        self, ticker_id: int, shares: Decimal, cluster_id: int | None = None
+    ) -> Ticker | None:
+        """Update the share count and cluster assignment for a ticker.
+
+        Returns None if not found.
+        """
         ticker = await self._session.get(Ticker, ticker_id)
         if ticker is None:
             return None
         ticker.shares = shares
+        ticker.cluster_id = cluster_id
         await self._session.flush()
         await self._session.refresh(ticker)
         return ticker

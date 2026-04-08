@@ -23,7 +23,7 @@ export function createTicker(payload: {
 
 export function updateTicker(
   id: number,
-  payload: { shares: number | string },
+  payload: { shares: number | string; cluster_id?: number | null },
 ): Promise<TickerResponse> {
   return apiPatch(`/api/v1/tickers/${id}`, tickerResponseSchema, payload);
 }

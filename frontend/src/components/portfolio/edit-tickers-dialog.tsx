@@ -134,9 +134,11 @@ function IconPlus({ className }: { className?: string }) {
 function PositionCard({ position, index }: { position: TickerResponse; index: number }) {
   const [mode, setMode] = useState<'view' | 'edit' | 'confirmDelete'>('view');
   const [sharesInput, setSharesInput] = useState(String(position.shares));
+  const [clusterInput, setClusterInput] = useState<number | null>(position.cluster_id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { mutate: update, isPending: saving } = useUpdateTicker();
   const { mutate: del, isPending: deleting } = useDeleteTicker();
+  const { data: clusters } = useClusters();
   const accent = ACCENTS[index % ACCENTS.length];
 
   useEffect(() => {
@@ -148,6 +150,7 @@ function PositionCard({ position, index }: { position: TickerResponse; index: nu
 
   function startEdit() {
     setSharesInput(String(position.shares));
+    setClusterInput(position.cluster_id ?? null);
     setMode('edit');
   }
 
@@ -158,15 +161,20 @@ function PositionCard({ position, index }: { position: TickerResponse; index: nu
 
   function saveEdit() {
     const n = Number(sharesInput);
-    if (!sharesInput.trim() || n <= 0 || n === position.shares) {
+    if (
+      !sharesInput.trim() ||
+      n <= 0 ||
+      (n === position.shares && clusterInput === (position.cluster_id ?? null))
+    ) {
       cancelEdit();
       return;
     }
     update(
-      { id: position.id, shares: sharesInput },
+      { id: position.id, shares: sharesInput, cluster_id: clusterInput },
       {
         onSuccess: (updated) => {
           setSharesInput(String(updated.shares));
+          setClusterInput(updated.cluster_id ?? null);
           setMode('view');
         },
       },
@@ -218,55 +226,88 @@ function PositionCard({ position, index }: { position: TickerResponse; index: nu
   if (mode === 'edit') {
     return (
       <div
-        className="flex items-center gap-3 px-4 py-3 rounded-xl border transition-all"
+        className="flex items-start gap-3 px-4 py-3 rounded-xl border transition-all"
         style={{ background: `${accent}08`, borderColor: `${accent}30` }}
       >
         <div
-          className="shrink-0 w-9 h-9 rounded-xl grid place-items-center font-bold text-sm"
+          className="shrink-0 w-9 h-9 rounded-xl grid place-items-center font-bold text-sm mt-0.5"
           style={{ background: `${accent}18`, color: accent, border: `1px solid ${accent}30` }}
         >
           {position.ticker.slice(0, 1)}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-mono font-semibold text-sm leading-tight" style={{ color: accent }}>
+          <p
+            className="font-mono font-semibold text-sm leading-tight mb-0.5"
+            style={{ color: accent }}
+          >
             {position.ticker}
           </p>
-          <p className="text-[11px] text-[#8a95a8] truncate mt-0.5">{position.company_name}</p>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <div className="relative">
-            <span
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono uppercase tracking-wider pointer-events-none"
-              style={{ color: `${accent}60` }}
+          <p className="text-[11px] text-[#8a95a8] truncate">{position.company_name}</p>
+
+          <div className="flex items-center gap-2 mt-2">
+            {/* Shares input */}
+            <div className="relative flex-1">
+              <span
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono uppercase tracking-wider pointer-events-none"
+                style={{ color: `${accent}60` }}
+              >
+                Shares
+              </span>
+              <input
+                ref={inputRef}
+                type="number"
+                step="any"
+                min="0.0001"
+                value={sharesInput}
+                onChange={(e) => setSharesInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-full pl-14 pr-3 py-2 bg-[#0b1120] border rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none transition-colors text-right"
+                style={{ borderColor: `${accent}40` }}
+              />
+            </div>
+
+            {/* Cluster dropdown */}
+            <div className="relative flex-1">
+              <span
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono uppercase tracking-wider pointer-events-none z-10"
+                style={{ color: `${accent}60` }}
+              >
+                Cluster
+              </span>
+              <select
+                value={clusterInput ?? ''}
+                onChange={(e) =>
+                  setClusterInput(e.target.value === '' ? null : Number(e.target.value))
+                }
+                className="w-full pl-16 pr-3 py-2 bg-[#0b1120] border rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none transition-colors appearance-none"
+                style={{ borderColor: `${accent}40` }}
+                aria-label="Assign to cluster"
+              >
+                <option value="">None</option>
+                {clusters?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Save / cancel */}
+            <button
+              onClick={saveEdit}
+              disabled={saving}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-[#0a0e1a] transition-colors shrink-0"
+              style={{ background: accent }}
             >
-              Shares
-            </span>
-            <input
-              ref={inputRef}
-              type="number"
-              step="any"
-              min="0.0001"
-              value={sharesInput}
-              onChange={(e) => setSharesInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="w-32 pl-14 pr-3 py-2 bg-[#0b1120] border rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none transition-colors text-right"
-              style={{ borderColor: `${accent}40` }}
-            />
+              {saving ? <span className="text-xs">…</span> : <IconCheck />}
+            </button>
+            <button
+              onClick={cancelEdit}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-[#4a5568] hover:text-[#8a95a8] hover:bg-white/5 transition-colors shrink-0"
+            >
+              <IconX />
+            </button>
           </div>
-          <button
-            onClick={saveEdit}
-            disabled={saving}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#0a0e1a] transition-colors"
-            style={{ background: accent }}
-          >
-            {saving ? <span className="text-xs">…</span> : <IconCheck />}
-          </button>
-          <button
-            onClick={cancelEdit}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-[#4a5568] hover:text-[#8a95a8] hover:bg-white/5 transition-colors"
-          >
-            <IconX />
-          </button>
         </div>
       </div>
     );

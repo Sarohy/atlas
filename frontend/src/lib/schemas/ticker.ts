@@ -17,6 +17,7 @@ export const tickerSchema = z.object({
 
 export const tickerUpdateSchema = z.object({
   shares: z.coerce.number().gt(0),
+  cluster_id: z.number().nullable().optional(),
 });
 
 export const tickerResponseSchema = z.object({

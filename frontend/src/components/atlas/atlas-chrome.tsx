@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { LogoutButton } from '@/components/auth/logout-button';
 import { useAdjustCash, usePortfolioSummary } from '@/lib/hooks/use-portfolio-summary';
 import { useTickers, useSyncTickers } from '@/lib/hooks/use-tickers';
+import { useClusters } from '@/lib/hooks/use-clusters';
 import type { PortfolioSummary } from '@/lib/schemas/portfolio-summary';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 import { cn } from '@/lib/utils';
@@ -148,6 +149,10 @@ export function AtlasNavigation({ labels }: { labels: readonly PortfolioNavItem[
 
 export function AtlasHoldingsRail() {
   const { data: tickers, isLoading } = useTickers();
+  const { data: clusters } = useClusters();
+
+  /** Map of cluster id → hex colour string, e.g. '#4a90d9'. */
+  const clusterColorMap = new Map((clusters ?? []).map((c) => [c.id, c.color]));
 
   const maxValue = Math.max(
     ...(tickers ?? []).map((t) => t.position_value ?? 0),
@@ -212,6 +217,8 @@ export function AtlasHoldingsRail() {
               const dayChangeTone =
                 changePct == null ? 'default' : changePct >= 0 ? 'green' : 'red';
               const progressTone = changePct == null || changePct >= 0 ? 'cyan' : 'red';
+              const clusterColor =
+                t.cluster_id != null ? clusterColorMap.get(t.cluster_id) : undefined;
 
               return (
                 <article className="atlas-portfolio-holding" key={t.id}>
@@ -221,8 +228,14 @@ export function AtlasHoldingsRail() {
                   </div>
                   <div className="atlas-portfolio-progress">
                     <span
-                      className={cn('atlas-portfolio-progress-bar', `is-${progressTone}`)}
-                      style={{ width: `${pct}%` }}
+                      className={cn(
+                        'atlas-portfolio-progress-bar',
+                        clusterColor == null && `is-${progressTone}`,
+                      )}
+                      style={{
+                        width: `${pct}%`,
+                        ...(clusterColor != null && { backgroundColor: clusterColor }),
+                      }}
                     />
                   </div>
                   <div className="atlas-portfolio-holding-row atlas-portfolio-holding-row--meta">

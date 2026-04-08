@@ -90,6 +90,13 @@ export const handlers = [
     });
   }),
 
+  http.post(`${BASE}/api/v1/portfolio/cash/adjust`, () => {
+    return HttpResponse.json({
+      cash_balance: 3985000,
+      cash_floor_pct: 0.1,
+    });
+  }),
+
   // ── Auth ──────────────────────────────────────────────────────────────────────
   http.post('http://localhost:8000/api/v1/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };

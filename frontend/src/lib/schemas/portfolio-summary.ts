@@ -5,6 +5,11 @@ export const cashUpdateSchema = z.object({
   cash_floor_pct: z.coerce.number().gte(0).lte(1).default(0.1),
 });
 
+/** Schema for the additive-delta cash adjustment request. No min bound — negative = withdrawal. */
+export const cashAdjustSchema = z.object({
+  delta: z.coerce.number(),
+});
+
 export const cashResponseSchema = z.object({
   cash_balance: z.coerce.number(),
   cash_floor_pct: z.coerce.number(),
@@ -26,5 +31,6 @@ export const portfolioSummarySchema = z.object({
 });
 
 export type CashUpdate = z.infer<typeof cashUpdateSchema>;
+export type CashAdjust = z.infer<typeof cashAdjustSchema>;
 export type CashResponse = z.infer<typeof cashResponseSchema>;
 export type PortfolioSummary = z.infer<typeof portfolioSummarySchema>;

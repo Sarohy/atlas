@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.models.portfolio_config import PORTFOLIO_CONFIG_ROW_ID, PortfolioConfig
 from atlas.models.ticker import Ticker
-from atlas.schemas.portfolio import CashUpdateRequest, PortfolioSummaryResponse
+from atlas.schemas.portfolio import CashAdjustRequest, CashUpdateRequest, PortfolioSummaryResponse
 
 
 def compute_portfolio_summary(
@@ -106,6 +106,20 @@ class PortfolioService:
         config = await self.get_or_create_config()
         config.cash_balance = data.cash_balance
         config.cash_floor_pct = data.cash_floor_pct
+        await self._session.flush()
+        await self._session.refresh(config)
+        return config
+
+    async def adjust_cash(self, data: CashAdjustRequest) -> PortfolioConfig:
+        """Add (or subtract) delta from cash balance.
+
+        The resulting balance is clamped to Decimal('0') — it can never go negative.
+        """
+        # ZERO_BALANCE: sentinel used to prevent negative cash_balance.
+        ZERO_BALANCE: Decimal = Decimal("0")
+        config = await self.get_or_create_config()
+        new_balance = config.cash_balance + data.delta
+        config.cash_balance = max(new_balance, ZERO_BALANCE)
         await self._session.flush()
         await self._session.refresh(config)
         return config

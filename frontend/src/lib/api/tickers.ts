@@ -16,6 +16,7 @@ export function createTicker(payload: {
   ticker: string;
   company_name: string;
   shares: number | string;
+  cluster_id?: number | null;
 }): Promise<TickerResponse> {
   return apiPost('/api/v1/tickers', tickerResponseSchema, payload);
 }

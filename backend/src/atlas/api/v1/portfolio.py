@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.db.session import get_db_session
 from atlas.schemas.portfolio import (
+    CashAdjustRequest,
     CashResponse,
     CashUpdateRequest,
     PortfolioSummaryResponse,
@@ -45,4 +46,18 @@ async def update_cash(
     """Update the portfolio cash balance and floor percentage."""
     svc = PortfolioService(session)
     config = await svc.update_cash(data)
+    return config  # type: ignore[return-value]
+
+
+@router.post("/cash/adjust", response_model=CashResponse)
+async def adjust_cash(
+    data: CashAdjustRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> CashResponse:
+    """Adjust cash balance by a delta (positive = deposit, negative = withdrawal).
+
+    The balance is clamped at zero — it cannot go negative.
+    """
+    svc = PortfolioService(session)
+    config = await svc.adjust_cash(data)
     return config  # type: ignore[return-value]

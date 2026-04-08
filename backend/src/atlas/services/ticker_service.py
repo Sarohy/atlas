@@ -33,6 +33,7 @@ class TickerService:
             ticker=data.ticker,
             company_name=data.company_name,
             shares=data.shares,
+            cluster_id=data.cluster_id,
         )
         self._session.add(ticker)
         await self._session.flush()

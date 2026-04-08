@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { LogoutButton } from '@/components/auth/logout-button';
-import { usePortfolioSummary, useUpdateCash } from '@/lib/hooks/use-portfolio-summary';
+import { useAdjustCash, usePortfolioSummary } from '@/lib/hooks/use-portfolio-summary';
 import { useTickers, useSyncTickers } from '@/lib/hooks/use-tickers';
 import type { PortfolioSummary } from '@/lib/schemas/portfolio-summary';
 import type { TickerResponse } from '@/lib/schemas/ticker';
@@ -345,25 +345,21 @@ export function LiveMetricsGrid() {
 
 // ─── Live cash panel ──────────────────────────────────────────────────────────
 
-/** Cash panel that reads live balance and allows the user to update it. */
+/** Cash panel that reads live balance and lets the user add or subtract incrementally. */
 export function LiveCashPanel() {
   const { data: summary, isLoading } = usePortfolioSummary();
-  const { mutate: updateCash, isPending, isError, error } = useUpdateCash();
+  const { mutate: adjustCash, isPending, isError, error } = useAdjustCash();
 
-  const [cashInput, setCashInput] = useState('');
+  const [deltaInput, setDeltaInput] = useState('');
+
+  const delta = deltaInput !== '' ? parseFloat(deltaInput) : null;
+  const previewBalance =
+    delta !== null && !isNaN(delta) && summary ? Math.max(0, summary.cash_balance + delta) : null;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const cashBalance = parseFloat(cashInput);
-    if (isNaN(cashBalance) || cashBalance < 0) return;
-
-    // Keep the existing floor fraction — only the balance is editable here.
-    const currentFloorFraction = summary ? summary.cash_floor_pct / 100 : 0.1;
-
-    updateCash(
-      { cash_balance: cashBalance, cash_floor_pct: currentFloorFraction },
-      { onSuccess: () => setCashInput('') },
-    );
+    if (delta === null || isNaN(delta)) return;
+    adjustCash(delta, { onSuccess: () => setDeltaInput('') });
   }
 
   const balanceText = isLoading ? '…' : summary ? fmtM(summary.cash_balance) : '—';
@@ -384,6 +380,14 @@ export function LiveCashPanel() {
         </div>
         <p className="atlas-portfolio-cash-label">Current Balance</p>
         <p className="atlas-portfolio-cash-value">{balanceText}</p>
+        {previewBalance !== null && (
+          <p
+            className="atlas-portfolio-cash-label"
+            style={{ marginTop: '0.3rem', fontSize: '0.7rem' }}
+          >
+            → {fmtM(previewBalance)}
+          </p>
+        )}
         <p
           className="atlas-portfolio-cash-label"
           style={{ marginTop: '0.4rem', fontSize: '0.7rem' }}
@@ -394,20 +398,19 @@ export function LiveCashPanel() {
       <form onSubmit={handleSubmit}>
         <div className="atlas-portfolio-cash-input-row">
           <input
-            aria-label="New cash balance"
+            aria-label="Cash adjustment amount"
             className="atlas-portfolio-cash-input"
             disabled={isPending}
-            min="0"
-            onChange={(e) => setCashInput(e.target.value)}
-            placeholder="New balance…"
+            onChange={(e) => setDeltaInput(e.target.value)}
+            placeholder="+ add / − subtract…"
             step="any"
             type="number"
-            value={cashInput}
+            value={deltaInput}
           />
           <button
-            aria-label="Save cash balance"
+            aria-label="Apply cash adjustment"
             className="atlas-portfolio-cash-submit"
-            disabled={isPending || !cashInput}
+            disabled={isPending || deltaInput === ''}
             type="submit"
           >
             {isPending ? '…' : '›'}

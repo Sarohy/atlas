@@ -5,6 +5,18 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class CashAdjustRequest(BaseModel):
+    """Payload to add or subtract from the portfolio cash balance.
+
+    Positive delta deposits cash; negative delta withdraws.
+    The resulting balance is clamped to zero — it cannot go negative.
+    """
+
+    delta: Decimal = Field(
+        description="Amount to add (positive) or subtract (negative) from cash balance.",
+    )
+
+
 class CashUpdateRequest(BaseModel):
     """Payload to update the portfolio cash balance and floor percentage."""
 

@@ -90,6 +90,66 @@ export const handlers = [
     });
   }),
 
+  http.post(`${BASE}/api/v1/portfolio/cash/adjust`, () => {
+    return HttpResponse.json({
+      cash_balance: 3985000,
+      cash_floor_pct: 0.1,
+    });
+  }),
+
+  // ── Clusters ──────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/clusters`, () => {
+    return HttpResponse.json([
+      {
+        id: 1,
+        name: 'AI Core',
+        color: '#4a90d9',
+        tickers: [
+          {
+            id: 1,
+            ticker: 'AAPL',
+            company_name: 'Apple Inc.',
+            shares: '100',
+            cluster_id: 1,
+            created_at: '2026-04-07T00:00:00Z',
+            updated_at: '2026-04-07T00:00:00Z',
+          },
+        ],
+        created_at: '2026-04-07T00:00:00Z',
+        updated_at: '2026-04-07T00:00:00Z',
+      },
+    ]);
+  }),
+
+  http.post(`${BASE}/api/v1/clusters`, () => {
+    return HttpResponse.json(
+      {
+        id: 2,
+        name: 'Energy',
+        color: '#4ade80',
+        tickers: [],
+        created_at: '2026-04-07T00:00:00Z',
+        updated_at: '2026-04-07T00:00:00Z',
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.patch(`${BASE}/api/v1/clusters/:id`, () => {
+    return HttpResponse.json({
+      id: 1,
+      name: 'AI Core Updated',
+      color: '#38bdf8',
+      tickers: [],
+      created_at: '2026-04-07T00:00:00Z',
+      updated_at: '2026-04-07T00:00:00Z',
+    });
+  }),
+
+  http.delete(`${BASE}/api/v1/clusters/:id`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   // ── Auth ──────────────────────────────────────────────────────────────────────
   http.post('http://localhost:8000/api/v1/auth/sign-in', async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };

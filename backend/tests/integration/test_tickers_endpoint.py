@@ -20,15 +20,15 @@ async def client() -> AsyncClient:
 
 async def test_ticker_search_returns_200_with_results(client: AsyncClient) -> None:
     """GET /tickers/search?q=apple returns 200 and a list of tickers."""
-    from atlas.schemas.position import TickerSearchResult
+    from atlas.schemas.ticker import TickerSearchResult
 
     mock_results = [
         TickerSearchResult(ticker="AAPL", name="Apple Inc.", market="stocks", type="CS"),
     ]
 
     with (
-        patch("atlas.api.v1.tickers.get_settings") as mock_settings,
-        patch("atlas.api.v1.tickers.TickerService") as mock_service,
+        patch("atlas.api.v1.ticker_search.get_settings") as mock_settings,
+        patch("atlas.api.v1.ticker_search.TickerSearchService") as mock_service,
     ):
         mock_settings.return_value.polygon_api_key = "test-key"
         instance = mock_service.return_value
@@ -48,7 +48,7 @@ async def test_ticker_search_requires_q_param(client: AsyncClient) -> None:
 
 async def test_ticker_search_returns_503_when_api_key_missing(client: AsyncClient) -> None:
     """GET /tickers/search returns 503 when POLYGON_API_KEY is not configured."""
-    with patch("atlas.api.v1.tickers.get_settings") as mock_settings:
+    with patch("atlas.api.v1.ticker_search.get_settings") as mock_settings:
         mock_settings.return_value.polygon_api_key = ""
 
         response = await client.get("/api/v1/tickers/search?q=apple")

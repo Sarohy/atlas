@@ -55,50 +55,73 @@ describe('LiveCashPanel', () => {
       // cash_balance = 3585000 → $3.58M
       expect(screen.getByText(/\$3\.\d+M/)).toBeInTheDocument();
     });
-    expect(screen.getByLabelText('New cash balance')).toBeInTheDocument();
+    expect(screen.getByLabelText('Cash adjustment amount')).toBeInTheDocument();
   });
 
-  it('submit button is disabled when cash input is empty', async () => {
+  it('submit button is disabled when delta input is empty', async () => {
     render(<LiveCashPanel />, { wrapper: makeWrapper() });
-    const submitBtn = screen.getByRole('button', { name: /Save cash balance/ });
+    const submitBtn = screen.getByRole('button', { name: /Apply cash adjustment/ });
     expect(submitBtn).toBeDisabled();
   });
 
-  it('calls PUT /api/v1/portfolio/cash when the form is submitted', async () => {
-    let putCalled = false;
+  it('calls POST /api/v1/portfolio/cash/adjust when the form is submitted', async () => {
+    let postCalled = false;
     server.use(
-      http.put('http://localhost:8000/api/v1/portfolio/cash', () => {
-        putCalled = true;
-        return HttpResponse.json({ cash_balance: 5000000, cash_floor_pct: 0.1 });
+      http.post('http://localhost:8000/api/v1/portfolio/cash/adjust', () => {
+        postCalled = true;
+        return HttpResponse.json({ cash_balance: 3985000, cash_floor_pct: 0.1 });
       }),
     );
     const user = userEvent.setup();
     render(<LiveCashPanel />, { wrapper: makeWrapper() });
 
-    await waitFor(() => screen.getByLabelText('New cash balance'));
+    await waitFor(() => screen.getByLabelText('Cash adjustment amount'));
 
-    await user.type(screen.getByLabelText('New cash balance'), '5000000');
+    await user.type(screen.getByLabelText('Cash adjustment amount'), '400000');
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Save cash balance/ }));
+      await user.click(screen.getByRole('button', { name: /Apply cash adjustment/ }));
     });
 
-    await waitFor(() => expect(putCalled).toBe(true));
+    await waitFor(() => expect(postCalled).toBe(true));
   });
 
-  it('shows an error message when PUT fails', async () => {
+  it('accepts a negative delta to subtract from cash', async () => {
+    let requestBody: unknown;
     server.use(
-      http.put('http://localhost:8000/api/v1/portfolio/cash', () => {
+      http.post('http://localhost:8000/api/v1/portfolio/cash/adjust', async ({ request }) => {
+        requestBody = await request.json();
+        return HttpResponse.json({ cash_balance: 3555000, cash_floor_pct: 0.1 });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<LiveCashPanel />, { wrapper: makeWrapper() });
+
+    await waitFor(() => screen.getByLabelText('Cash adjustment amount'));
+
+    await user.type(screen.getByLabelText('Cash adjustment amount'), '-30000');
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: /Apply cash adjustment/ }));
+    });
+
+    await waitFor(() => {
+      expect((requestBody as Record<string, unknown>).delta).toBe(-30000);
+    });
+  });
+
+  it('shows an error message when POST fails', async () => {
+    server.use(
+      http.post('http://localhost:8000/api/v1/portfolio/cash/adjust', () => {
         return HttpResponse.json({ detail: 'Server error' }, { status: 500 });
       }),
     );
     const user = userEvent.setup();
     render(<LiveCashPanel />, { wrapper: makeWrapper() });
 
-    await waitFor(() => screen.getByLabelText('New cash balance'));
+    await waitFor(() => screen.getByLabelText('Cash adjustment amount'));
 
-    await user.type(screen.getByLabelText('New cash balance'), '9999999');
+    await user.type(screen.getByLabelText('Cash adjustment amount'), '9999999');
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Save cash balance/ }));
+      await user.click(screen.getByRole('button', { name: /Apply cash adjustment/ }));
     });
 
     await waitFor(() => {

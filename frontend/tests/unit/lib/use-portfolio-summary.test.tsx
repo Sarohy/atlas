@@ -3,7 +3,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import * as summaryApi from '@/lib/api/portfolio-summary';
-import { usePortfolioSummary, useUpdateCash } from '@/lib/hooks/use-portfolio-summary';
+import {
+  useAdjustCash,
+  usePortfolioSummary,
+  useUpdateCash,
+} from '@/lib/hooks/use-portfolio-summary';
 import type { PortfolioSummary, CashResponse } from '@/lib/schemas/portfolio-summary';
 
 vi.mock('@/lib/api/portfolio-summary');
@@ -71,5 +75,40 @@ describe('useUpdateCash', () => {
       cash_balance: 5000000,
       cash_floor_pct: 0.12,
     });
+  });
+});
+
+describe('useAdjustCash', () => {
+  it('calls adjustCash with the delta and invalidates the summary query', async () => {
+    vi.mocked(summaryApi.fetchPortfolioSummary).mockResolvedValue(SUMMARY);
+    vi.mocked(summaryApi.adjustCash).mockResolvedValueOnce({
+      cash_balance: 3985000,
+      cash_floor_pct: 0.1,
+    });
+
+    const { result } = renderHook(() => useAdjustCash(), { wrapper: makeWrapper() });
+
+    await act(async () => {
+      result.current.mutate(400000);
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(summaryApi.adjustCash).toHaveBeenCalledWith(400000);
+  });
+
+  it('calls adjustCash with a negative delta for withdrawal', async () => {
+    vi.mocked(summaryApi.adjustCash).mockResolvedValueOnce({
+      cash_balance: 3555000,
+      cash_floor_pct: 0.1,
+    });
+
+    const { result } = renderHook(() => useAdjustCash(), { wrapper: makeWrapper() });
+
+    await act(async () => {
+      result.current.mutate(-30000);
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(summaryApi.adjustCash).toHaveBeenCalledWith(-30000);
   });
 });

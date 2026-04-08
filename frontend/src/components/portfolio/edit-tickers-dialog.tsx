@@ -11,6 +11,7 @@ import {
   useDeleteTicker,
   useCreateTicker,
 } from '@/lib/hooks/use-tickers';
+import { useClusters } from '@/lib/hooks/use-clusters';
 import { TickerSearch } from './ticker-search';
 import type { TickerResponse, TickerSearchResult } from '@/lib/schemas/ticker';
 
@@ -24,6 +25,7 @@ const addSchema = z.object({
     .string()
     .min(1, 'Required')
     .refine((v) => Number(v) > 0, { message: 'Must be > 0' }),
+  cluster_id: z.number().nullable().optional(),
 });
 type AddForm = z.infer<typeof addSchema>;
 
@@ -317,6 +319,7 @@ function AddPositionPanel() {
   const [selectedTicker, setSelectedTicker] = useState<TickerSearchResult | null>(null);
   const sharesRef = useRef<HTMLInputElement | null>(null);
   const { mutate: create, isPending } = useCreateTicker();
+  const { data: clusters } = useClusters();
 
   const {
     register,
@@ -338,7 +341,12 @@ function AddPositionPanel() {
   function onSubmit(data: AddForm) {
     if (!selectedTicker) return;
     create(
-      { ticker: selectedTicker.ticker, company_name: selectedTicker.name, shares: data.shares },
+      {
+        ticker: selectedTicker.ticker,
+        company_name: selectedTicker.name,
+        shares: data.shares,
+        cluster_id: data.cluster_id ?? null,
+      },
       {
         onSuccess: () => {
           reset();
@@ -417,33 +425,55 @@ function AddPositionPanel() {
           <TickerSearch onSelect={setSelectedTicker} autoFocus />
         )}
 
-        {/* Shares + submit */}
+        {/* Shares + cluster + submit */}
         {selectedTicker && (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#3a4a5e] uppercase tracking-widest pointer-events-none">
-                Shares
-              </span>
-              <input
-                type="number"
-                step="any"
-                min="0.0001"
-                placeholder="0.0000"
-                {...sharesRest}
-                ref={(el) => {
-                  sharesFormRef(el);
-                  sharesRef.current = el;
-                }}
-                className="w-full pl-16 pr-3 py-2.5 bg-[#111827] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors text-right"
-              />
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#3a4a5e] uppercase tracking-widest pointer-events-none">
+                  Shares
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  min="0.0001"
+                  placeholder="0.0000"
+                  {...sharesRest}
+                  ref={(el) => {
+                    sharesFormRef(el);
+                    sharesRef.current = el;
+                  }}
+                  className="w-full pl-16 pr-3 py-2.5 bg-[#111827] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors text-right"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isPending}
+                className="shrink-0 h-10 px-5 bg-[#4a90d9] hover:bg-[#3a7bc8] text-[#0a0e1a] font-mono font-bold text-sm rounded-lg transition-colors disabled:opacity-40"
+              >
+                {isPending ? '…' : 'Add'}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="shrink-0 h-10 px-5 bg-[#4a90d9] hover:bg-[#3a7bc8] text-[#0a0e1a] font-mono font-bold text-sm rounded-lg transition-colors disabled:opacity-40"
-            >
-              {isPending ? '…' : 'Add'}
-            </button>
+
+            {/* Cluster dropdown */}
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#3a4a5e] uppercase tracking-widest pointer-events-none">
+                Cluster
+              </span>
+              <select
+                {...register('cluster_id', { setValueAs: (v) => (v === '' ? null : Number(v)) })}
+                className="w-full pl-20 pr-3 py-2.5 bg-[#111827] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors appearance-none"
+                aria-label="Assign to cluster"
+                defaultValue=""
+              >
+                <option value="">None</option>
+                {clusters?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
         {errors.shares && <p className="text-[11px] text-[#f87171]">{errors.shares.message}</p>}

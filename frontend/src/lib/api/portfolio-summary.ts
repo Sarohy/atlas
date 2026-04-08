@@ -1,4 +1,4 @@
-import { apiFetch, apiPut } from './client';
+import { apiFetch, apiPost, apiPut } from './client';
 import {
   cashResponseSchema,
   portfolioSummarySchema,
@@ -19,4 +19,13 @@ export function fetchCash(): Promise<CashResponse> {
 
 export function updateCash(data: CashUpdate): Promise<CashResponse> {
   return apiPut(`${BASE}/cash`, cashResponseSchema, data);
+}
+
+/**
+ * Add or subtract `delta` from the portfolio cash balance.
+ * Positive = deposit; negative = withdrawal.
+ * The backend clamps the result at zero — it cannot go negative.
+ */
+export function adjustCash(delta: number): Promise<CashResponse> {
+  return apiPost(`${BASE}/cash/adjust`, cashResponseSchema, { delta });
 }

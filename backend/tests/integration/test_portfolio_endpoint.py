@@ -189,3 +189,63 @@ async def test_update_cash_floor_pct_above_1_rejected(
     )
     assert resp.status_code == 422
 
+
+# ── POST /portfolio/cash/adjust ───────────────────────────────────────────────
+
+
+async def test_adjust_cash_positive_delta_adds_to_balance(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """Starting balance $20; adding $400 should yield $420."""
+    cfg = _make_config(cash="20.00")
+    mock_session.get = AsyncMock(return_value=cfg)
+    mock_session.flush = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    resp = await client.post("/api/v1/portfolio/cash/adjust", json={"delta": "400.00"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert float(data["cash_balance"]) == pytest.approx(420.0)
+
+
+async def test_adjust_cash_negative_delta_subtracts_from_balance(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """Starting balance $420; subtracting $30 should yield $390."""
+    cfg = _make_config(cash="420.00")
+    mock_session.get = AsyncMock(return_value=cfg)
+    mock_session.flush = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    resp = await client.post(
+        "/api/v1/portfolio/cash/adjust", json={"delta": "-30.00"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert float(data["cash_balance"]) == pytest.approx(390.0)
+
+
+async def test_adjust_cash_clamps_at_zero_prevents_negative(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """Starting balance $10; subtracting $100 should clamp to $0, not go negative."""
+    cfg = _make_config(cash="10.00")
+    mock_session.get = AsyncMock(return_value=cfg)
+    mock_session.flush = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    resp = await client.post(
+        "/api/v1/portfolio/cash/adjust", json={"delta": "-100.00"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert float(data["cash_balance"]) == pytest.approx(0.0)
+
+
+async def test_adjust_cash_missing_delta_is_rejected(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """A request body without `delta` should return 422 Unprocessable Entity."""
+    resp = await client.post("/api/v1/portfolio/cash/adjust", json={})
+    assert resp.status_code == 422
+

@@ -1,33 +1,29 @@
-"""SQLAlchemy ORM model for a portfolio position."""
+"""SQLAlchemy ORM model for a watchlist item."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, Numeric, String, func
+from sqlalchemy.orm import Mapped, mapped_column
 
 from atlas.db.base import Base
 
-if TYPE_CHECKING:
-    from atlas.models.cluster import Cluster
 
+class WatchlistItem(Base):
+    """A single ticker on the ATLAS watchlist.
 
-class Ticker(Base):
-    """A single holding in the ATLAS portfolio.
-
-    ``ticker`` is unique — one record per symbol at all times.
-    ``shares`` is stored with 4 decimal places for fractional-share accuracy.
+    Unlike portfolio tickers, watchlist items carry no share count or position
+    value — they are purely for monitoring price and risk metrics.
     """
 
-    __tablename__ = "tickers"
+    __tablename__ = "watchlist"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     # Maximum ticker length on US exchanges is 5 chars; 20 gives future headroom.
-    TICKER_MAX_LEN = 20  # e.g. "GOOGL", "BRK.B"
+    TICKER_MAX_LEN = 20
     ticker: Mapped[str] = mapped_column(
         String(TICKER_MAX_LEN),
         unique=True,
@@ -35,22 +31,16 @@ class Ticker(Base):
         index=True,
     )
 
-    # Human-readable company name from Polygon — stored so we don't re-fetch.
+    # Human-readable company name — stored to avoid redundant Polygon lookups.
     COMPANY_NAME_MAX_LEN = 200
     company_name: Mapped[str] = mapped_column(
         String(COMPANY_NAME_MAX_LEN),
         nullable=False,
     )
 
-    # Shares held — 15 digits total, 4 decimal places.
-    shares: Mapped[Decimal] = mapped_column(
-        Numeric(precision=15, scale=4),
-        nullable=False,
-    )
+    # --- Market-data columns — populated by the /watchlist/sync endpoint ---
 
-    # --- Market data columns — populated by the /sync endpoint ---
-
-    # Latest trade price from Polygon session.price or last_trade.price.
+    # Latest trade price from the Polygon snapshot.
     current_price: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=15, scale=4),
         nullable=True,
@@ -74,32 +64,13 @@ class Ticker(Base):
         nullable=True,
     )
 
-    # Position market value: shares × current_price.
-    position_value: Mapped[Decimal | None] = mapped_column(
-        Numeric(precision=20, scale=4),
-        nullable=True,
-    )
-
-    # Rolling 1-year beta vs SPY — measures sensitivity to broad market moves.
-    # β > 1: more volatile than market; β < 1: less volatile; β < 0: inverse.
+    # Rolling 1-year beta vs SPY.
     beta: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=8, scale=4),
         nullable=True,
     )
 
-    # Optional cluster assignment — NULL if unassigned. ON DELETE SET NULL.
-    cluster_id: Mapped[int | None] = mapped_column(
-        ForeignKey("clusters.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    cluster: Mapped[Cluster | None] = relationship(
-        "Cluster",
-        back_populates="tickers",
-        lazy="joined",
-    )
-
-    # Timestamp of the last successful Polygon sync for this position.
+    # Timestamp of the last successful Polygon sync for this item.
     synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -118,4 +89,4 @@ class Ticker(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Ticker ticker={self.ticker!r} shares={self.shares}>"
+        return f"<WatchlistItem ticker={self.ticker!r}>"

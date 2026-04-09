@@ -20,10 +20,11 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.3,<0.12.0"]
-build-backend = "uv_build"
+# hatchling is a standard PEP 517 build backend, compatible with plain pip.
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "httpx>=0.28.1",
     "mypy>=1.20.0",

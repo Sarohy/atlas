@@ -38,6 +38,7 @@ cp /path/to/this/bundle/.claude/agents/*.md .claude/agents/
 Open Claude Code in the `atlas/` directory and paste the **entire contents of `BACKEND_SETUP.md`** as your first message. Claude will work through the steps, using the `tdd-enforcer` and `code-reviewer` agents at the appropriate moments.
 
 When it finishes, you'll have a working `backend/` directory with:
+
 - A passing `GET /api/v1/health` endpoint
 - ≥90% test coverage
 - All quality gates green
@@ -48,6 +49,7 @@ When it finishes, you'll have a working `backend/` directory with:
 Once the backend is running, paste the **entire contents of `FRONTEND_SETUP.md`** as your next message in the same Claude Code session (or a new one — agents work either way).
 
 When it finishes, you'll have a working `frontend/` directory with:
+
 - A home page rendering "ATLAS" + live backend health status
 - Unit, component, and e2e tests all passing
 - Same quality gates and TDD discipline as the backend
@@ -56,7 +58,7 @@ When it finishes, you'll have a working `frontend/` directory with:
 
 ```bash
 # Terminal 1 — make sure local Postgres is running, then:
-cd backend && uv run uvicorn atlas.main:create_app --factory --reload
+cd backend && uvicorn atlas.main:create_app --factory --reload
 
 # Terminal 2
 cd frontend && pnpm dev
@@ -66,6 +68,60 @@ cd frontend && pnpm test:e2e
 ```
 
 Visit `http://localhost:3000` and confirm "ATLAS" + "Backend: ok" appears.
+
+## Running Locally
+
+### Backend
+
+```bash
+# Prerequisites: Python 3.12+, PostgreSQL running, atlas_dev database created
+cd backend
+
+# First-time setup
+python3.12 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+cp .env.example .env               # fill in DATABASE_URL
+
+# Apply migrations
+alembic upgrade head
+
+# Start the dev server (http://localhost:8000)
+uvicorn atlas.main:create_app --factory --reload --port 8000
+```
+
+### Frontend
+
+```bash
+# Prerequisites: Node 22+, pnpm, backend running on :8000
+cd frontend
+
+# First-time setup
+pnpm install
+cp .env.example .env.local         # NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Start the dev server (http://localhost:3000)
+pnpm dev
+```
+
+### Running tests
+
+```bash
+# Backend (no running server needed — uses test database)
+cd backend
+source .venv/bin/activate
+pytest
+
+# Frontend unit + component (MSW mocks the API)
+cd frontend
+pnpm test
+
+# Frontend e2e (Playwright auto-starts pnpm dev; requires backend on :8000)
+cd frontend
+pnpm test:e2e
+```
+
+---
 
 ## How the agents work together
 
@@ -94,7 +150,7 @@ The Hello World scaffold doesn't build any of that yet. It builds the foundation
 
 ## Tech stack reference
 
-**Backend:** Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · PostgreSQL 16 · Alembic · pytest · uv · ruff · mypy
+**Backend:** Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · PostgreSQL 16 · Alembic · pytest · pip · ruff · mypy
 
 **Frontend:** Next.js 15 · React 19 · TypeScript (strict) · TailwindCSS · shadcn/ui · TanStack Query · Zod · React Hook Form · Vitest · React Testing Library · MSW · Playwright · pnpm
 

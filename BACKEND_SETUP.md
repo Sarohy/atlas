@@ -22,7 +22,7 @@ The structure must support what is coming next: scoring jobs, market data ingest
 - **SQLAlchemy 2.0** (async) + **Alembic** for ORM and migrations
 - **PostgreSQL 16** as the database (installed locally — no Docker)
 - **pytest** + **pytest-asyncio** + **httpx** for testing
-- **uv** for dependency management (faster than pip/poetry)
+- **pip** for dependency management (standard Python package manager)
 - **ruff** for linting and formatting
 - **mypy** in strict mode for type checking
 - **pre-commit** hooks to enforce all of the above
@@ -88,11 +88,15 @@ backend/
 ### Step 1 — Initialize the project
 
 1. Create the `backend/` directory and `cd` into it.
-2. Run `uv init --package atlas` to scaffold a `pyproject.toml`.
-3. Add dependencies:
+2. Create and activate a virtual environment:
+   ```bash
+   python3.12 -m venv .venv
+   source .venv/bin/activate   # Windows: .venv\Scripts\activate
    ```
-   uv add fastapi uvicorn[standard] pydantic pydantic-settings sqlalchemy[asyncio] asyncpg alembic structlog
-   uv add --dev pytest pytest-asyncio pytest-cov httpx ruff mypy pre-commit
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
 4. Create the directory structure shown above. Every package directory needs an `__init__.py`.
 5. Create `.gitignore` (Python defaults + `.env`, `.venv`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`).
@@ -108,7 +112,7 @@ In `pyproject.toml` add these tool sections:
 
 Create `.pre-commit-config.yaml` with hooks for ruff (lint + format), mypy, and pytest (run on push only).
 
-Run `uv run pre-commit install` and `uv run pre-commit install --hook-type pre-push`.
+Run `pre-commit install` and `pre-commit install --hook-type pre-push`.
 
 ### Step 3 — Write the failing tests FIRST
 
@@ -117,17 +121,19 @@ This is the TDD step. Do not write any application code yet.
 **`tests/conftest.py`** — create an async test client fixture using `httpx.AsyncClient` and `ASGITransport` pointing at the FastAPI app.
 
 **`tests/unit/test_health_schema.py`** — write a test that:
+
 - Imports `HealthResponse` from `atlas.schemas.health`
 - Asserts it has fields `status: str` and `service: str`
 - Asserts an instance with `status="ok"` and `service="atlas-backend"` serializes to the expected dict
 
 **`tests/integration/test_health_endpoint.py`** — write a test that:
+
 - Uses the async client fixture
 - Calls `GET /api/v1/health`
 - Asserts status code 200
 - Asserts response JSON equals `{"status": "ok", "service": "atlas-backend"}`
 
-Run `uv run pytest`. **Confirm both tests fail** with import errors. This is correct — failing tests prove the test runner works.
+Run `pytest`. **Confirm both tests fail** with import errors. This is correct — failing tests prove the test runner works.
 
 ### Step 4 — Implement the minimum code to pass
 
@@ -140,7 +146,7 @@ Now write only enough code to make the tests green:
 5. **`src/atlas/main.py`** — FastAPI app factory `create_app()` that mounts the v1 router under `/api/v1` and configures CORS for `http://localhost:3000`.
 6. **`.env.example`** — document required env vars.
 
-Run `uv run pytest`. **Both tests must now pass.** Run `uv run ruff check . && uv run ruff format --check . && uv run mypy src`. All must pass.
+Run `pytest`. **Both tests must now pass.** Run `ruff check . && ruff format --check . && mypy src`. All must pass.
 
 ### Step 5 — Database scaffolding (no models yet)
 
@@ -161,7 +167,7 @@ Run `uv run pytest`. **Both tests must now pass.** Run `uv run ruff check . && u
 3. **`src/atlas/db/base.py`** — SQLAlchemy `DeclarativeBase` subclass.
 4. **`src/atlas/db/session.py`** — async engine and `async_sessionmaker` reading `database_url` from settings.
 5. **`alembic.ini`** + **`alembic/env.py`** — configured for async, importing `Base` from `atlas.db.base`. No migrations yet.
-6. Verify: `uv run alembic revision --autogenerate -m "initial"` should produce an empty migration. Delete it — we don't commit empty migrations.
+6. Verify: `alembic revision --autogenerate -m "initial"` should produce an empty migration. Delete it — we don't commit empty migrations.
 
 ### Step 6 — Logging and final verification
 
@@ -169,12 +175,12 @@ Run `uv run pytest`. **Both tests must now pass.** Run `uv run ruff check . && u
 2. Add a startup log line confirming the app booted with environment name.
 3. Run the full quality gate one more time:
    ```
-   uv run ruff check .
-   uv run ruff format --check .
-   uv run mypy src
-   uv run pytest --cov-fail-under=90
+   ruff check .
+   ruff format --check .
+   mypy src
+   pytest --cov-fail-under=90
    ```
-4. Start the server: `uv run uvicorn atlas.main:create_app --factory --reload`
+4. Start the server: `uvicorn atlas.main:create_app --factory --reload`
 5. Manually verify `curl http://localhost:8000/api/v1/health` returns the expected JSON.
 
 ### Step 7 — Document and commit
@@ -201,13 +207,13 @@ These rules apply to **every future feature**, not just this scaffold:
 
 Before declaring this step done, confirm:
 
-- [ ] `uv run pytest` passes with ≥90% coverage
-- [ ] `uv run ruff check .` passes
-- [ ] `uv run mypy src` passes in strict mode
-- [ ] `uv run uvicorn atlas.main:create_app --factory` starts cleanly
+- [ ] `pytest` passes with ≥90% coverage
+- [ ] `ruff check .` passes
+- [ ] `mypy src` passes in strict mode
+- [ ] `uvicorn atlas.main:create_app --factory` starts cleanly
 - [ ] `curl http://localhost:8000/api/v1/health` returns `{"status":"ok","service":"atlas-backend"}`
 - [ ] Local PostgreSQL is running and `atlas_dev` database exists
-- [ ] `uv run alembic upgrade head` runs without error
+- [ ] `alembic upgrade head` runs without error
 - [ ] Pre-commit hooks installed and passing
 - [ ] README documents everything above
 

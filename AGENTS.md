@@ -58,7 +58,7 @@ These apply to every change, every file, every agent:
 | Tests         | pytest + pytest-asyncio + pytest-cov         |
 | Lint / format | ruff                                         |
 | Types         | mypy (strict)                                |
-| Dev runner    | `uv run`                                     |
+| Dev runner    | `python` (pip + venv)                        |
 
 ### Frontend — `frontend/`
 
@@ -145,10 +145,10 @@ frontend/tests/components/health-status.test.tsx  ↔  frontend/src/components/h
 
 ```bash
 cd backend
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
-uv run pytest --cov=src --cov-fail-under=90
+ruff check .
+ruff format --check .
+mypy src
+pytest --cov=src --cov-fail-under=90
 ```
 
 ### Frontend
@@ -172,7 +172,7 @@ Git hooks (Husky + lint-staged on frontend, pre-commit on backend) enforce this 
 ```bash
 # Terminal 1 — PostgreSQL must be running first
 cd backend
-uv run uvicorn atlas.main:create_app --factory --reload --port 8000
+uvicorn atlas.main:create_app --factory --reload --port 8000
 ```
 
 Required env (copy from `backend/.env.example` → `backend/.env`):
@@ -200,7 +200,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ```bash
 # Backend unit + integration (no running server needed)
-cd backend && uv run pytest
+cd backend && pytest
 
 # Frontend unit + component (MSW mocks the backend)
 cd frontend && pnpm test

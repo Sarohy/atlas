@@ -57,7 +57,7 @@ Tests live in `tests/` and use **MSW** to mock the backend — no running backen
 
 ```bash
 # Requires the backend to be running on :8000 first:
-# cd ../backend && uv run uvicorn atlas.main:create_app --factory --port 8000
+# cd ../backend && source .venv/bin/activate && uvicorn atlas.main:create_app --factory --port 8000
 
 pnpm test:e2e          # Playwright auto-starts `pnpm dev` on :3000, then runs Chromium tests
 ```

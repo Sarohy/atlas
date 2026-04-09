@@ -41,3 +41,18 @@ def create_app() -> FastAPI:
     logger.info("ATLAS backend booted", environment=settings.environment)
 
     return app
+
+
+if __name__ == "__main__":
+    import multiprocessing
+
+    import uvicorn
+
+    uvicorn.run(
+        "atlas.main:create_app",
+        factory=True,
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        workers=multiprocessing.cpu_count(),
+    )

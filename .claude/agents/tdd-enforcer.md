@@ -13,7 +13,7 @@ When invoked, you:
 1. **Identify the change being proposed.** Read the user's request and any files about to be modified.
 2. **Check for existing tests.** Use Grep and Glob to find test files corresponding to the code being changed. Backend tests live in `backend/tests/`, frontend tests live in `frontend/tests/` and `frontend/e2e/`.
 3. **Verify the test is failing for the right reason.** Run the test suite scoped to the relevant file:
-   - Backend: `cd backend && uv run pytest tests/path/to/test.py -v`
+   - Backend: `cd backend && source .venv/bin/activate && pytest tests/path/to/test.py -v`
    - Frontend: `cd frontend && pnpm test tests/path/to/test.test.ts`
 4. **Block or approve.**
    - **Block** if there is no test, the test passes already (meaning it's not actually testing the new behavior), or the test fails for the wrong reason (import error in implementation file = bad, assertion error on expected behavior = good for unit tests, import error on test target = good if the target doesn't exist yet).

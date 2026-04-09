@@ -1,6 +1,6 @@
 # ATLAS Backend
 
-Decision-support API for active investing — FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · PostgreSQL · uv
+Decision-support API for active investing — FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · PostgreSQL · pip
 
 ---
 
@@ -9,7 +9,7 @@ Decision-support API for active investing — FastAPI · Pydantic v2 · SQLAlche
 | Tool       | Version | Install                                                                     |
 | ---------- | ------- | --------------------------------------------------------------------------- |
 | Python     | 3.12+   | [pyenv](https://github.com/pyenv/pyenv) or [python.org](https://python.org) |
-| uv         | latest  | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                          |
+| pip        | bundled | ships with Python 3.12+                                                     |
 | PostgreSQL | 14+     | `brew install postgresql@16` (macOS)                                        |
 
 Ensure PostgreSQL is running and the following databases exist:
@@ -27,16 +27,20 @@ createdb atlas_test
 # Clone and enter the backend directory
 cd backend
 
-# Install all dependencies (creates .venv automatically)
-uv sync
+# Create and activate a virtual environment
+python3.12 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# Install all dependencies
+pip install -r requirements-dev.txt
 
 # Copy and fill environment variables
 cp .env.example .env
 # Edit .env — set DATABASE_URL to your local postgres connection string
 
 # Install pre-commit hooks
-uv run pre-commit install
-uv run pre-commit install --hook-type pre-push
+pre-commit install
+pre-commit install --hook-type pre-push
 ```
 
 ---
@@ -44,7 +48,7 @@ uv run pre-commit install --hook-type pre-push
 ## Running Tests
 
 ```bash
-uv run pytest
+pytest
 ```
 
 This runs all tests with coverage. The gate fails if coverage drops below **90%**.
@@ -52,7 +56,7 @@ This runs all tests with coverage. The gate fails if coverage drops below **90%*
 To run a single file:
 
 ```bash
-uv run pytest tests/unit/test_health_schema.py -v
+pytest tests/unit/test_health_schema.py -v
 ```
 
 ---
@@ -60,7 +64,7 @@ uv run pytest tests/unit/test_health_schema.py -v
 ## Running the Dev Server
 
 ```bash
-uv run uvicorn atlas.main:create_app --factory --reload
+uvicorn atlas.main:create_app --factory --reload
 ```
 
 The API is then available at `http://localhost:8000`.
@@ -80,10 +84,10 @@ Expected response:
 Run before every commit:
 
 ```bash
-uv run ruff check .          # lint
-uv run ruff format --check . # formatting
-uv run mypy src              # type checks (strict mode)
-uv run pytest                # tests + coverage ≥ 90%
+ruff check .          # lint
+ruff format --check . # formatting
+mypy src              # type checks (strict mode)
+pytest                # tests + coverage ≥ 90%
 ```
 
 All four commands must exit 0.
@@ -94,10 +98,10 @@ All four commands must exit 0.
 
 ```bash
 # Apply all migrations to the dev database
-uv run alembic upgrade head
+alembic upgrade head
 
 # Create a new migration after adding/changing a model
-uv run alembic revision --autogenerate -m "describe your change"
+alembic revision --autogenerate -m "describe your change"
 ```
 
 ---
@@ -138,9 +142,9 @@ backend/
 Every feature follows **Red → Green → Refactor**:
 
 1. Write a failing test that describes the desired behaviour.
-2. Run `uv run pytest` — confirm the new test fails.
+2. Run `pytest` — confirm the new test fails.
 3. Write the **minimum** implementation to make it pass.
-4. Run `uv run pytest` — confirm all tests pass.
+4. Run `pytest` — confirm all tests pass.
 5. Refactor if needed. Tests still pass.
 6. Run the full quality gate before committing.
 

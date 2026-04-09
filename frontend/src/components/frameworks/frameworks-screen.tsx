@@ -1,14 +1,10 @@
 import { cn } from '@/lib/utils';
-import { F1MomentumPanel } from './f1-momentum-panel';
-import { F2EarningsPanel } from './f2-earnings-panel';
-import { F3AnalystPanel } from './f3-analyst-panel';
 import type {
   FrameworkCard,
   FrameworkOverviewCard,
   FrameworksScreenData,
 } from '@/types/frameworks';
-import { F4OptionsPanel } from './f4-options-panel';
-import { F5FundamentalPanel } from './f5-fundamental-panel';
+import { FrameworksPanelsSection } from './frameworks-panels-section';
 
 type FrameworksScreenProps = {
   data: FrameworksScreenData;
@@ -32,11 +28,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
         ))}
       </section>
 
-      <F1MomentumPanel />
-      <F2EarningsPanel />
-      <F3AnalystPanel />
-      <F4OptionsPanel />
-      <F5FundamentalPanel />
+      <FrameworksPanelsSection />
     </main>
   );
 }

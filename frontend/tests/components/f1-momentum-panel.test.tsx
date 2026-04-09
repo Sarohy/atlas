@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
@@ -17,7 +16,7 @@ function createWrapper() {
 }
 
 function renderPanel() {
-  return render(<F1MomentumPanel />, { wrapper: createWrapper() });
+  return render(<F1MomentumPanel ticker="AAPL" />, { wrapper: createWrapper() });
 }
 
 // ---------------------------------------------------------------------------
@@ -30,24 +29,7 @@ describe('F1MomentumPanel', () => {
     expect(screen.getByText('F1 Momentum')).toBeInTheDocument();
   });
 
-  it('shows tickers loading state while the portfolio is being fetched', () => {
-    renderPanel();
-    // MSW will respond asynchronously — tickers loading indicator appears first
-    expect(screen.getByTestId('f1-tickers-loading')).toBeInTheDocument();
-  });
-
-  it('renders a ticker select populated from the backend', async () => {
-    renderPanel();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('f1-ticker-select')).toBeInTheDocument();
-    });
-
-    // MSW handler returns AAPL — it should appear as an option
-    expect(screen.getByRole('option', { name: 'AAPL' })).toBeInTheDocument();
-  });
-
-  it('renders momentum data after tickers and momentum both resolve', async () => {
+  it('renders momentum data after momentum resolves', async () => {
     renderPanel();
 
     await waitFor(() => {
@@ -73,15 +55,5 @@ describe('F1MomentumPanel', () => {
 
     expect(screen.getByText('62.5')).toBeInTheDocument();
     expect(screen.getByText('ABOVE ALL')).toBeInTheDocument();
-  });
-
-  it('re-fetches when the user selects a different ticker', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('f1-ticker-select'));
-
-    const select = screen.getByTestId('f1-ticker-select');
-    await userEvent.selectOptions(select, 'AAPL');
-
-    expect((select as HTMLSelectElement).value).toBe('AAPL');
   });
 });

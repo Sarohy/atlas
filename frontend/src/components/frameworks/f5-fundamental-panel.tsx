@@ -1,10 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import { cn } from '@/lib/utils';
 import { useFundamental } from '@/lib/hooks/use-fundamental';
-import { useTickers } from '@/lib/hooks/use-tickers';
 import type {
   AltmanZScoreIndicator,
   DebtEquityIndicator,
@@ -63,8 +60,15 @@ const INST_TONE: Record<string, string> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+type F5FundamentalPanelProps = {
+  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
+  ticker: string;
+};
+
 /**
- * F5 Fundamental Quality panel — self-contained, no props.
+ * F5 Fundamental Quality panel — receives the active ticker from the shared
+ * selector and shows insider activity, Altman Z-Score, free cash flow,
+ * debt/equity ratio, and institutional ownership plus the weighted F5 score.
  *
  * Five sub-indicators per Factor_Mapping_Guide:
  *   Insider Activity (30%) | Altman Z-Score (25%) | Free Cash Flow (20%)
@@ -74,30 +78,13 @@ const INST_TONE: Record<string, string> = {
  * Caps: C-suite sell >$1M → 72 | CEO/CFO >$10M → 65 | Altman grey zone → 75.
  * Hard block: Altman Z < 1.8 → new capital blocked.
  */
-export function F5FundamentalPanel() {
-  const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
-  const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
-  const { data, isFetching, isError, error } = useFundamental(activeTicker);
+export function F5FundamentalPanel({ ticker }: F5FundamentalPanelProps) {
+  const { data, isFetching, isError, error } = useFundamental(ticker);
 
   return (
     <section className="atlas-frameworks-panel atlas-f5-panel" data-testid="f5-fundamental-panel">
       <header className="atlas-frameworks-panel-header atlas-f5-panel-header">
         <h2 className="atlas-frameworks-panel-title">F5 Fundamental Quality</h2>
-        {tickersLoading && (
-          <span className="atlas-f5-state-msg" data-testid="f5-tickers-loading">
-            Loading tickers…
-          </span>
-        )}
-        {tickersError && (
-          <span className="atlas-f5-state-msg atlas-f5-state-msg--error" data-testid="f5-tickers-error">
-            Failed to load portfolio tickers.
-          </span>
-        )}
-        {!tickersLoading && !tickersError && tickers.length > 0 && (
-          <TickerSelect tickers={tickers} value={activeTicker} onChange={setSelectedTicker} />
-        )}
       </header>
 
       <div className="atlas-f5-panel-body">
@@ -108,39 +95,9 @@ export function F5FundamentalPanel() {
           />
         )}
         {!isFetching && !isError && data && <FundamentalContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
+        {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ticker selector
-// ---------------------------------------------------------------------------
-
-function TickerSelect({
-  tickers,
-  value,
-  onChange,
-}: {
-  tickers: readonly string[];
-  value: string;
-  onChange: (t: string) => void;
-}) {
-  return (
-    <select
-      className="atlas-f5-ticker-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Select ticker for F5 fundamental analysis"
-      data-testid="f5-ticker-select"
-    >
-      {tickers.map((t) => (
-        <option key={t} value={t}>
-          {t}
-        </option>
-      ))}
-    </select>
   );
 }
 
@@ -281,17 +238,14 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 // Indicator card shell
 // ---------------------------------------------------------------------------
 
-function IndicatorCard({
-  label,
-  score,
-  weight,
-  children,
-}: {
+type IndicatorCardProps = {
   label: string;
   score: number;
   weight: number;
   children: React.ReactNode;
-}) {
+};
+
+function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
   const weightPct = Math.round(weight * 100);
   return (
     <article
@@ -414,9 +368,7 @@ function FreeCashFlowCard({ fcf }: { fcf: FreeCashFlowIndicator }) {
         {fcf.fcf_prior !== null && (
           <div className="atlas-f5-dl-row">
             <dt>Prior Q</dt>
-            <dd className={fcf.fcf_prior >= 0 ? '' : 'is-red'}>
-              {formatUsd(fcf.fcf_prior)}
-            </dd>
+            <dd className={fcf.fcf_prior >= 0 ? '' : 'is-red'}>{formatUsd(fcf.fcf_prior)}</dd>
           </div>
         )}
       </dl>
@@ -469,9 +421,7 @@ function InstitutionalOwnershipCard({ inst }: { inst: InstitutionalOwnershipIndi
         {inst.ownership_pct !== null && (
           <div className="atlas-f5-dl-row">
             <dt>Ownership</dt>
-            <dd className={labelTone}>
-              {(inst.ownership_pct * 100).toFixed(1)}%
-            </dd>
+            <dd className={labelTone}>{(inst.ownership_pct * 100).toFixed(1)}%</dd>
           </div>
         )}
       </dl>

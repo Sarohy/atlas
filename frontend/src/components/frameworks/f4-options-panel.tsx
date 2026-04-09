@@ -1,10 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import { cn } from '@/lib/utils';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
-import { useTickers } from '@/lib/hooks/use-tickers';
 import type {
   CallPutRatioIndicator,
   DarkPoolIndicator,
@@ -43,40 +40,30 @@ const TIER_TONE: Record<string, string> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+type F4OptionsPanelProps = {
+  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
+  ticker: string;
+};
+
 /**
- * F4 Options Flow panel — self-contained, no props.
+ * F4 Options Flow panel — receives the active ticker from the shared
+ * selector and shows whale block size, call/put ratio, volume vs OI,
+ * dark pool prints, and sweep type plus the weighted F4 composite score.
  *
  * Five sub-indicators per Factor_Mapping_Guide:
  *   Whale Block Size (35%) | Call/Put Ratio (20%) | Volume vs OI (20%)
  *   Dark Pool Print (15%) | Sweep Type (10%)
  *
  * Data source: Unusual Whales API.
- * Collar flag caps score at 68 when protective put + covered call structure is detected.
+ * Collar flag caps score at 68 when a protective put + covered call is detected.
  */
-export function F4OptionsPanel() {
-  const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
-  const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-  const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
-  const { data, isFetching, isError, error } = useOptionsFlow(activeTicker);
+export function F4OptionsPanel({ ticker }: F4OptionsPanelProps) {
+  const { data, isFetching, isError, error } = useOptionsFlow(ticker);
 
   return (
     <section className="atlas-frameworks-panel atlas-f4-panel" data-testid="f4-options-panel">
       <header className="atlas-frameworks-panel-header atlas-f4-panel-header">
         <h2 className="atlas-frameworks-panel-title">F4 Options Flow</h2>
-        {tickersLoading && (
-          <span className="atlas-f4-state-msg" data-testid="f4-tickers-loading">
-            Loading tickers…
-          </span>
-        )}
-        {tickersError && (
-          <span className="atlas-f4-state-msg atlas-f4-state-msg--error" data-testid="f4-tickers-error">
-            Failed to load portfolio tickers.
-          </span>
-        )}
-        {!tickersLoading && !tickersError && tickers.length > 0 && (
-          <TickerSelect tickers={tickers} value={activeTicker} onChange={setSelectedTicker} />
-        )}
       </header>
 
       <div className="atlas-f4-panel-body">
@@ -87,39 +74,9 @@ export function F4OptionsPanel() {
           />
         )}
         {!isFetching && !isError && data && <OptionsFlowContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
+        {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ticker selector
-// ---------------------------------------------------------------------------
-
-function TickerSelect({
-  tickers,
-  value,
-  onChange,
-}: {
-  tickers: readonly string[];
-  value: string;
-  onChange: (t: string) => void;
-}) {
-  return (
-    <select
-      className="atlas-f4-ticker-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Select ticker for F4 options flow analysis"
-      data-testid="f4-ticker-select"
-    >
-      {tickers.map((t) => (
-        <option key={t} value={t}>
-          {t}
-        </option>
-      ))}
-    </select>
   );
 }
 
@@ -241,17 +198,14 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 // Indicator card shell
 // ---------------------------------------------------------------------------
 
-function IndicatorCard({
-  label,
-  score,
-  weight,
-  children,
-}: {
+type IndicatorCardProps = {
   label: string;
   score: number;
   weight: number;
   children: React.ReactNode;
-}) {
+};
+
+function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
   const weightPct = Math.round(weight * 100);
   return (
     <article

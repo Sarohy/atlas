@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
@@ -17,7 +16,7 @@ function createWrapper() {
 }
 
 function renderPanel() {
-  return render(<F2EarningsPanel />, { wrapper: createWrapper() });
+  return render(<F2EarningsPanel ticker="AAPL" />, { wrapper: createWrapper() });
 }
 
 // ---------------------------------------------------------------------------
@@ -30,22 +29,7 @@ describe('F2EarningsPanel', () => {
     expect(screen.getByText('F2 Earnings Quality')).toBeInTheDocument();
   });
 
-  it('shows tickers loading state while the portfolio is being fetched', () => {
-    renderPanel();
-    expect(screen.getByTestId('f2-tickers-loading')).toBeInTheDocument();
-  });
-
-  it('renders a ticker select populated from the backend', async () => {
-    renderPanel();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('f2-ticker-select')).toBeInTheDocument();
-    });
-
-    expect(screen.getByRole('option', { name: 'AAPL' })).toBeInTheDocument();
-  });
-
-  it('renders earnings data after tickers and earnings both resolve', async () => {
+  it('renders earnings data after earnings resolves', async () => {
     renderPanel();
 
     await waitFor(() => {
@@ -72,15 +56,5 @@ describe('F2EarningsPanel', () => {
     expect(screen.getByText('+65.0%')).toBeInTheDocument();
     // Guidance direction from mock: guidance_label='RAISE_FULL_YEAR' → "Raised Full Year"
     expect(screen.getByText('Raised Full Year')).toBeInTheDocument();
-  });
-
-  it('re-fetches when the user selects a different ticker', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('f2-ticker-select'));
-
-    const select = screen.getByTestId('f2-ticker-select');
-    await userEvent.selectOptions(select, 'AAPL');
-
-    expect((select as HTMLSelectElement).value).toBe('AAPL');
   });
 });

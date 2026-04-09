@@ -1,10 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import { cn } from '@/lib/utils';
 import { useMomentum } from '@/lib/hooks/use-momentum';
-import { useTickers } from '@/lib/hooks/use-tickers';
 import type {
   MacdIndicator,
   MaAlignmentIndicator,
@@ -35,47 +32,23 @@ const GRADE_TONE: Record<string, string> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+type F1MomentumPanelProps = {
+  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
+  ticker: string;
+};
+
 /**
- * F1 Momentum panel — fetches the user's portfolio tickers from the backend,
- * lets the user pick one from a dropdown, then calls the momentum API and
- * shows RSI, MACD, MA alignment, 52-week position, 1M/6M performance,
- * sector momentum, and the composite F1 score.
+ * F1 Momentum panel — receives the active ticker from the shared selector,
+ * calls the momentum API, and shows RSI, MACD, MA alignment, 52-week
+ * position, 1M/6M performance, sector momentum, and the composite F1 score.
  */
-export function F1MomentumPanel() {
-  const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
-
-  // Derive a sorted list of unique ticker symbols from the portfolio.
-  const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
-
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-
-  // Resolve the ticker actually used for the API call: prefer the user's
-  // explicit choice, but fall back to the first portfolio ticker so the
-  // panel is populated automatically on first load.
-  const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
-
-  const { data, isFetching, isError, error } = useMomentum(activeTicker);
+export function F1MomentumPanel({ ticker }: F1MomentumPanelProps) {
+  const { data, isFetching, isError, error } = useMomentum(ticker);
 
   return (
     <section className="atlas-frameworks-panel atlas-f1-panel" data-testid="f1-momentum-panel">
       <header className="atlas-frameworks-panel-header atlas-f1-panel-header">
         <h2 className="atlas-frameworks-panel-title">F1 Momentum</h2>
-        {tickersLoading && (
-          <span className="atlas-f1-state-msg" data-testid="f1-tickers-loading">
-            Loading tickers…
-          </span>
-        )}
-        {tickersError && (
-          <span
-            className="atlas-f1-state-msg atlas-f1-state-msg--error"
-            data-testid="f1-tickers-error"
-          >
-            Failed to load portfolio tickers.
-          </span>
-        )}
-        {!tickersLoading && !tickersError && tickers.length > 0 && (
-          <TickerSelect tickers={tickers} value={activeTicker} onChange={setSelectedTicker} />
-        )}
       </header>
 
       <div className="atlas-f1-panel-body">
@@ -86,37 +59,9 @@ export function F1MomentumPanel() {
           />
         )}
         {!isFetching && !isError && data && <MomentumContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
+        {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ticker selector
-// ---------------------------------------------------------------------------
-
-type TickerSelectProps = {
-  tickers: readonly string[];
-  value: string;
-  onChange: (ticker: string) => void;
-};
-
-function TickerSelect({ tickers, value, onChange }: TickerSelectProps) {
-  return (
-    <select
-      className="atlas-f1-ticker-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Select ticker for F1 momentum analysis"
-      data-testid="f1-ticker-select"
-    >
-      {tickers.map((t) => (
-        <option key={t} value={t}>
-          {t}
-        </option>
-      ))}
-    </select>
   );
 }
 

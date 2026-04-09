@@ -1,10 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import { cn } from '@/lib/utils';
 import { useEarnings } from '@/lib/hooks/use-earnings';
-import { useTickers } from '@/lib/hooks/use-tickers';
 import type {
   BacklogBtbIndicator,
   EarningsResponse,
@@ -66,45 +63,24 @@ const BACKLOG_TONE: Record<string, string> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+type F2EarningsPanelProps = {
+  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
+  ticker: string;
+};
+
 /**
- * F2 Earnings Quality panel — fetches the user's portfolio tickers from the
- * backend, lets the user pick one, then calls the earnings API and shows
- * revenue growth (YoY), EPS beat history (rolling 3Q), guidance direction
- * (from transcript NLP), gross-margin trend, and backlog/visibility
- * (from transcript NLP), plus the weighted F2 composite score.
+ * F2 Earnings Quality panel — receives the active ticker from the shared
+ * selector, calls the earnings API, and shows revenue growth (YoY), EPS beat
+ * history (rolling 3Q), guidance direction, gross-margin trend, and
+ * backlog/visibility, plus the weighted F2 composite score.
  */
-export function F2EarningsPanel() {
-  const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
-
-  const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
-
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-
-  // Resolve the active ticker: prefer explicit selection, fall back to first.
-  const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
-
-  const { data, isFetching, isError, error } = useEarnings(activeTicker);
+export function F2EarningsPanel({ ticker }: F2EarningsPanelProps) {
+  const { data, isFetching, isError, error } = useEarnings(ticker);
 
   return (
     <section className="atlas-frameworks-panel atlas-f2-panel" data-testid="f2-earnings-panel">
       <header className="atlas-frameworks-panel-header atlas-f2-panel-header">
         <h2 className="atlas-frameworks-panel-title">F2 Earnings Quality</h2>
-        {tickersLoading && (
-          <span className="atlas-f2-state-msg" data-testid="f2-tickers-loading">
-            Loading tickers…
-          </span>
-        )}
-        {tickersError && (
-          <span
-            className="atlas-f2-state-msg atlas-f2-state-msg--error"
-            data-testid="f2-tickers-error"
-          >
-            Failed to load portfolio tickers.
-          </span>
-        )}
-        {!tickersLoading && !tickersError && tickers.length > 0 && (
-          <TickerSelect tickers={tickers} value={activeTicker} onChange={setSelectedTicker} />
-        )}
       </header>
 
       <div className="atlas-f2-panel-body">
@@ -115,37 +91,9 @@ export function F2EarningsPanel() {
           />
         )}
         {!isFetching && !isError && data && <EarningsContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
+        {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ticker selector
-// ---------------------------------------------------------------------------
-
-type TickerSelectProps = {
-  tickers: readonly string[];
-  value: string;
-  onChange: (ticker: string) => void;
-};
-
-function TickerSelect({ tickers, value, onChange }: TickerSelectProps) {
-  return (
-    <select
-      className="atlas-f2-ticker-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Select ticker for F2 earnings quality analysis"
-      data-testid="f2-ticker-select"
-    >
-      {tickers.map((t) => (
-        <option key={t} value={t}>
-          {t}
-        </option>
-      ))}
-    </select>
   );
 }
 

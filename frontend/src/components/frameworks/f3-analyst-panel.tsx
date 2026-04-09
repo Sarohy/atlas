@@ -1,10 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import { cn } from '@/lib/utils';
 import { useAnalyst } from '@/lib/hooks/use-analyst';
-import { useTickers } from '@/lib/hooks/use-tickers';
 import type {
   AnalystCoverageIndicator,
   AnalystResponse,
@@ -33,8 +30,15 @@ const GRADE_TONE: Record<string, string> = {
 // Public component
 // ---------------------------------------------------------------------------
 
+type F3AnalystPanelProps = {
+  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
+  ticker: string;
+};
+
 /**
- * F3 Analyst Conviction panel — self-contained, no props.
+ * F3 Analyst Conviction panel — receives the active ticker from the shared
+ * selector and shows analyst consensus, coverage count, price-target upside,
+ * and PT revision direction plus the weighted F3 composite score.
  *
  * Four sub-indicators per Factor_Mapping_Guide:
  *   Consensus Rating (35%) | Analyst Count (10%)
@@ -42,37 +46,13 @@ const GRADE_TONE: Record<string, string> = {
  *
  * Data source: Benzinga (consensus + calendar ratings) + Polygon (price).
  */
-export function F3AnalystPanel() {
-  const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
-
-  const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
-
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
-
-  const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
-
-  const { data, isFetching, isError, error } = useAnalyst(activeTicker);
+export function F3AnalystPanel({ ticker }: F3AnalystPanelProps) {
+  const { data, isFetching, isError, error } = useAnalyst(ticker);
 
   return (
     <section className="atlas-frameworks-panel atlas-f3-panel" data-testid="f3-analyst-panel">
       <header className="atlas-frameworks-panel-header atlas-f3-panel-header">
         <h2 className="atlas-frameworks-panel-title">F3 Analyst Conviction</h2>
-        {tickersLoading && (
-          <span className="atlas-f3-state-msg" data-testid="f3-tickers-loading">
-            Loading tickers…
-          </span>
-        )}
-        {tickersError && (
-          <span
-            className="atlas-f3-state-msg atlas-f3-state-msg--error"
-            data-testid="f3-tickers-error"
-          >
-            Failed to load portfolio tickers.
-          </span>
-        )}
-        {!tickersLoading && !tickersError && tickers.length > 0 && (
-          <TickerSelect tickers={tickers} value={activeTicker} onChange={setSelectedTicker} />
-        )}
       </header>
 
       <div className="atlas-f3-panel-body">
@@ -83,37 +63,9 @@ export function F3AnalystPanel() {
           />
         )}
         {!isFetching && !isError && data && <AnalystContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
+        {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ticker selector
-// ---------------------------------------------------------------------------
-
-type TickerSelectProps = {
-  tickers: readonly string[];
-  value: string;
-  onChange: (ticker: string) => void;
-};
-
-function TickerSelect({ tickers, value, onChange }: TickerSelectProps) {
-  return (
-    <select
-      className="atlas-f3-ticker-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Select ticker for F3 analyst conviction analysis"
-      data-testid="f3-ticker-select"
-    >
-      {tickers.map((t) => (
-        <option key={t} value={t}>
-          {t}
-        </option>
-      ))}
-    </select>
   );
 }
 
@@ -251,11 +203,7 @@ function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
 
 function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicator }) {
   return (
-    <IndicatorCard
-      label="Consensus Rating"
-      score={consensus.score}
-      weight={consensus.weight}
-    >
+    <IndicatorCard label="Consensus Rating" score={consensus.score} weight={consensus.weight}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Consensus</dt>
@@ -279,7 +227,7 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
       </dl>
       {consensus.total_analysts > 0 && (
         <div className="atlas-f3-consensus-bar" aria-hidden="true">
-          {(consensus.strong_buy_count + consensus.buy_count) > 0 && (
+          {consensus.strong_buy_count + consensus.buy_count > 0 && (
             <span
               className="atlas-f3-consensus-bar-buy"
               style={{
@@ -293,7 +241,7 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
               style={{ width: `${(consensus.hold_count / consensus.total_analysts) * 100}%` }}
             />
           )}
-          {(consensus.sell_count + consensus.strong_sell_count) > 0 && (
+          {consensus.sell_count + consensus.strong_sell_count > 0 && (
             <span
               className="atlas-f3-consensus-bar-sell"
               style={{
@@ -365,7 +313,11 @@ function PtRevisionCard({ revision }: { revision: PtRevisionIndicator }) {
         </div>
         <div className="atlas-f3-dl-row">
           <dt>Raises (30d)</dt>
-          <dd className={revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''}>
+          <dd
+            className={
+              revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''
+            }
+          >
             {revision.raises_30d}
           </dd>
         </div>

@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
@@ -17,7 +16,7 @@ function createWrapper() {
 }
 
 function renderPanel() {
-  return render(<F3AnalystPanel />, { wrapper: createWrapper() });
+  return render(<F3AnalystPanel ticker="AAPL" />, { wrapper: createWrapper() });
 }
 
 // ---------------------------------------------------------------------------
@@ -30,22 +29,7 @@ describe('F3AnalystPanel', () => {
     expect(screen.getByText('F3 Analyst Conviction')).toBeInTheDocument();
   });
 
-  it('shows tickers loading state while the portfolio is being fetched', () => {
-    renderPanel();
-    expect(screen.getByTestId('f3-tickers-loading')).toBeInTheDocument();
-  });
-
-  it('renders a ticker select populated from the backend', async () => {
-    renderPanel();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('f3-ticker-select')).toBeInTheDocument();
-    });
-
-    expect(screen.getByRole('option', { name: 'AAPL' })).toBeInTheDocument();
-  });
-
-  it('renders analyst data after tickers and analyst both resolve', async () => {
+  it('renders analyst data after analyst resolves', async () => {
     renderPanel();
 
     await waitFor(() => {
@@ -72,15 +56,5 @@ describe('F3AnalystPanel', () => {
     expect(screen.getByTestId('f3-consensus-label')).toHaveTextContent('STRONG BUY');
     // PT upside from mock: 26.0%
     expect(screen.getByText('+26.0%')).toBeInTheDocument();
-  });
-
-  it('re-fetches when the user selects a different ticker', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('f3-ticker-select'));
-
-    const select = screen.getByTestId('f3-ticker-select');
-    await userEvent.selectOptions(select, 'AAPL');
-
-    expect((select as HTMLSelectElement).value).toBe('AAPL');
   });
 });

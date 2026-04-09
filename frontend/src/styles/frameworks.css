@@ -159,6 +159,64 @@
   }
 }
 
+/* ---- Frameworks Panels Section (shared ticker bar + F1–F5) -------- */
+
+.atlas-frameworks-panels-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.atlas-frameworks-ticker-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 14px;
+  padding: 8px 14px;
+  background: var(--atlas-portfolio-panel);
+  border: 1px solid var(--atlas-portfolio-border);
+  border-radius: 6px 6px 0 0;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-frameworks-ticker-bar-label {
+  color: var(--atlas-portfolio-muted);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.575rem;
+  font-weight: 600;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+}
+
+.atlas-frameworks-ticker-select {
+  background: #161d2f;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  color: var(--atlas-portfolio-text);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  min-width: 90px;
+}
+
+.atlas-frameworks-ticker-select:focus {
+  outline: none;
+  border-color: var(--atlas-portfolio-cyan);
+}
+
+.atlas-frameworks-ticker-bar-state {
+  color: var(--atlas-portfolio-muted);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.575rem;
+}
+
+.atlas-frameworks-ticker-bar-state--error {
+  color: var(--atlas-portfolio-red);
+}
+
 /* ---- F1 Momentum Panel -------------------------------------------- */
 
 .atlas-f1-panel {

@@ -597,7 +597,7 @@ function AddTickerDialog({ onClose }: AddTickerDialogProps) {
                 '…'
               ) : (
                 <>
-                  <IconPlus /> Add Position
+                  <IconPlus /> Add Ticker
                 </>
               )}
             </button>

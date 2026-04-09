@@ -267,7 +267,7 @@
 
 .atlas-portfolio-ticker {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 1rem;
   padding: 0.9rem 0;
@@ -276,6 +276,53 @@
 
 .atlas-portfolio-ticker:first-child {
   border-top: 0;
+}
+
+/* Action buttons — revealed on row hover */
+.atlas-portfolio-ticker-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.atlas-portfolio-ticker:hover .atlas-portfolio-ticker-actions {
+  opacity: 1;
+}
+
+.atlas-portfolio-ticker-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  color: #4a90d9;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+
+.atlas-portfolio-ticker-action:hover {
+  background: rgba(74, 144, 217, 0.1);
+}
+
+.atlas-portfolio-ticker-action--danger {
+  color: #3a4a5e;
+}
+
+.atlas-portfolio-ticker-action--danger:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+}
+
+/* Inline edit / confirm-delete row — replaces the CSS grid row */
+.atlas-portfolio-ticker-expanded {
+  margin: 4px 0;
 }
 
 .atlas-portfolio-ticker-badge {

@@ -460,3 +460,263 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   F2 Earnings Quality Panel
+   ============================================================ */
+
+.atlas-f2-panel {
+  margin-top: 14px;
+}
+
+.atlas-f2-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--atlas-portfolio-border);
+}
+
+.atlas-f2-panel-body {
+  padding: 1rem;
+}
+
+.atlas-f2-ticker-select {
+  margin-left: auto;
+  background: var(--atlas-portfolio-bg, #0d1117);
+  color: var(--atlas-portfolio-text, #e6edf3);
+  border: 1px solid var(--atlas-portfolio-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.atlas-f2-state-msg {
+  font-size: 0.82rem;
+  color: var(--atlas-portfolio-muted, #8b949e);
+  padding: 0.5rem 0;
+}
+
+.atlas-f2-state-msg--error {
+  color: var(--atlas-portfolio-red, #f85149);
+}
+
+/* Score hero */
+
+.atlas-f2-score-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.atlas-f2-score-ring {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.atlas-f2-score-number {
+  font-size: 2.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.atlas-f2-score-number.is-green  { color: var(--atlas-portfolio-green); }
+.atlas-f2-score-number.is-cyan   { color: var(--atlas-portfolio-cyan); }
+.atlas-f2-score-number.is-yellow { color: var(--atlas-portfolio-yellow); }
+.atlas-f2-score-number.is-orange { color: #fb923c; }
+.atlas-f2-score-number.is-red    { color: var(--atlas-portfolio-red); }
+
+.atlas-f2-score-denom {
+  font-size: 1rem;
+  color: var(--atlas-portfolio-muted, #8b949e);
+}
+
+.atlas-f2-score-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f2-grade-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.atlas-f2-label-sub {
+  font-size: 0.72rem;
+  color: var(--atlas-portfolio-muted, #8b949e);
+}
+
+/* Score bar */
+
+.atlas-f2-score-bar {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 16px;
+}
+
+.atlas-f2-score-bar-seg {
+  flex: 1;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.atlas-f2-score-bar-seg.is-empty  { background: var(--atlas-portfolio-border); }
+.atlas-f2-score-bar-seg.is-green  { background: var(--atlas-portfolio-green); }
+.atlas-f2-score-bar-seg.is-cyan   { background: var(--atlas-portfolio-cyan); }
+.atlas-f2-score-bar-seg.is-yellow { background: var(--atlas-portfolio-yellow); }
+.atlas-f2-score-bar-seg.is-orange { background: #fb923c; }
+.atlas-f2-score-bar-seg.is-red    { background: var(--atlas-portfolio-red); }
+
+/* Indicator grid */
+
+.atlas-f2-indicators {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.atlas-f2-indicator {
+  border: 1px solid var(--atlas-portfolio-border);
+  border-radius: 5px;
+  padding: 0.65rem 0.8rem;
+  background: color-mix(in srgb, var(--atlas-portfolio-panel) 80%, transparent);
+}
+
+.atlas-f2-indicator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.atlas-f2-indicator-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--atlas-portfolio-muted, #8b949e);
+}
+
+.atlas-f2-indicator-score {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--atlas-portfolio-text, #e6edf3);
+}
+
+.atlas-f2-indicator-max {
+  font-size: 0.65rem;
+  color: var(--atlas-portfolio-muted, #8b949e);
+}
+
+/* Data list */
+
+.atlas-f2-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+
+.atlas-f2-dl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.atlas-f2-dl dt {
+  color: var(--atlas-portfolio-muted, #8b949e);
+}
+
+.atlas-f2-dl dd {
+  font-weight: 500;
+}
+
+/* EPS beat bar */
+
+.atlas-f2-beat-bar {
+  margin-top: 6px;
+  height: 4px;
+  background: var(--atlas-portfolio-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.atlas-f2-beat-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.atlas-f2-beat-bar-fill.is-green  { background: var(--atlas-portfolio-green); }
+.atlas-f2-beat-bar-fill.is-cyan   { background: var(--atlas-portfolio-cyan); }
+.atlas-f2-beat-bar-fill.is-yellow { background: var(--atlas-portfolio-yellow); }
+.atlas-f2-beat-bar-fill.is-orange { background: #fb923c; }
+.atlas-f2-beat-bar-fill.is-red    { background: var(--atlas-portfolio-red); }
+
+/* Margin sparkline */
+
+.atlas-f2-margin-sparkline {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 48px;
+  margin-top: 8px;
+  padding-bottom: 14px;
+  position: relative;
+}
+
+.atlas-f2-margin-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.atlas-f2-margin-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  min-height: 3px;
+}
+
+.atlas-f2-margin-bar.is-green  { background: var(--atlas-portfolio-green); }
+.atlas-f2-margin-bar.is-cyan   { background: var(--atlas-portfolio-cyan); }
+.atlas-f2-margin-bar.is-yellow { background: var(--atlas-portfolio-yellow); }
+.atlas-f2-margin-bar.is-red    { background: var(--atlas-portfolio-red); }
+
+.atlas-f2-margin-bar-label {
+  font-size: 0.6rem;
+  color: var(--atlas-portfolio-muted, #8b949e);
+  position: absolute;
+  bottom: 0;
+}
+
+/* Tone colours shared with F1 */
+
+.atlas-f2-dl dd.is-green  { color: var(--atlas-portfolio-green); }
+.atlas-f2-dl dd.is-cyan   { color: var(--atlas-portfolio-cyan); }
+.atlas-f2-dl dd.is-yellow { color: var(--atlas-portfolio-yellow); }
+.atlas-f2-dl dd.is-orange { color: #fb923c; }
+.atlas-f2-dl dd.is-red    { color: var(--atlas-portfolio-red); }
+
+@media (max-width: 1160px) {
+  .atlas-f2-indicators {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .atlas-f2-indicators {
+    grid-template-columns: 1fr;
+  }
+}

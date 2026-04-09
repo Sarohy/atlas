@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from atlas.api.v1 import (
     auth,
     clusters,
+    earnings,
     health,
     momentum,
     portfolio,
@@ -22,3 +23,4 @@ router.include_router(ticker_search.router)
 router.include_router(clusters.router)
 router.include_router(watchlist.router)
 router.include_router(momentum.router)
+router.include_router(earnings.router)

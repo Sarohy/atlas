@@ -215,4 +215,45 @@ export const handlers = [
       f1_grade: 'STRONG BUY',
     });
   }),
+
+  // ── Earnings ──────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/earnings/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      revenue_growth: {
+        current_ttm: 390000.0,
+        prior_ttm: 330000.0,
+        growth_pct: 18.2,
+        score: 20,
+        max_score: 20,
+      },
+      eps_beats: {
+        beat_rate_pct: 100.0,
+        quarters_beat: 4,
+        score: 20,
+        max_score: 20,
+      },
+      guidance: {
+        revision_direction: 2,
+        revision_pct: 12.5,
+        score: 20,
+        max_score: 20,
+      },
+      backlog_btb: {
+        btb_proxy: 6.5,
+        revenue_acceleration: 6.5,
+        score: 20,
+        max_score: 20,
+      },
+      margin_trajectory: {
+        gross_margins: [42.0, 43.5, 44.2, 45.1],
+        trajectory: 1.03,
+        score: 20,
+        max_score: 20,
+      },
+      f2_score: 100,
+      f2_grade: 'STRONG BUY',
+    });
+  }),
 ];

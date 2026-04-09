@@ -7,6 +7,7 @@ from atlas.api.v1 import (
     auth,
     clusters,
     earnings,
+    fundamental,
     health,
     momentum,
     options_flow,
@@ -28,3 +29,4 @@ router.include_router(momentum.router)
 router.include_router(earnings.router)
 router.include_router(analyst.router)
 router.include_router(options_flow.router)
+router.include_router(fundamental.router)

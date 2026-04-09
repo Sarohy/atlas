@@ -8,6 +8,7 @@ import type {
   FrameworksScreenData,
 } from '@/types/frameworks';
 import { F4OptionsPanel } from './f4-options-panel';
+import { F5FundamentalPanel } from './f5-fundamental-panel';
 
 type FrameworksScreenProps = {
   data: FrameworksScreenData;
@@ -35,6 +36,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
       <F2EarningsPanel />
       <F3AnalystPanel />
       <F4OptionsPanel />
+      <F5FundamentalPanel />
     </main>
   );
 }

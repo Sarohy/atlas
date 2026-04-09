@@ -256,4 +256,49 @@ export const handlers = [
       f2_grade: 'STRONG BUY',
     });
   }),
+
+  http.get(`${BASE}/api/v1/analyst/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      consensus_rating: {
+        buy_count: 28,
+        hold_count: 8,
+        sell_count: 2,
+        total_analysts: 38,
+        buy_pct: 73.7,
+        label: 'STRONG BUY',
+        score: 20,
+        max_score: 20,
+      },
+      pt_upside: {
+        current_price: 182.5,
+        consensus_pt: 230.0,
+        upside_pct: 26.0,
+        score: 20,
+        max_score: 20,
+      },
+      pt_direction: {
+        current_consensus_pt: 230.0,
+        prior_consensus_pt: 210.0,
+        direction_pct: 9.5,
+        score: 20,
+        max_score: 20,
+      },
+      analyst_coverage: {
+        num_analysts: 38,
+        score: 20,
+        max_score: 20,
+      },
+      recent_upgrades: {
+        upgrades: 5,
+        downgrades: 1,
+        net_upgrades: 4,
+        score: 20,
+        max_score: 20,
+      },
+      f3_score: 100,
+      f3_grade: 'STRONG BUY',
+    });
+  }),
 ];

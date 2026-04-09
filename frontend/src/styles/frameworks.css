@@ -770,3 +770,234 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   F3 Analyst Conviction Panel
+   ========================================================================== */
+
+.atlas-f3-panel {
+  background: var(--atlas-panel-bg, #0f1117);
+  border: 1px solid var(--atlas-border, #1e2233);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.atlas-f3-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.atlas-f3-ticker-select {
+  margin-left: auto;
+  background: var(--atlas-input-bg, #161824);
+  color: var(--atlas-text, #e2e8f0);
+  border: 1px solid var(--atlas-border, #1e2233);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.atlas-f3-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.atlas-f3-state-msg {
+  color: var(--atlas-text-muted, #94a3b8);
+  font-size: 0.875rem;
+}
+
+.atlas-f3-state-msg--error {
+  color: var(--atlas-red, #ef4444);
+}
+
+/* Score hero */
+.atlas-f3-score-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.atlas-f3-score-ring {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.atlas-f3-score-number {
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.atlas-f3-score-denom {
+  font-size: 1.25rem;
+  color: var(--atlas-text-muted, #94a3b8);
+}
+
+.atlas-f3-score-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f3-grade-pill {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  width: fit-content;
+}
+
+.atlas-f3-label-sub {
+  font-size: 0.75rem;
+  color: var(--atlas-text-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Score bar */
+.atlas-f3-score-bar {
+  display: flex;
+  gap: 4px;
+  height: 8px;
+}
+
+.atlas-f3-score-bar-seg {
+  flex: 1;
+  border-radius: 2px;
+}
+
+/* Indicator grid */
+.atlas-f3-indicators {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.atlas-f3-indicator {
+  background: var(--atlas-card-bg, #161824);
+  border: 1px solid var(--atlas-border, #1e2233);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.atlas-f3-indicator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.atlas-f3-indicator-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--atlas-text-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f3-indicator-score {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--atlas-text, #e2e8f0);
+}
+
+.atlas-f3-indicator-max {
+  font-size: 0.75rem;
+  color: var(--atlas-text-muted, #94a3b8);
+  font-weight: 400;
+}
+
+.atlas-f3-indicator-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Data list */
+.atlas-f3-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.atlas-f3-dl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.atlas-f3-dl dt {
+  font-size: 0.75rem;
+  color: var(--atlas-text-muted, #94a3b8);
+  flex-shrink: 0;
+}
+
+.atlas-f3-dl dd {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--atlas-text, #e2e8f0);
+  text-align: right;
+  margin: 0;
+}
+
+/* Tone colours shared across f3 */
+.atlas-f3-dl dd.is-green {
+  color: var(--atlas-green, #22c55e);
+}
+.atlas-f3-dl dd.is-cyan {
+  color: var(--atlas-cyan, #06b6d4);
+}
+.atlas-f3-dl dd.is-yellow {
+  color: var(--atlas-yellow, #eab308);
+}
+.atlas-f3-dl dd.is-orange {
+  color: var(--atlas-orange, #f97316);
+}
+.atlas-f3-dl dd.is-red {
+  color: var(--atlas-red, #ef4444);
+}
+
+/* Consensus stacked bar */
+.atlas-f3-consensus-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--atlas-border, #1e2233);
+}
+
+.atlas-f3-consensus-bar-buy {
+  background: var(--atlas-green, #22c55e);
+}
+.atlas-f3-consensus-bar-hold {
+  background: var(--atlas-yellow, #eab308);
+}
+.atlas-f3-consensus-bar-sell {
+  background: var(--atlas-red, #ef4444);
+}
+
+/* Responsive breakpoints */
+@media (max-width: 1160px) {
+  .atlas-f3-indicators {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .atlas-f3-indicators {
+    grid-template-columns: 1fr;
+  }
+}

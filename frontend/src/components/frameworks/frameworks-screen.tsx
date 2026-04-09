@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 import { F1MomentumPanel } from './f1-momentum-panel';
 import { F2EarningsPanel } from './f2-earnings-panel';
+import { F3AnalystPanel } from './f3-analyst-panel';
 import type {
   FrameworkCard,
   FrameworkOverviewCard,
@@ -31,6 +32,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
 
       <F1MomentumPanel />
       <F2EarningsPanel />
+      <F3AnalystPanel />
     </main>
   );
 }

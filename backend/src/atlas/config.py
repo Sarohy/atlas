@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # Polygon.io API key — required for ticker search
     polygon_api_key: str = Field(default="")
 
+    # Alpha Vantage API key — required for F2 Earnings Quality scoring
+    # (INCOME_STATEMENT, EARNINGS, EARNINGS_CALL_TRANSCRIPT endpoints)
+    alphavantage_api_key: str = Field(default="")
+
 
 def get_settings() -> Settings:
     """Return a Settings instance (cached via dependency injection in prod)."""

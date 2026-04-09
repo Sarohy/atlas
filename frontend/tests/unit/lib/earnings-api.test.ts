@@ -16,37 +16,39 @@ afterEach(() => vi.clearAllMocks());
 const EARNINGS_RESPONSE = {
   ticker: 'AAPL',
   revenue_growth: {
-    current_ttm: 390000.0,
-    prior_ttm: 330000.0,
-    growth_pct: 18.2,
-    score: 20,
-    max_score: 20,
+    yoy_pct: 65.0,
+    raw_score: 90,
+    score: 27,
+    max_score: 30,
   },
   eps_beats: {
-    beat_rate_pct: 100.0,
-    quarters_beat: 4,
+    beats_in_3: 3,
+    quarters_checked: 3,
+    raw_score: 100,
     score: 20,
     max_score: 20,
   },
   guidance: {
-    revision_direction: 2,
-    revision_pct: 12.5,
-    score: 20,
-    max_score: 20,
-  },
-  backlog_btb: {
-    btb_proxy: 6.5,
-    revenue_acceleration: 6.5,
+    guidance_label: 'RAISE_FULL_YEAR',
+    transcript_quarter: '2024Q3',
+    raw_score: 100,
     score: 20,
     max_score: 20,
   },
   margin_trajectory: {
-    gross_margins: [42.0, 43.5, 44.2, 45.1],
-    trajectory: 1.03,
-    score: 20,
-    max_score: 20,
+    gross_margins: [43.0, 44.0, 45.0],
+    margin_change_pts: 2.0,
+    raw_score: 80,
+    score: 12,
+    max_score: 15,
   },
-  f2_score: 100,
+  backlog_btb: {
+    backlog_label: 'EXPLICIT_MULTI_QUARTER',
+    raw_score: 100,
+    score: 15,
+    max_score: 15,
+  },
+  f2_score: 94,
   f2_grade: 'STRONG BUY',
 };
 
@@ -77,8 +79,8 @@ describe('fetchEarnings', () => {
     const result = await fetchEarnings('AAPL');
 
     expect(result.ticker).toBe('AAPL');
-    expect(result.f2_score).toBe(100);
+    expect(result.f2_score).toBe(94);
     expect(result.f2_grade).toBe('STRONG BUY');
-    expect(result.revenue_growth.growth_pct).toBe(18.2);
+    expect(result.revenue_growth.yoy_pct).toBe(65.0);
   });
 });

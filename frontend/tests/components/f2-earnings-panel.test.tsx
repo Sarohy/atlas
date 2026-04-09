@@ -60,7 +60,7 @@ describe('F2EarningsPanel', () => {
     expect(screen.getByTestId('f2-indicator-revenue-growth')).toBeInTheDocument();
     expect(screen.getByTestId('f2-indicator-eps-beats')).toBeInTheDocument();
     expect(screen.getByTestId('f2-indicator-guidance')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-indicator-backlog-/-btb')).toBeInTheDocument();
+    expect(screen.getByTestId('f2-indicator-backlog-visibility')).toBeInTheDocument();
     expect(screen.getByTestId('f2-indicator-margin-trajectory')).toBeInTheDocument();
   });
 
@@ -68,10 +68,10 @@ describe('F2EarningsPanel', () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('f2-content'));
 
-    // Revenue growth value from mock: +18.2%
-    expect(screen.getByText('+18.2%')).toBeInTheDocument();
-    // Guidance direction from mock: revision_direction=2 → "Consistently Raised"
-    expect(screen.getByText('Consistently Raised')).toBeInTheDocument();
+    // Revenue growth value from mock: +65.0%
+    expect(screen.getByText('+65.0%')).toBeInTheDocument();
+    // Guidance direction from mock: guidance_label='RAISE_FULL_YEAR' → "Raised Full Year"
+    expect(screen.getByText('Raised Full Year')).toBeInTheDocument();
   });
 
   it('re-fetches when the user selects a different ticker', async () => {

@@ -30,13 +30,36 @@ const GRADE_TONE: Record<string, string> = {
   AVOID: 'is-red',
 };
 
-/** Human-readable labels for the revision_direction integer. */
-const REVISION_LABEL: Record<number, string> = {
-  2: 'Consistently Raised',
-  1: 'Raised',
-  0: 'Flat',
-  [-1]: 'Cut',
-  [-2]: 'Consistently Cut',
+/** Human-readable labels for the guidance_label categorical string. */
+const GUIDANCE_LABEL: Record<string, string> = {
+  RAISE_FULL_YEAR: 'Raised Full Year',
+  MAINTAIN: 'Maintained',
+  NARROW_RANGE: 'Narrowed Range',
+  LOWER: 'Lowered',
+};
+
+/** CSS tone classes for the guidance_label categorical string. */
+const GUIDANCE_TONE: Record<string, string> = {
+  RAISE_FULL_YEAR: 'is-green',
+  MAINTAIN: 'is-cyan',
+  NARROW_RANGE: 'is-yellow',
+  LOWER: 'is-red',
+};
+
+/** Human-readable labels for the backlog_label categorical string. */
+const BACKLOG_LABEL: Record<string, string> = {
+  EXPLICIT_MULTI_QUARTER: 'Explicit Multi-Quarter',
+  STRONG: 'Strong Demand',
+  LIMITED: 'Limited Visibility',
+  NO_COMMENTARY: 'No Commentary',
+};
+
+/** CSS tone classes for the backlog_label categorical string. */
+const BACKLOG_TONE: Record<string, string> = {
+  EXPLICIT_MULTI_QUARTER: 'is-green',
+  STRONG: 'is-cyan',
+  LIMITED: 'is-yellow',
+  NO_COMMENTARY: 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -46,8 +69,9 @@ const REVISION_LABEL: Record<number, string> = {
 /**
  * F2 Earnings Quality panel — fetches the user's portfolio tickers from the
  * backend, lets the user pick one, then calls the earnings API and shows
- * revenue growth, EPS beats, guidance, backlog/BTB, margin trajectory, and
- * the composite F2 score.
+ * revenue growth (YoY), EPS beat history (rolling 3Q), guidance direction
+ * (from transcript NLP), gross-margin trend, and backlog/visibility
+ * (from transcript NLP), plus the weighted F2 composite score.
  */
 export function F2EarningsPanel() {
   const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
@@ -189,8 +213,8 @@ function EarningsContent({ data }: { data: EarningsResponse }) {
         <RevenueGrowthCard rev={data.revenue_growth} />
         <EpsBeatsCard eps={data.eps_beats} />
         <GuidanceCard guidance={data.guidance} />
-        <BacklogBtbCard btb={data.backlog_btb} />
         <MarginTrajectoryCard margin={data.margin_trajectory} />
+        <BacklogVisibilityCard btb={data.backlog_btb} />
       </div>
     </div>
   );
@@ -256,49 +280,34 @@ function RevenueGrowthCard({ rev }: { rev: RevenueGrowthIndicator }) {
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
           <dt>YoY Growth</dt>
-          <dd className={growthTone(rev.growth_pct)}>
-            {rev.growth_pct !== null ? formatPct(rev.growth_pct) : '—'}
+          <dd className={growthTone(rev.yoy_pct)}>
+            {rev.yoy_pct !== null ? formatPct(rev.yoy_pct) : '—'}
           </dd>
         </div>
-        {rev.current_ttm !== null && (
-          <div className="atlas-f2-dl-row">
-            <dt>TTM Revenue</dt>
-            <dd>{formatMillions(rev.current_ttm)}</dd>
-          </div>
-        )}
-        {rev.prior_ttm !== null && (
-          <div className="atlas-f2-dl-row">
-            <dt>Prior TTM</dt>
-            <dd>{formatMillions(rev.prior_ttm)}</dd>
-          </div>
-        )}
       </dl>
     </IndicatorCard>
   );
 }
 
 function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
-  const beatsLabel = eps.quarters_beat !== null ? `${eps.quarters_beat}/4` : '—';
+  const beatsLabel =
+    eps.beats_in_3 !== null && eps.quarters_checked !== null
+      ? `${eps.beats_in_3}/${eps.quarters_checked}`
+      : '—';
 
   return (
     <IndicatorCard label="EPS Beats" score={eps.score} maxScore={eps.max_score}>
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
-          <dt>Beat Rate</dt>
-          <dd className={beatRateTone(eps.beat_rate_pct)}>
-            {eps.beat_rate_pct !== null ? formatPct(eps.beat_rate_pct) : '—'}
-          </dd>
-        </div>
-        <div className="atlas-f2-dl-row">
-          <dt>Quarters Beat</dt>
-          <dd>{beatsLabel}</dd>
+          <dt>Beats (Last 3Q)</dt>
+          <dd className={beatsTone(eps.beats_in_3)}>{beatsLabel}</dd>
         </div>
       </dl>
-      {eps.beat_rate_pct !== null && (
+      {eps.beats_in_3 !== null && eps.quarters_checked !== null && eps.quarters_checked > 0 && (
         <div className="atlas-f2-beat-bar">
           <span
-            className={cn('atlas-f2-beat-bar-fill', beatRateTone(eps.beat_rate_pct))}
-            style={{ width: `${eps.beat_rate_pct}%` }}
+            className={cn('atlas-f2-beat-bar-fill', beatsTone(eps.beats_in_3))}
+            style={{ width: `${(eps.beats_in_3 / eps.quarters_checked) * 100}%` }}
           />
         </div>
       )}
@@ -307,46 +316,20 @@ function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
 }
 
 function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
-  const label = REVISION_LABEL[guidance.revision_direction] ?? 'Unknown';
+  const label = GUIDANCE_LABEL[guidance.guidance_label] ?? guidance.guidance_label;
+  const tone = GUIDANCE_TONE[guidance.guidance_label] ?? 'is-yellow';
+
   return (
     <IndicatorCard label="Guidance" score={guidance.score} maxScore={guidance.max_score}>
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
           <dt>Direction</dt>
-          <dd className={guidanceTone(guidance.revision_direction)}>{label}</dd>
+          <dd className={tone}>{label}</dd>
         </div>
-        {guidance.revision_pct !== null && (
+        {guidance.transcript_quarter !== null && (
           <div className="atlas-f2-dl-row">
-            <dt>EPS Revision</dt>
-            <dd className={growthTone(guidance.revision_pct)}>
-              {formatPct(guidance.revision_pct)}
-            </dd>
-          </div>
-        )}
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function BacklogBtbCard({ btb }: { btb: BacklogBtbIndicator }) {
-  return (
-    <IndicatorCard label="Backlog / BTB" score={btb.score} maxScore={btb.max_score}>
-      <dl className="atlas-f2-dl">
-        <div className="atlas-f2-dl-row">
-          <dt>BTB Proxy</dt>
-          <dd className={btbTone(btb.btb_proxy)}>
-            {btb.btb_proxy !== null
-              ? `${btb.btb_proxy >= 0 ? '+' : ''}${btb.btb_proxy.toFixed(2)}`
-              : '—'}
-          </dd>
-        </div>
-        {btb.revenue_acceleration !== null && (
-          <div className="atlas-f2-dl-row">
-            <dt>Rev. Acceleration</dt>
-            <dd className={growthTone(btb.revenue_acceleration)}>
-              {btb.revenue_acceleration >= 0 ? '+' : ''}
-              {btb.revenue_acceleration.toFixed(2)} ppts
-            </dd>
+            <dt>Source Quarter</dt>
+            <dd>{guidance.transcript_quarter}</dd>
           </div>
         )}
       </dl>
@@ -359,10 +342,10 @@ function MarginTrajectoryCard({ margin }: { margin: MarginTrajectoryIndicator })
     <IndicatorCard label="Margin Trajectory" score={margin.score} maxScore={margin.max_score}>
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
-          <dt>Avg QoQ Change</dt>
-          <dd className={marginTone(margin.trajectory)}>
-            {margin.trajectory !== null
-              ? `${margin.trajectory >= 0 ? '+' : ''}${margin.trajectory.toFixed(2)} ppts`
+          <dt>Margin Change</dt>
+          <dd className={marginTone(margin.margin_change_pts)}>
+            {margin.margin_change_pts !== null
+              ? `${margin.margin_change_pts >= 0 ? '+' : ''}${margin.margin_change_pts.toFixed(2)} ppts`
               : '—'}
           </dd>
         </div>
@@ -385,6 +368,22 @@ function MarginTrajectoryCard({ margin }: { margin: MarginTrajectoryIndicator })
   );
 }
 
+function BacklogVisibilityCard({ btb }: { btb: BacklogBtbIndicator }) {
+  const label = BACKLOG_LABEL[btb.backlog_label] ?? btb.backlog_label;
+  const tone = BACKLOG_TONE[btb.backlog_label] ?? 'is-yellow';
+
+  return (
+    <IndicatorCard label="Backlog Visibility" score={btb.score} maxScore={btb.max_score}>
+      <dl className="atlas-f2-dl">
+        <div className="atlas-f2-dl-row">
+          <dt>Visibility</dt>
+          <dd className={tone}>{label}</dd>
+        </div>
+      </dl>
+    </IndicatorCard>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Small formatting helpers — pure, no side effects
 // ---------------------------------------------------------------------------
@@ -394,50 +393,27 @@ function formatPct(value: number): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-function formatMillions(value: number): string {
-  if (Math.abs(value) >= 1_000) {
-    return `$${(value / 1_000).toFixed(1)}B`;
-  }
-  return `$${value.toFixed(0)}M`;
-}
-
 function growthTone(value: number | null): string {
   if (value === null) return '';
-  if (value >= 15) return 'is-green';
-  if (value >= 5) return 'is-cyan';
+  if (value >= 50) return 'is-green';
+  if (value >= 10) return 'is-cyan';
   if (value >= 0) return 'is-yellow';
   return 'is-red';
 }
 
-function beatRateTone(pct: number | null): string {
-  if (pct === null) return '';
-  if (pct >= 75) return 'is-green';
-  if (pct >= 50) return 'is-cyan';
-  if (pct >= 25) return 'is-yellow';
+function beatsTone(beats: number | null): string {
+  if (beats === null) return '';
+  if (beats >= 3) return 'is-green';
+  if (beats >= 2) return 'is-cyan';
+  if (beats >= 1) return 'is-yellow';
   return 'is-red';
 }
 
-function guidanceTone(direction: number): string {
-  if (direction >= 2) return 'is-green';
-  if (direction >= 1) return 'is-cyan';
-  if (direction === 0) return 'is-yellow';
-  if (direction === -1) return 'is-orange';
-  return 'is-red';
-}
-
-function btbTone(proxy: number | null): string {
-  if (proxy === null) return '';
-  if (proxy > 5) return 'is-green';
-  if (proxy >= 0) return 'is-cyan';
-  if (proxy >= -2) return 'is-yellow';
-  return 'is-red';
-}
-
-function marginTone(trajectory: number | null): string {
-  if (trajectory === null) return '';
-  if (trajectory >= 0.02) return 'is-green';
-  if (trajectory >= 0) return 'is-cyan';
-  if (trajectory >= -0.02) return 'is-yellow';
+function marginTone(changePts: number | null): string {
+  if (changePts === null) return '';
+  if (changePts > 3) return 'is-green';
+  if (changePts >= 1) return 'is-cyan';
+  if (changePts >= -1) return 'is-yellow';
   return 'is-red';
 }
 

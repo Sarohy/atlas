@@ -1,4 +1,12 @@
-"""Pydantic schemas for the F2 Earnings Quality endpoint."""
+"""Pydantic schemas for the F2 Earnings Quality endpoint.
+
+Schema field names mirror the Factor_Mapping_Guide §F2 rework:
+  - All indicators carry ``raw_score`` (0-100 pre-weight) and ``score`` (weighted contribution).
+  - ``GuidanceIndicator`` uses a categorical ``guidance_label`` string.
+  - ``BacklogBtbIndicator`` uses a categorical ``backlog_label`` string.
+  - ``MarginTrajectoryIndicator`` exposes ``margin_change_pts`` in percentage points.
+  - Max-score values reflect the new internal weights (30/20/20/15/15).
+"""
 
 from __future__ import annotations
 
@@ -27,104 +35,115 @@ class F2Grade:
 
 
 class RevenueGrowthIndicator(BaseModel):
-    """Year-over-year TTM revenue growth and its contribution to the F2 score."""
+    """Year-over-year revenue growth and its contribution to the F2 score.
 
-    model_config = ConfigDict(from_attributes=True)
-
-    current_ttm: float | None = Field(
-        None, description="Trailing twelve-month revenue (most recent, USD millions)."
-    )
-    prior_ttm: float | None = Field(
-        None, description="Trailing twelve-month revenue (one year prior, USD millions)."
-    )
-    growth_pct: float | None = Field(
-        None, description="YoY TTM revenue growth (%). Null when prior TTM is unavailable."
-    )
-    score: int = Field(ge=0, le=20, description="F2 score contribution (0-20).")
-    max_score: int = Field(default=20)
-
-
-class EpsBeatsIndicator(BaseModel):
-    """EPS-vs-consensus beat rate over the last 4 reported quarters."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    beat_rate_pct: float | None = Field(
-        None,
-        description="Percentage of the last 4 quarters where EPS beat consensus (0-100). "
-        "Null when earnings data is unavailable.",
-    )
-    quarters_beat: int | None = Field(
-        None, description="Number of quarters (out of 4) where actual EPS beat estimate."
-    )
-    score: int = Field(ge=0, le=20, description="F2 score contribution (0-20).")
-    max_score: int = Field(default=20)
-
-
-class GuidanceIndicator(BaseModel):
-    """Management guidance quality derived from EPS estimate revision trend."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    revision_direction: int = Field(
-        description=(
-            "Net revision direction: +2 strongly raised, +1 raised, 0 flat, "
-            "-1 cut, -2 strongly cut."
-        )
-    )
-    revision_pct: float | None = Field(
-        None,
-        description="Percentage change in consensus EPS estimate over the last 4 revisions. "
-        "Null when revision data is unavailable.",
-    )
-    score: int = Field(ge=0, le=20, description="F2 score contribution (0-20).")
-    max_score: int = Field(default=20)
-
-
-class BacklogBtbIndicator(BaseModel):
-    """Book-to-bill proxy derived from revenue-growth vs gross-margin stability.
-
-    A true book-to-bill ratio requires segment-level order data that is rarely
-    available via public APIs.  ATLAS approximates it by comparing the last
-    two consecutive quarters of revenue growth rate: if revenue acceleration
-    is positive *and* gross margin is stable-or-improving, we infer backlog
-    expansion (BTB > 1).
+    Weight: 30%  →  max 30 pts contribution.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    btb_proxy: float | None = Field(
+    yoy_pct: float | None = Field(
         None,
-        description=(
-            "Book-to-bill proxy: positive = orders accelerating relative to revenue, "
-            "negative = decelerating.  Null when insufficient quarterly data."
-        ),
+        description="YoY quarterly revenue growth (%). Null when data is unavailable.",
     )
-    revenue_acceleration: float | None = Field(
+    raw_score: int = Field(
+        ge=0, le=100, description="Raw 0-100 score before weighting."
+    )
+    score: int = Field(ge=0, le=30, description="Weighted F2 contribution (0-30).")
+    max_score: int = Field(default=30)
+
+
+class EpsBeatsIndicator(BaseModel):
+    """EPS-vs-consensus beat count over the last 3 reported quarters.
+
+    Weight: 20%  →  max 20 pts contribution.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    beats_in_3: int | None = Field(
         None,
-        description="Change in QoQ revenue growth rate (latest quarter minus prior quarter, ppts).",
+        description="Number of the last 3 quarters where reported EPS beat estimated EPS (0-3).",
     )
-    score: int = Field(ge=0, le=20, description="F2 score contribution (0-20).")
+    quarters_checked: int | None = Field(
+        None,
+        description="How many of the last 3 quarters had sufficient EPS data.",
+    )
+    raw_score: int = Field(
+        ge=0, le=100, description="Raw 0-100 score before weighting."
+    )
+    score: int = Field(ge=0, le=20, description="Weighted F2 contribution (0-20).")
     max_score: int = Field(default=20)
 
 
+class GuidanceIndicator(BaseModel):
+    """Management guidance direction derived from the earnings-call transcript.
+
+    Weight: 20%  →  max 20 pts contribution.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    guidance_label: str = Field(
+        description=(
+            "Guidance classification: RAISE_FULL_YEAR | MAINTAIN | NARROW_RANGE | LOWER"
+        )
+    )
+    transcript_quarter: str | None = Field(
+        None,
+        description="Fiscal quarter of the transcript used (e.g. '2024Q3').",
+    )
+    raw_score: int = Field(
+        ge=0, le=100, description="Raw 0-100 score before weighting."
+    )
+    score: int = Field(ge=0, le=20, description="Weighted F2 contribution (0-20).")
+    max_score: int = Field(default=20)
+
+
+class BacklogBtbIndicator(BaseModel):
+    """Backlog / forward visibility derived from the earnings-call transcript.
+
+    Weight: 15%  →  max 15 pts contribution.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    backlog_label: str = Field(
+        description=(
+            "Backlog classification: EXPLICIT_MULTI_QUARTER | STRONG | LIMITED | NO_COMMENTARY"
+        )
+    )
+    raw_score: int = Field(
+        ge=0, le=100, description="Raw 0-100 score before weighting."
+    )
+    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    max_score: int = Field(default=15)
+
+
 class MarginTrajectoryIndicator(BaseModel):
-    """Gross-margin direction over the last four reported quarters."""
+    """Gross-margin trend derived from the last 3 reported quarterly income statements.
+
+    Weight: 15%  →  max 15 pts contribution.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     gross_margins: list[float] = Field(
-        description="Gross margin (%) for each of the last 4 quarters (oldest first)."
+        default_factory=list,
+        description="Gross-margin (%) values for the last 3 quarters (oldest first).",
     )
-    trajectory: float | None = Field(
+    margin_change_pts: float | None = Field(
         None,
         description=(
-            "Average quarter-over-quarter change in gross margin (ppts). "
-            "Positive = expanding, negative = contracting."
+            "Gross-margin change in percentage points (most recent minus oldest in window). "
+            "Positive = expanding, negative = contracting. Null when insufficient data."
         ),
     )
-    score: int = Field(ge=0, le=20, description="F2 score contribution (0-20).")
-    max_score: int = Field(default=20)
+    raw_score: int = Field(
+        ge=0, le=100, description="Raw 0-100 score before weighting."
+    )
+    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    max_score: int = Field(default=15)
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +160,8 @@ class EarningsResponse(BaseModel):
     revenue_growth: RevenueGrowthIndicator
     eps_beats: EpsBeatsIndicator
     guidance: GuidanceIndicator
-    backlog_btb: BacklogBtbIndicator
     margin_trajectory: MarginTrajectoryIndicator
+    backlog_btb: BacklogBtbIndicator
     f2_score: int = Field(ge=0, le=100, description="Composite F2 Earnings Quality score (0-100).")
     f2_grade: str = Field(
         description="F2 grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID"

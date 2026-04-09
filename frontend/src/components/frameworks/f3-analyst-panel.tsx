@@ -9,9 +9,8 @@ import type {
   AnalystCoverageIndicator,
   AnalystResponse,
   ConsensusRatingIndicator,
-  PtDirectionIndicator,
+  PtRevisionIndicator,
   PtUpsideIndicator,
-  RecentUpgradesIndicator,
 } from '@/lib/schemas/analyst';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +20,7 @@ import type {
 /** Number of score bar segments representing the full 0-100 scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Map F3 grade string to CSS tone class name used across the design system. */
+/** Map F3 grade string to CSS tone class name. */
 const GRADE_TONE: Record<string, string> = {
   'STRONG BUY': 'is-green',
   BUY: 'is-cyan',
@@ -37,9 +36,11 @@ const GRADE_TONE: Record<string, string> = {
 /**
  * F3 Analyst Conviction panel — self-contained, no props.
  *
- * Fetches the user's portfolio tickers, lets them pick one, then calls the
- * analyst API and renders consensus rating, PT upside, PT direction, analyst
- * coverage, and recent upgrades alongside the composite F3 score.
+ * Four sub-indicators per Factor_Mapping_Guide:
+ *   Consensus Rating (35%) | Analyst Count (10%)
+ *   PT vs Current Price (30%) | PT Revision Direction (25%)
+ *
+ * Data source: Benzinga (consensus + calendar ratings) + Polygon (price).
  */
 export function F3AnalystPanel() {
   const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
@@ -48,7 +49,6 @@ export function F3AnalystPanel() {
 
   const [selectedTicker, setSelectedTicker] = useState<string>('');
 
-  // Resolve the active ticker: prefer explicit selection, fall back to first.
   const activeTicker = selectedTicker !== '' ? selectedTicker : (tickers[0] ?? '');
 
   const { data, isFetching, isError, error } = useAnalyst(activeTicker);
@@ -146,7 +146,7 @@ function EmptyState({ ticker }: { ticker: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main content — rendered when data is available
+// Main content
 // ---------------------------------------------------------------------------
 
 function AnalystContent({ data }: { data: AnalystResponse }) {
@@ -176,13 +176,12 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
       {/* Score bar */}
       <ScoreBar score={data.f3_score} gradeTone={gradeTone} />
 
-      {/* Indicator grid */}
+      {/* Four weighted indicator cards */}
       <div className="atlas-f3-indicators">
         <ConsensusRatingCard consensus={data.consensus_rating} />
-        <PtUpsideCard pt={data.pt_upside} />
-        <PtDirectionCard dir={data.pt_direction} />
         <AnalystCoverageCard coverage={data.analyst_coverage} />
-        <RecentUpgradesCard upgrades={data.recent_upgrades} />
+        <PtUpsideCard pt={data.pt_upside} />
+        <PtRevisionCard revision={data.pt_revision} />
       </div>
     </div>
   );
@@ -220,11 +219,12 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 type IndicatorCardProps = {
   label: string;
   score: number;
-  maxScore: number;
+  weight: number;
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps) {
+function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
+  const weightPct = Math.round(weight * 100);
   return (
     <article
       className="atlas-f3-indicator"
@@ -232,10 +232,13 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
     >
       <header className="atlas-f3-indicator-header">
         <span className="atlas-f3-indicator-label">{label}</span>
-        <span className="atlas-f3-indicator-score">
-          {score}
-          <span className="atlas-f3-indicator-max">/{maxScore}</span>
-        </span>
+        <div className="atlas-f3-indicator-meta">
+          <span className="atlas-f3-indicator-weight">{weightPct}%</span>
+          <span className="atlas-f3-indicator-score">
+            {score}
+            <span className="atlas-f3-indicator-max">/100</span>
+          </span>
+        </div>
       </header>
       <div className="atlas-f3-indicator-body">{children}</div>
     </article>
@@ -248,7 +251,11 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
 
 function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicator }) {
   return (
-    <IndicatorCard label="Consensus Rating" score={consensus.score} maxScore={consensus.max_score}>
+    <IndicatorCard
+      label="Consensus Rating"
+      score={consensus.score}
+      weight={consensus.weight}
+    >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Consensus</dt>
@@ -263,18 +270,21 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
           </div>
         )}
         <div className="atlas-f3-dl-row">
-          <dt>B / H / S</dt>
+          <dt>SB / B / H / S / SS</dt>
           <dd>
-            {consensus.buy_count} / {consensus.hold_count} / {consensus.sell_count}
+            {consensus.strong_buy_count} / {consensus.buy_count} / {consensus.hold_count} /{' '}
+            {consensus.sell_count} / {consensus.strong_sell_count}
           </dd>
         </div>
       </dl>
       {consensus.total_analysts > 0 && (
         <div className="atlas-f3-consensus-bar" aria-hidden="true">
-          {consensus.buy_count > 0 && (
+          {(consensus.strong_buy_count + consensus.buy_count) > 0 && (
             <span
               className="atlas-f3-consensus-bar-buy"
-              style={{ width: `${(consensus.buy_count / consensus.total_analysts) * 100}%` }}
+              style={{
+                width: `${((consensus.strong_buy_count + consensus.buy_count) / consensus.total_analysts) * 100}%`,
+              }}
             />
           )}
           {consensus.hold_count > 0 && (
@@ -283,10 +293,12 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
               style={{ width: `${(consensus.hold_count / consensus.total_analysts) * 100}%` }}
             />
           )}
-          {consensus.sell_count > 0 && (
+          {(consensus.sell_count + consensus.strong_sell_count) > 0 && (
             <span
               className="atlas-f3-consensus-bar-sell"
-              style={{ width: `${(consensus.sell_count / consensus.total_analysts) * 100}%` }}
+              style={{
+                width: `${((consensus.sell_count + consensus.strong_sell_count) / consensus.total_analysts) * 100}%`,
+              }}
             />
           )}
         </div>
@@ -295,9 +307,28 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
   );
 }
 
+function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator }) {
+  return (
+    <IndicatorCard label="Analyst Count" score={coverage.score} weight={coverage.weight}>
+      <dl className="atlas-f3-dl">
+        <div className="atlas-f3-dl-row">
+          <dt>Analysts</dt>
+          <dd className={coverageTone(coverage.num_analysts)}>
+            {coverage.num_analysts > 0 ? coverage.num_analysts : '—'}
+          </dd>
+        </div>
+        <div className="atlas-f3-dl-row">
+          <dt>Reliability</dt>
+          <dd>{coverageLabel(coverage.num_analysts)}</dd>
+        </div>
+      </dl>
+    </IndicatorCard>
+  );
+}
+
 function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
   return (
-    <IndicatorCard label="PT Upside" score={pt.score} maxScore={pt.max_score}>
+    <IndicatorCard label="PT vs Current Price" score={pt.score} weight={pt.weight}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Upside</dt>
@@ -322,70 +353,25 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
   );
 }
 
-function PtDirectionCard({ dir }: { dir: PtDirectionIndicator }) {
+function PtRevisionCard({ revision }: { revision: PtRevisionIndicator }) {
   return (
-    <IndicatorCard label="PT Direction" score={dir.score} maxScore={dir.max_score}>
+    <IndicatorCard label="PT Revision Direction" score={revision.score} weight={revision.weight}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
-          <dt>PT Change</dt>
-          <dd className={directionTone(dir.direction_pct)}>
-            {dir.direction_pct !== null ? formatPct(dir.direction_pct) : 'No prior data'}
-          </dd>
-        </div>
-        {dir.current_consensus_pt !== null && (
-          <div className="atlas-f3-dl-row">
-            <dt>Current PT</dt>
-            <dd>{formatPrice(dir.current_consensus_pt)}</dd>
-          </div>
-        )}
-        {dir.prior_consensus_pt !== null && (
-          <div className="atlas-f3-dl-row">
-            <dt>Prior PT</dt>
-            <dd>{formatPrice(dir.prior_consensus_pt)}</dd>
-          </div>
-        )}
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator }) {
-  return (
-    <IndicatorCard label="Analyst Coverage" score={coverage.score} maxScore={coverage.max_score}>
-      <dl className="atlas-f3-dl">
-        <div className="atlas-f3-dl-row">
-          <dt>Analysts</dt>
-          <dd className={coverageTone(coverage.num_analysts)}>
-            {coverage.num_analysts > 0 ? coverage.num_analysts : '—'}
+          <dt>Signal</dt>
+          <dd className={revisionTone(revision.revision_label)} data-testid="f3-revision-label">
+            {revision.revision_label}
           </dd>
         </div>
         <div className="atlas-f3-dl-row">
-          <dt>Reliability</dt>
-          <dd>{coverageLabel(coverage.num_analysts)}</dd>
-        </div>
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function RecentUpgradesCard({ upgrades }: { upgrades: RecentUpgradesIndicator }) {
-  return (
-    <IndicatorCard label="Recent Upgrades" score={upgrades.score} maxScore={upgrades.max_score}>
-      <dl className="atlas-f3-dl">
-        <div className="atlas-f3-dl-row">
-          <dt>Net</dt>
-          <dd className={netUpgradesTone(upgrades.net_upgrades)}>
-            {upgrades.net_upgrades >= 0 ? '+' : ''}
-            {upgrades.net_upgrades}
+          <dt>Raises (30d)</dt>
+          <dd className={revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''}>
+            {revision.raises_30d}
           </dd>
         </div>
         <div className="atlas-f3-dl-row">
-          <dt>Upgrades</dt>
-          <dd className="is-green">{upgrades.upgrades}</dd>
-        </div>
-        <div className="atlas-f3-dl-row">
-          <dt>Downgrades</dt>
-          <dd className={upgrades.downgrades > 0 ? 'is-red' : ''}>{upgrades.downgrades}</dd>
+          <dt>Lowers (30d)</dt>
+          <dd className={revision.lowers_30d > 0 ? 'is-red' : ''}>{revision.lowers_30d}</dd>
         </div>
       </dl>
     </IndicatorCard>
@@ -393,7 +379,7 @@ function RecentUpgradesCard({ upgrades }: { upgrades: RecentUpgradesIndicator })
 }
 
 // ---------------------------------------------------------------------------
-// Formatting and tone helpers — pure, no side effects
+// Formatting and tone helpers
 // ---------------------------------------------------------------------------
 
 function formatPct(value: number): string {
@@ -409,48 +395,36 @@ function consensusTone(label: string): string {
   if (label === 'STRONG BUY') return 'is-green';
   if (label === 'BUY') return 'is-cyan';
   if (label === 'HOLD') return 'is-yellow';
-  if (label === 'UNDERPERFORM') return 'is-orange';
   if (label === 'SELL') return 'is-red';
   return '';
 }
 
 function upsideTone(upside: number | null): string {
   if (upside === null) return '';
-  if (upside >= 25) return 'is-green';
-  if (upside >= 10) return 'is-cyan';
-  if (upside >= 0) return 'is-yellow';
+  if (upside > 30) return 'is-green';
+  if (upside >= 15) return 'is-cyan';
+  if (upside >= 5) return 'is-yellow';
+  if (upside >= 0) return 'is-orange';
   return 'is-red';
 }
 
-function directionTone(direction: number | null): string {
-  if (direction === null) return '';
-  if (direction >= 5) return 'is-green';
-  if (direction >= 1) return 'is-cyan';
-  if (direction >= -1) return 'is-yellow';
-  if (direction >= -5) return 'is-orange';
-  return 'is-red';
+function revisionTone(label: string): string {
+  if (label === 'MULTIPLE RAISES') return 'is-green';
+  if (label === '1 RAISE') return 'is-cyan';
+  if (label === 'NO CHANGE') return 'is-yellow';
+  return 'is-red'; // LOWERED
 }
 
 function coverageTone(count: number): string {
-  if (count >= 20) return 'is-green';
+  if (count > 20) return 'is-green';
   if (count >= 10) return 'is-cyan';
   if (count >= 5) return 'is-yellow';
-  if (count >= 2) return 'is-orange';
-  return 'is-red';
+  return 'is-orange'; // <5 — capped at 40 pts
 }
 
 function coverageLabel(count: number): string {
-  if (count >= 20) return 'High';
+  if (count > 20) return 'High';
   if (count >= 10) return 'Good';
   if (count >= 5) return 'Moderate';
-  if (count >= 2) return 'Minimal';
-  return 'None';
-}
-
-function netUpgradesTone(net: number): string {
-  if (net >= 3) return 'is-green';
-  if (net >= 1) return 'is-cyan';
-  if (net === 0) return 'is-yellow';
-  if (net >= -2) return 'is-orange';
-  return 'is-red';
+  return 'Thin (<5)';
 }

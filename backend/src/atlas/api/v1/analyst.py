@@ -13,22 +13,27 @@ router = APIRouter(prefix="/analyst", tags=["analyst"])
 async def get_analyst(ticker: str) -> AnalystResponse:
     """Compute the F3 Analyst Conviction score for a single ticker.
 
-    Fetches analyst consensus data from Polygon.io — buy/hold/sell breakdown,
-    consensus price target, prior price target, and recent rating changes —
-    then rolls them into a 0-100 composite F3 score.
+    Fetches consensus ratings and PT revision data from Benzinga, current
+    price from Polygon.io, then rolls them into a 0-100 composite F3 score
+    using the four weighted sub-indicators defined in the Factor_Mapping_Guide:
+      Consensus Rating (35%), Analyst Count (10%),
+      PT vs Current Price (30%), PT Revision Direction (25%).
 
-    Returns 503 when ``POLYGON_API_KEY`` is not configured.
+    Returns 503 when BENZINGA_API_KEY is not configured.
     """
     settings = get_settings()
-    if not settings.polygon_api_key:
+    if not settings.benzinga_api_key:
         raise HTTPException(
             status_code=503,
-            detail="Analyst analysis unavailable: POLYGON_API_KEY is not configured.",
+            detail="Analyst analysis unavailable: BENZINGA_API_KEY is not configured.",
         )
 
     normalised = ticker.strip().upper()
     if not normalised:
         raise HTTPException(status_code=422, detail="Ticker symbol must not be empty.")
 
-    service = AnalystService(api_key=settings.polygon_api_key)
+    service = AnalystService(
+        benzinga_api_key=settings.benzinga_api_key,
+        polygon_api_key=settings.polygon_api_key,
+    )
     return await service.compute_analyst(normalised)

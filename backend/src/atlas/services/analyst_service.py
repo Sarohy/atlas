@@ -1,20 +1,29 @@
 """F3 Analyst Conviction service.
 
-Pure computation functions (all deterministic, no I/O) plus the
-``AnalystService`` class that fetches data from Polygon.io and produces
-an ``AnalystResponse``.
+Data sources:
+  - Benzinga  → consensus ratings, analyst count, consensus PT, PT revision direction
+  - Polygon.io → current stock price
 
-F3 sub-indicators (0-20 pts each, total 0-100):
-  1. Consensus Rating    — buy/hold/sell analyst breakdown
-  2. PT Upside           — % upside from current price to consensus PT
-  3. PT Direction        — whether the consensus PT is being raised or cut
-  4. Analyst Coverage    — number of analysts covering the stock
-  5. Recent Upgrades     — net upgrade/downgrade balance over 90 days
+F3 sub-indicators and weights (Factor_Mapping_Guide):
+  1. Consensus Rating     (35%) — (Strong Buy + Buy) % of total analysts
+  2. Analyst Count        (10%) — unique analysts covering the stock
+  3. PT vs Current Price  (30%) — % upside from current price to consensus PT
+  4. PT Revision Direction(25%) — PT raises / lowers from Benzinga in last 30 days
+
+F3 = (score1 × 0.35) + (score2 × 0.10) + (score3 × 0.30) + (score4 × 0.25)
+
+LITE worked example (from guide):
+  Consensus 80 × 0.35 = 28.0
+  Coverage  85 × 0.10 =  8.5   (10-20 analysts)
+  PT Upside 85 × 0.30 = 25.5   (15-30% above current)
+  PT Revision 100 × 0.25 = 25.0 (multiple raises)
+  F3 = 87 → rounds to 88 per guide (Mizuho top pick, multiple PT raises)
 """
 
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from typing import Any, Final
 
 import httpx
@@ -23,221 +32,126 @@ from atlas.schemas.analyst import (
     AnalystCoverageIndicator,
     AnalystResponse,
     ConsensusRatingIndicator,
-    PtDirectionIndicator,
+    PtRevisionIndicator,
     PtUpsideIndicator,
-    RecentUpgradesIndicator,
 )
 
 # ---------------------------------------------------------------------------
-# Named scoring thresholds
+# Weights
 # ---------------------------------------------------------------------------
 
-# Consensus rating thresholds (% of analysts with a buy rating)
-_CONSENSUS_STRONG_BUY_PCT: Final[float] = 70.0  # >=70 % → STRONG BUY / 20 pts
-_CONSENSUS_BUY_PCT: Final[float] = 50.0  # >=50 % → BUY / 15 pts
-_CONSENSUS_HOLD_PCT: Final[float] = 30.0  # >=30 % → HOLD / 10 pts
-_CONSENSUS_UNDERPERFORM_PCT: Final[float] = 20.0  # >=20 % → UNDERPERFORM / 5 pts
+_W_CONSENSUS: Final[float] = 0.35
+_W_COVERAGE: Final[float] = 0.10
+_W_PT_UPSIDE: Final[float] = 0.30
+_W_PT_REVISION: Final[float] = 0.25
 
-# PT upside thresholds (% upside from current price to consensus PT)
-_PT_UPSIDE_STRONG: Final[float] = 25.0  # >=25 % → 20 pts
-_PT_UPSIDE_GOOD: Final[float] = 10.0  # >=10 % → 15 pts
-_PT_UPSIDE_MODERATE: Final[float] = 5.0  # >=5 %  → 10 pts
-# >=0 % but <5 % → 5 pts; negative → 0 pts
-
-# PT direction thresholds (% change in consensus PT vs prior reading)
-_PT_DIR_STRONG_UP: Final[float] = 5.0  # PT raised >=5 % → 20 pts
-_PT_DIR_MILD_UP: Final[float] = 1.0  # PT raised >=1 % → 15 pts
-_PT_DIR_MILD_DOWN: Final[float] = -1.0  # flat band (-1 % to +1 %) → 10 pts
-_PT_DIR_STRONG_DOWN: Final[float] = -5.0  # PT cut >=5 % → 0 pts
-
-# Analyst coverage thresholds (number of covering analysts)
-_COVERAGE_STRONG: Final[int] = 20  # >=20 analysts → 20 pts
-_COVERAGE_GOOD: Final[int] = 10  # >=10 analysts → 15 pts
-_COVERAGE_MODERATE: Final[int] = 5  # >=5  analysts → 10 pts
-_COVERAGE_MINIMAL: Final[int] = 2  # >=2  analysts → 5 pts; <2 → 0 pts
-
-# Net-upgrades thresholds (upgrades - downgrades over last 90 days)
-_UPGRADES_STRONG: Final[int] = 3  # net >=+3 → 20 pts
-_UPGRADES_MILD: Final[int] = 1  # net >=+1 → 15 pts
-# net ==  0 → 10 pts (neutral)
-_DOWNGRADES_MILD: Final[int] = -2  # net >=-2 → 5 pts; net <-2 → 0 pts
-
+# ---------------------------------------------------------------------------
 # Grade thresholds
+# ---------------------------------------------------------------------------
+
 _GRADE_STRONG_BUY: Final[int] = 80
 _GRADE_BUY: Final[int] = 60
 _GRADE_NEUTRAL: Final[int] = 40
 _GRADE_WEAK: Final[int] = 20
 
-_MAX_SCORE_PER_INDICATOR: Final[int] = 20
-_POLYGON_TIMEOUT_SECONDS: Final[float] = 10.0
-
 # ---------------------------------------------------------------------------
-# Pure computation helpers
+# API constants
 # ---------------------------------------------------------------------------
 
+_BENZINGA_BASE_URL: Final[str] = "https://api.benzinga.com"
+_POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
+_TIMEOUT: Final[float] = 10.0
 
-def _compute_consensus_rating(buy: int, hold: int, sell: int) -> tuple[str, float | None]:
-    """Compute consensus label and buy percentage from analyst counts.
+# PT revision look-back window in days
+_REVISION_DAYS: Final[int] = 30
 
-    Args:
-        buy:  Analysts with a buy / strong-buy rating.
-        hold: Analysts with a hold / neutral rating.
-        sell: Analysts with an underperform / sell rating.
-
-    Returns:
-        ``(label, buy_pct)`` where label is one of:
-        ``"STRONG BUY" | "BUY" | "HOLD" | "UNDERPERFORM" | "SELL" | "NO DATA"``
-        and ``buy_pct`` is the percentage of buy ratings (0-100), or ``None``
-        when the total analyst count is zero.
-    """
-    total = buy + hold + sell
-    if total == 0:
-        return "NO DATA", None
-    buy_pct = buy / total * 100.0
-    if buy_pct >= _CONSENSUS_STRONG_BUY_PCT:
-        return "STRONG BUY", buy_pct
-    if buy_pct >= _CONSENSUS_BUY_PCT:
-        return "BUY", buy_pct
-    if buy_pct >= _CONSENSUS_HOLD_PCT:
-        return "HOLD", buy_pct
-    if buy_pct >= _CONSENSUS_UNDERPERFORM_PCT:
-        return "UNDERPERFORM", buy_pct
-    return "SELL", buy_pct
+# ---------------------------------------------------------------------------
+# Scoring functions — each returns 0-100
+# ---------------------------------------------------------------------------
 
 
 def _score_consensus(buy_pct: float | None) -> int:
-    """Map analyst buy percentage to a 0-20 score.
+    """Consensus Rating score (0-100).
 
-    Args:
-        buy_pct: Percentage of analysts with a buy rating (0-100), or ``None``.
-
-    Returns:
-        Integer score: 0, 5, 10, 15, or 20.
+    Guide: Strong Buy (>80% Buy) → 100 | Buy (60-80%) → 80
+           Hold (40-60%) → 55 | Sell → 20
+    Null / no data → 55 (neutral).
     """
     if buy_pct is None:
-        return 0
-    if buy_pct >= _CONSENSUS_STRONG_BUY_PCT:
-        return 20
-    if buy_pct >= _CONSENSUS_BUY_PCT:
-        return 15
-    if buy_pct >= _CONSENSUS_HOLD_PCT:
-        return 10
-    if buy_pct >= _CONSENSUS_UNDERPERFORM_PCT:
-        return 5
-    return 0
+        return 55
+    if buy_pct > 80:
+        return 100
+    if buy_pct >= 60:
+        return 80
+    if buy_pct >= 40:
+        return 55
+    return 20
 
 
-def _compute_pt_upside(current_price: float | None, consensus_pt: float | None) -> float | None:
-    """Compute percentage upside from current price to consensus price target.
+def _score_analyst_coverage(count: int | None) -> int:
+    """Analyst Count score (0-100).
 
-    Returns ``None`` when either argument is ``None`` or ``current_price`` is zero.
+    Guide: >20 → 100 | 10-20 → 85 | 5-10 → 65 | <5 → 40 (max 40 per guide rule).
     """
-    if current_price is None or consensus_pt is None:
-        return None
-    if current_price == 0.0:
-        return None
-    return (consensus_pt - current_price) / current_price * 100.0
+    if count is None:
+        return 40
+    if count > 20:
+        return 100
+    if count >= 10:
+        return 85
+    if count >= 5:
+        return 65
+    return 40  # <5 analysts: hard cap at 40
 
 
 def _score_pt_upside(upside_pct: float | None) -> int:
-    """Map PT upside percentage to a 0-20 score.
+    """PT vs Current Price score (0-100).
 
-    Args:
-        upside_pct: Percentage upside (negative = downside), or ``None``.
-
-    Returns:
-        Integer score: 0, 5, 10, 15, or 20.
+    Guide: PT >30% above current → 100 | 15-30% → 85 | 5-15% → 70
+           0-5% → 55 | PT below current → 20
+    Null / no data → 55 (neutral).
     """
     if upside_pct is None:
-        return 0
-    if upside_pct >= _PT_UPSIDE_STRONG:
-        return 20
-    if upside_pct >= _PT_UPSIDE_GOOD:
-        return 15
-    if upside_pct >= _PT_UPSIDE_MODERATE:
-        return 10
-    if upside_pct >= 0.0:
-        return 5
-    return 0
+        return 55
+    if upside_pct > 30:
+        return 100
+    if upside_pct >= 15:
+        return 85
+    if upside_pct >= 5:
+        return 70
+    if upside_pct >= 0:
+        return 55
+    return 20
 
 
-def _compute_pt_direction(current_pt: float | None, prior_pt: float | None) -> float | None:
-    """Compute percentage change in consensus PT from prior to current reading.
+def _score_pt_revision(raises: int, lowers: int) -> int:
+    """PT Revision Direction score (0-100).
 
-    Returns:
-        Positive value when the PT is being raised; negative when cut.
-        ``None`` when either argument is ``None`` or ``prior_pt`` is zero.
+    Guide: Multiple upgrades last 30d → 100 | 1 upgrade → 80
+           No change → 60 | Downgrade → 20
+    'Raises' and 'Announces' from Benzinga action_pt count as raises.
+    'Lowers' counts as a downgrade.
     """
-    if current_pt is None or prior_pt is None:
-        return None
-    if prior_pt == 0.0:
-        return None
-    return (current_pt - prior_pt) / prior_pt * 100.0
+    if raises >= 2:
+        return 100
+    if raises == 1:
+        return 80
+    if lowers == 0:
+        return 60  # no change / maintains
+    return 20  # any downgrade
 
 
-def _score_pt_direction(direction_pct: float | None) -> int:
-    """Map PT direction percentage to a 0-20 score.
-
-    ``None`` (no historical PT data available) returns 10 — neutral, since
-    there is no evidence of a raise or a cut.
-    """
-    if direction_pct is None:
-        return 10
-    if direction_pct >= _PT_DIR_STRONG_UP:
-        return 20
-    if direction_pct >= _PT_DIR_MILD_UP:
-        return 15
-    if direction_pct >= _PT_DIR_MILD_DOWN:
-        return 10
-    if direction_pct >= _PT_DIR_STRONG_DOWN:
-        return 5
-    return 0
-
-
-def _score_analyst_coverage(num_analysts: int | None) -> int:
-    """Map analyst count to a 0-20 score.
-
-    More analysts means a more reliable and liquid consensus signal.
-    ``None`` returns 0 (no coverage data available).
-    """
-    if num_analysts is None:
-        return 0
-    if num_analysts >= _COVERAGE_STRONG:
-        return 20
-    if num_analysts >= _COVERAGE_GOOD:
-        return 15
-    if num_analysts >= _COVERAGE_MODERATE:
-        return 10
-    if num_analysts >= _COVERAGE_MINIMAL:
-        return 5
-    return 0
-
-
-def _compute_net_upgrades(upgrades: int, downgrades: int) -> int:
-    """Compute net upgrade balance (upgrades - downgrades) over a recent window."""
-    return upgrades - downgrades
-
-
-def _score_net_upgrades(net_upgrades: int | None) -> int:
-    """Map net upgrade count to a 0-20 score.
-
-    ``None`` (no recent rating-change data) returns 10 — neutral.
-    """
-    if net_upgrades is None:
-        return 10
-    if net_upgrades >= _UPGRADES_STRONG:
-        return 20
-    if net_upgrades >= _UPGRADES_MILD:
-        return 15
-    if net_upgrades >= 0:
-        return 10
-    if net_upgrades >= _DOWNGRADES_MILD:
-        return 5
-    return 0
+def _revision_label(raises: int, lowers: int) -> str:
+    if raises >= 2:
+        return "MULTIPLE RAISES"
+    if raises == 1:
+        return "1 RAISE"
+    if lowers == 0:
+        return "NO CHANGE"
+    return "LOWERED"
 
 
 def _grade_from_total(total: int) -> str:
-    """Convert a numeric F3 total (0-100) into a grade string."""
     if total >= _GRADE_STRONG_BUY:
         return "STRONG BUY"
     if total >= _GRADE_BUY:
@@ -250,79 +164,104 @@ def _grade_from_total(total: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Assembly helper
+# Consensus label helper
+# ---------------------------------------------------------------------------
+
+
+def _consensus_label(buy_pct: float | None) -> str:
+    if buy_pct is None:
+        return "NO DATA"
+    if buy_pct > 80:
+        return "STRONG BUY"
+    if buy_pct >= 60:
+        return "BUY"
+    if buy_pct >= 40:
+        return "HOLD"
+    return "SELL"
+
+
+# ---------------------------------------------------------------------------
+# Assembly
 # ---------------------------------------------------------------------------
 
 
 def _build_analyst_response(
     ticker: str,
+    strong_buy: int,
     buy: int,
     hold: int,
     sell: int,
-    current_price: float | None,
-    consensus_pt: float | None,
-    prior_consensus_pt: float | None,
+    strong_sell: int,
     num_analysts: int | None,
-    upgrades: int,
-    downgrades: int,
+    consensus_pt: float | None,
+    current_price: float | None,
+    pt_raises: int,
+    pt_lowers: int,
 ) -> AnalystResponse:
-    """Assemble an ``AnalystResponse`` from raw indicator inputs."""
-    label, buy_pct = _compute_consensus_rating(buy, hold, sell)
-    upside = _compute_pt_upside(current_price, consensus_pt)
-    direction = _compute_pt_direction(consensus_pt, prior_consensus_pt)
-    net = _compute_net_upgrades(upgrades, downgrades)
+    """Assemble an AnalystResponse from raw fetched values."""
+    total_analysts = strong_buy + buy + hold + sell + strong_sell
+    effective_count = num_analysts if num_analysts is not None else total_analysts
 
+    # Buy percentage = (Strong Buy + Buy) / total * 100
+    buy_pct: float | None = None
+    if total_analysts > 0:
+        buy_pct = (strong_buy + buy) / total_analysts * 100.0
+
+    # PT upside
+    upside_pct: float | None = None
+    if current_price and consensus_pt and current_price > 0:
+        upside_pct = (consensus_pt - current_price) / current_price * 100.0
+
+    # Individual scores (0-100)
     consensus_score = _score_consensus(buy_pct)
-    upside_score = _score_pt_upside(upside)
-    direction_score = _score_pt_direction(direction)
-    coverage_score = _score_analyst_coverage(num_analysts)
-    upgrades_score = _score_net_upgrades(net)
+    coverage_score = _score_analyst_coverage(effective_count)
+    upside_score = _score_pt_upside(upside_pct)
+    revision_score = _score_pt_revision(pt_raises, pt_lowers)
 
-    total = consensus_score + upside_score + direction_score + coverage_score + upgrades_score
-    grade = _grade_from_total(total)
-
-    effective_analysts = num_analysts if num_analysts is not None else buy + hold + sell
+    # Weighted F3
+    f3_raw = (
+        consensus_score * _W_CONSENSUS
+        + coverage_score * _W_COVERAGE
+        + upside_score * _W_PT_UPSIDE
+        + revision_score * _W_PT_REVISION
+    )
+    f3_score = round(f3_raw)
 
     return AnalystResponse(
         ticker=ticker.upper(),
         consensus_rating=ConsensusRatingIndicator(
+            strong_buy_count=strong_buy,
             buy_count=buy,
             hold_count=hold,
             sell_count=sell,
-            total_analysts=buy + hold + sell,
+            strong_sell_count=strong_sell,
+            total_analysts=total_analysts,
             buy_pct=buy_pct,
-            label=label,
+            label=_consensus_label(buy_pct),
             score=consensus_score,
-            max_score=_MAX_SCORE_PER_INDICATOR,
+            weight=_W_CONSENSUS,
+        ),
+        analyst_coverage=AnalystCoverageIndicator(
+            num_analysts=effective_count,
+            score=coverage_score,
+            weight=_W_COVERAGE,
         ),
         pt_upside=PtUpsideIndicator(
             current_price=current_price,
             consensus_pt=consensus_pt,
-            upside_pct=upside,
+            upside_pct=upside_pct,
             score=upside_score,
-            max_score=_MAX_SCORE_PER_INDICATOR,
+            weight=_W_PT_UPSIDE,
         ),
-        pt_direction=PtDirectionIndicator(
-            current_consensus_pt=consensus_pt,
-            prior_consensus_pt=prior_consensus_pt,
-            direction_pct=direction,
-            score=direction_score,
-            max_score=_MAX_SCORE_PER_INDICATOR,
+        pt_revision=PtRevisionIndicator(
+            raises_30d=pt_raises,
+            lowers_30d=pt_lowers,
+            revision_label=_revision_label(pt_raises, pt_lowers),
+            score=revision_score,
+            weight=_W_PT_REVISION,
         ),
-        analyst_coverage=AnalystCoverageIndicator(
-            num_analysts=effective_analysts,
-            score=coverage_score,
-            max_score=_MAX_SCORE_PER_INDICATOR,
-        ),
-        recent_upgrades=RecentUpgradesIndicator(
-            upgrades=upgrades,
-            downgrades=downgrades,
-            net_upgrades=net,
-            score=upgrades_score,
-            max_score=_MAX_SCORE_PER_INDICATOR,
-        ),
-        f3_score=total,
-        f3_grade=grade,
+        f3_score=f3_score,
+        f3_grade=_grade_from_total(f3_score),
     )
 
 
@@ -332,57 +271,197 @@ def _build_analyst_response(
 
 
 class AnalystService:
-    """Fetches analyst consensus data from Polygon.io and computes F3 scores."""
+    """Fetches F3 data from Benzinga + Polygon and computes the F3 score."""
 
-    _BASE_URL: Final[str] = "https://api.polygon.io"
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
+    def __init__(self, benzinga_api_key: str, polygon_api_key: str = "") -> None:
+        self._benzinga_key = benzinga_api_key
+        self._polygon_key = polygon_api_key
 
     @classmethod
     def from_env(cls) -> AnalystService:
-        """Construct the service from the ``POLYGON_API_KEY`` environment variable."""
-        key = os.environ.get("POLYGON_API_KEY", "")
-        return cls(api_key=key)
+        return cls(
+            benzinga_api_key=os.environ.get("BENZINGA_API_KEY", ""),
+            polygon_api_key=os.environ.get("POLYGON_API_KEY", ""),
+        )
 
     async def compute_analyst(self, ticker: str) -> AnalystResponse:
-        """Fetch analyst consensus data from Polygon and produce an ``AnalystResponse``."""
-        async with httpx.AsyncClient(
-            base_url=self._BASE_URL,
-            timeout=_POLYGON_TIMEOUT_SECONDS,
-            params={"apiKey": self._api_key},
-        ) as client:
+        """Fetch data from Benzinga + Polygon and return an AnalystResponse."""
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            consensus_data = await self._fetch_consensus(client, ticker)
+            ratings_data = await self._fetch_recent_ratings(client, ticker)
             current_price = await self._fetch_current_price(client, ticker)
-            analyst_data = await self._fetch_analyst_data(client, ticker)
 
-        buy = int(analyst_data.get("buy", 0))
-        hold = int(analyst_data.get("hold", 0))
-        sell = int(analyst_data.get("sell", 0))
-        consensus_pt: float | None = analyst_data.get("consensus_pt")
-        prior_pt: float | None = analyst_data.get("prior_consensus_pt")
-        raw_num_analysts = analyst_data.get("num_analysts")
-        num_analysts: int | None = int(raw_num_analysts) if raw_num_analysts is not None else None
-        upgrades = int(analyst_data.get("upgrades", 0))
-        downgrades = int(analyst_data.get("downgrades", 0))
+        strong_buy = consensus_data.get("strong_buy", 0)
+        buy = consensus_data.get("buy", 0)
+        hold = consensus_data.get("hold", 0)
+        sell = consensus_data.get("sell", 0)
+        strong_sell = consensus_data.get("strong_sell", 0)
+        num_analysts: int | None = consensus_data.get("num_analysts")
+        consensus_pt: float | None = consensus_data.get("consensus_pt")
+
+        pt_raises: int = ratings_data.get("raises", 0)
+        pt_lowers: int = ratings_data.get("lowers", 0)
 
         return _build_analyst_response(
             ticker=ticker,
+            strong_buy=strong_buy,
             buy=buy,
             hold=hold,
             sell=sell,
-            current_price=current_price,
-            consensus_pt=consensus_pt,
-            prior_consensus_pt=prior_pt,
+            strong_sell=strong_sell,
             num_analysts=num_analysts,
-            upgrades=upgrades,
-            downgrades=downgrades,
+            consensus_pt=consensus_pt,
+            current_price=current_price,
+            pt_raises=pt_raises,
+            pt_lowers=pt_lowers,
         )
 
-    async def _fetch_current_price(self, client: httpx.AsyncClient, ticker: str) -> float | None:
-        """Return the most recent closing price for ``ticker`` from Polygon snapshots."""
+    # ------------------------------------------------------------------
+    # Benzinga — consensus ratings
+    # ------------------------------------------------------------------
+
+    async def _fetch_consensus(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> dict[str, Any]:
+        """Fetch consensus rating breakdown from Benzinga.
+
+        Endpoint: GET /api/v1/consensus-ratings
+        Params: tickers, aggregate_type=number, token
+        """
         try:
             resp = await client.get(
-                f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker.upper()}"
+                f"{_BENZINGA_BASE_URL}/api/v1/consensus-ratings",
+                params={
+                    "tickers": ticker.upper(),
+                    "aggregate_type": "number",
+                    "token": self._benzinga_key,
+                },
+            )
+            resp.raise_for_status()
+            payload: dict[str, Any] = resp.json()
+
+            # Benzinga returns a list under "consensus_ratings" or "ratings"
+            records: list[Any] = (
+                payload.get("consensus_ratings")
+                or payload.get("ratings")
+                or []
+            )
+            if not records:
+                return {}
+
+            record: dict[str, Any] = records[0]
+            consensus: dict[str, Any] = record.get("consensus") or record
+
+            # Rating counts — Benzinga may use different key styles
+            def _get_count(keys: list[str]) -> int:
+                for k in keys:
+                    v = consensus.get(k)
+                    if v is not None:
+                        try:
+                            return int(v)
+                        except (TypeError, ValueError):
+                            pass
+                return 0
+
+            strong_buy = _get_count(["strongBuy", "strong_buy", "ratingCountStrongBuy"])
+            buy = _get_count(["buy", "ratingCountBuy"])
+            hold = _get_count(["hold", "neutral", "ratingCountHold"])
+            sell = _get_count(["sell", "ratingCountSell"])
+            strong_sell = _get_count(["strongSell", "strong_sell", "ratingCountStrongSell"])
+
+            # Analyst count
+            raw_count = (
+                consensus.get("analystCount")
+                or consensus.get("analyst_count")
+                or consensus.get("numOfRatings")
+                or consensus.get("ratingCount")
+            )
+            num_analysts: int | None = int(raw_count) if raw_count is not None else None
+
+            # Consensus price target
+            raw_pt = (
+                consensus.get("targetPrice")
+                or consensus.get("target_price")
+                or consensus.get("priceTarget")
+                or consensus.get("price_target")
+            )
+            consensus_pt: float | None = None
+            if raw_pt is not None:
+                try:
+                    consensus_pt = float(raw_pt)
+                except (TypeError, ValueError):
+                    pass
+
+            return {
+                "strong_buy": strong_buy,
+                "buy": buy,
+                "hold": hold,
+                "sell": sell,
+                "strong_sell": strong_sell,
+                "num_analysts": num_analysts,
+                "consensus_pt": consensus_pt,
+            }
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
+    # Benzinga — calendar ratings (PT revision direction, last 30 days)
+    # ------------------------------------------------------------------
+
+    async def _fetch_recent_ratings(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> dict[str, Any]:
+        """Count PT raises and lowers from Benzinga calendar/ratings (last 30 days).
+
+        action_pt values that count as raises: 'Raises', 'Announces'
+        action_pt values that count as lowers: 'Lowers'
+        'Maintains' → no change (ignored in counts)
+        """
+        try:
+            date_from = (date.today() - timedelta(days=_REVISION_DAYS)).isoformat()
+            date_to = date.today().isoformat()
+
+            resp = await client.get(
+                f"{_BENZINGA_BASE_URL}/api/v2.1/calendar/ratings",
+                params={
+                    "tickers": ticker.upper(),
+                    "dateFrom": date_from,
+                    "dateTo": date_to,
+                    "token": self._benzinga_key,
+                },
+                headers={"accept": "application/json"},
+            )
+            resp.raise_for_status()
+            payload: dict[str, Any] = resp.json()
+
+            ratings: list[Any] = payload.get("ratings") or []
+            raises = 0
+            lowers = 0
+            for r in ratings:
+                action_pt: str = (r.get("action_pt") or "").strip().lower()
+                if action_pt in ("raises", "announces"):
+                    raises += 1
+                elif action_pt == "lowers":
+                    lowers += 1
+
+            return {"raises": raises, "lowers": lowers}
+        except Exception:
+            return {"raises": 0, "lowers": 0}
+
+    # ------------------------------------------------------------------
+    # Polygon.io — current price
+    # ------------------------------------------------------------------
+
+    async def _fetch_current_price(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> float | None:
+        """Return the most recent closing price from Polygon snapshot."""
+        if not self._polygon_key:
+            return None
+        try:
+            resp = await client.get(
+                f"{_POLYGON_BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers/{ticker.upper()}",
+                params={"apiKey": self._polygon_key},
             )
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()
@@ -391,32 +470,3 @@ class AnalystService:
             return float(raw) if raw is not None else None
         except Exception:
             return None
-
-    async def _fetch_analyst_data(self, client: httpx.AsyncClient, ticker: str) -> dict[str, Any]:
-        """Return a normalised analyst-data dict from Polygon.
-
-        Tries Polygon's ticker snapshot for analyst fields.  Returns an empty
-        dict (all indicators will fall back to defaults) if the endpoint is
-        unavailable or the subscription tier does not include analyst data.
-        """
-        try:
-            resp = await client.get(
-                f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker.upper()}"
-            )
-            resp.raise_for_status()
-            payload: dict[str, Any] = resp.json()
-            ticker_data: dict[str, Any] = payload.get("ticker", {})
-            # Analyst fields are present on higher-tier Polygon subscriptions.
-            analysts: dict[str, Any] = ticker_data.get("analysts", {})
-            return {
-                "buy": analysts.get("buy", 0),
-                "hold": analysts.get("hold", 0),
-                "sell": analysts.get("sell", 0),
-                "consensus_pt": analysts.get("priceTarget"),
-                "prior_consensus_pt": analysts.get("priorPriceTarget"),
-                "num_analysts": analysts.get("numAnalysts"),
-                "upgrades": analysts.get("upgrades", 0),
-                "downgrades": analysts.get("downgrades", 0),
-            }
-        except Exception:
-            return {}

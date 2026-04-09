@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     # Polygon.io API key — required for ticker search
     polygon_api_key: str = Field(default="")
 
+    # Benzinga API key — required for F3 Analyst Conviction scoring
+    # (consensus-ratings and calendar/ratings endpoints)
+    benzinga_api_key: str = Field(default="")
+
+    # Unusual Whales API key — required for F4 Options Flow scoring
+    # (flow-alerts, options-volume, darkpool endpoints)
+    unusual_whales_api_key: str = Field(default="")
+
     # Alpha Vantage API key — required for F2 Earnings Quality scoring
     # (INCOME_STATEMENT and EARNINGS endpoints)
     alphavantage_api_key: str = Field(default="")

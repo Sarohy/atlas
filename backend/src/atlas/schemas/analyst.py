@@ -1,4 +1,14 @@
-"""Pydantic schemas for the F3 Analyst Conviction endpoint."""
+"""Pydantic schemas for the F3 Analyst Conviction endpoint.
+
+F3 has four sub-indicators with internal weights (per Factor_Mapping_Guide):
+  1. Consensus Rating     — buy % of analyst coverage            (35%)
+  2. Analyst Count        — number of unique covering analysts   (10%)
+  3. PT vs Current Price  — % upside from current to consensus PT (30%)
+  4. PT Revision Direction — PT raises / lowers in last 30 days  (25%)
+
+Each indicator is scored 0–100. The F3 score is:
+  F3 = (consensus × 0.35) + (count × 0.10) + (pt_upside × 0.30) + (pt_revision × 0.25)
+"""
 
 from __future__ import annotations
 
@@ -27,32 +37,57 @@ class F3Grade:
 
 
 class ConsensusRatingIndicator(BaseModel):
-    """Analyst buy/hold/sell breakdown and the resulting consensus label."""
+    """Analyst buy/hold/sell breakdown and the resulting consensus label.
+
+    Scoring rule (0-100):
+      buy_pct > 80% → 100 (Strong Buy) | 60-80% → 80 (Buy)
+      40-60% → 55 (Hold) | < 40% → 20 (Sell)
+    Weight in F3: 35%
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
-    buy_count: int = Field(ge=0, description="Number of analysts with a Buy or Strong Buy rating.")
-    hold_count: int = Field(ge=0, description="Number of analysts with a Hold / Neutral rating.")
-    sell_count: int = Field(
-        ge=0, description="Number of analysts with an Underperform or Sell rating."
-    )
+    strong_buy_count: int = Field(ge=0, description="Analysts with a Strong Buy rating.")
+    buy_count: int = Field(ge=0, description="Analysts with a Buy rating.")
+    hold_count: int = Field(ge=0, description="Analysts with a Hold / Neutral rating.")
+    sell_count: int = Field(ge=0, description="Analysts with a Sell rating.")
+    strong_sell_count: int = Field(ge=0, description="Analysts with a Strong Sell rating.")
     total_analysts: int = Field(ge=0, description="Total analyst count.")
     buy_pct: float | None = Field(
         None,
-        description="Buy ratings as a percentage of total (0-100). Null when no analysts.",
+        description="(Strong Buy + Buy) as a percentage of total (0-100). Null when no analysts.",
     )
     label: str = Field(
-        description=(
-            "Consensus label derived from buy_pct: "
-            "STRONG BUY | BUY | HOLD | UNDERPERFORM | SELL | NO DATA"
-        )
+        description="Consensus label: STRONG BUY | BUY | HOLD | SELL | NO DATA"
     )
-    score: int = Field(ge=0, le=20, description="F3 score contribution (0-20).")
-    max_score: int = Field(default=20)
+    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    weight: float = Field(default=0.35, description="Weight in F3 formula.")
+
+
+class AnalystCoverageIndicator(BaseModel):
+    """Depth of analyst coverage.
+
+    Scoring rule (0-100):
+      > 20 analysts → 100 | 10-20 → 85 | 5-10 → 65 | < 5 → 40 (hard cap)
+    Note: names with fewer than 5 analysts score max 40 per guide.
+    Weight in F3: 10%
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    num_analysts: int = Field(ge=0, description="Total number of analysts covering the stock.")
+    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    weight: float = Field(default=0.10, description="Weight in F3 formula.")
 
 
 class PtUpsideIndicator(BaseModel):
-    """Price target upside vs the current market price."""
+    """Price target upside vs the current market price.
+
+    Scoring rule (0-100):
+      PT > 30% above current → 100 | 15-30% → 85 | 5-15% → 70
+      0-5% → 55 | PT below current → 20
+    Weight in F3: 30%
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -69,53 +104,30 @@ class PtUpsideIndicator(BaseModel):
             "Negative indicates downside. Null when price data is missing."
         ),
     )
-    score: int = Field(ge=0, le=20, description="F3 score contribution (0-20).")
-    max_score: int = Field(default=20)
+    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    weight: float = Field(default=0.30, description="Weight in F3 formula.")
 
 
-class PtDirectionIndicator(BaseModel):
-    """Direction of the consensus price target revision."""
+class PtRevisionIndicator(BaseModel):
+    """Direction of analyst PT revisions over the last 30 days.
 
-    model_config = ConfigDict(from_attributes=True)
+    Uses Benzinga calendar/ratings action_pt field:
+      'Raises' / 'Announces' → upgrade | 'Lowers' → downgrade | 'Maintains' → no change
 
-    current_consensus_pt: float | None = Field(
-        None, description="Current consensus 12-month price target (USD)."
-    )
-    prior_consensus_pt: float | None = Field(
-        None,
-        description="Consensus price target from approximately 3 months ago (USD).",
-    )
-    direction_pct: float | None = Field(
-        None,
-        description=(
-            "Percentage change in consensus PT from prior to current. "
-            "Positive = PT being raised; negative = PT being cut."
-        ),
-    )
-    score: int = Field(ge=0, le=20, description="F3 score contribution (0-20).")
-    max_score: int = Field(default=20)
-
-
-class AnalystCoverageIndicator(BaseModel):
-    """Depth of analyst coverage — more analysts means a more reliable consensus."""
+    Scoring rule (0-100):
+      ≥ 2 raises in 30d → 100 | 1 raise → 80 | No change → 60 | Any lower → 20
+    Weight in F3: 25%
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
-    num_analysts: int = Field(ge=0, description="Total number of analysts covering the stock.")
-    score: int = Field(ge=0, le=20, description="F3 score contribution (0-20).")
-    max_score: int = Field(default=20)
-
-
-class RecentUpgradesIndicator(BaseModel):
-    """Net upgrade/downgrade balance over the most recent 90-day window."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    upgrades: int = Field(ge=0, description="Number of analyst upgrades in last 90 days.")
-    downgrades: int = Field(ge=0, description="Number of analyst downgrades in last 90 days.")
-    net_upgrades: int = Field(description="upgrades - downgrades. Positive = net bullish action.")
-    score: int = Field(ge=0, le=20, description="F3 score contribution (0-20).")
-    max_score: int = Field(default=20)
+    raises_30d: int = Field(ge=0, description="PT raises (Raises/Announces) in last 30 days.")
+    lowers_30d: int = Field(ge=0, description="PT cuts (Lowers) in last 30 days.")
+    revision_label: str = Field(
+        description="Summary label: MULTIPLE RAISES | 1 RAISE | NO CHANGE | LOWERED"
+    )
+    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    weight: float = Field(default=0.25, description="Weight in F3 formula.")
 
 
 # ---------------------------------------------------------------------------
@@ -124,16 +136,21 @@ class RecentUpgradesIndicator(BaseModel):
 
 
 class AnalystResponse(BaseModel):
-    """Complete F3 Analyst Conviction analysis for a single ticker."""
+    """Complete F3 Analyst Conviction analysis for a single ticker.
+
+    F3 = (consensus_rating.score × 0.35)
+       + (analyst_coverage.score × 0.10)
+       + (pt_upside.score × 0.30)
+       + (pt_revision.score × 0.25)
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     ticker: str = Field(description="Ticker symbol (upper-case).")
     consensus_rating: ConsensusRatingIndicator
-    pt_upside: PtUpsideIndicator
-    pt_direction: PtDirectionIndicator
     analyst_coverage: AnalystCoverageIndicator
-    recent_upgrades: RecentUpgradesIndicator
+    pt_upside: PtUpsideIndicator
+    pt_revision: PtRevisionIndicator
     f3_score: int = Field(
         ge=0, le=100, description="Composite F3 Analyst Conviction score (0-100)."
     )

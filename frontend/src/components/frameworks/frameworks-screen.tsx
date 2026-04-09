@@ -11,7 +11,10 @@ type FrameworksScreenProps = {
 
 export function FrameworksScreen({ data }: FrameworksScreenProps) {
   return (
-    <main className="atlas-portfolio-main atlas-frameworks-main" data-testid="atlas-frameworks-page">
+    <main
+      className="atlas-portfolio-main atlas-frameworks-main"
+      data-testid="atlas-frameworks-page"
+    >
       <section className="atlas-frameworks-overview">
         {data.overviewCards.map((card) => (
           <OverviewCard card={card} key={card.label} />

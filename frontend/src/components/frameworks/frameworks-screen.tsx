@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { F1MomentumPanel } from './f1-momentum-panel';
 import type {
   FrameworkCard,
   FrameworkOverviewCard,
@@ -26,6 +27,8 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
           <FrameworkRuleCard framework={framework} key={framework.title} />
         ))}
       </section>
+
+      <F1MomentumPanel />
     </main>
   );
 }

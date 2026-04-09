@@ -171,4 +171,48 @@ export const handlers = [
       message: 'Logout successful.',
     });
   }),
+
+  // ── Momentum ──────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/momentum/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      sector_etf: 'XLK',
+      rsi: { value: 62.5, score: 20, max_score: 20 },
+      macd: { macd_line: 1.23, signal_line: 0.98, histogram: 0.25, score: 20, max_score: 20 },
+      ma_alignment: {
+        ma_20: 175.0,
+        ma_50: 170.0,
+        ma_200: 160.0,
+        label: 'FULL_BULL',
+        score: 20,
+        max_score: 20,
+      },
+      week_52_position: {
+        high_52w: 200.0,
+        low_52w: 140.0,
+        position_pct: 75.0,
+        score: 15,
+        max_score: 20,
+      },
+      performance: {
+        perf_1m: 7.5,
+        perf_6m: 22.0,
+        score_1m: 8,
+        score_6m: 10,
+        score: 18,
+        max_score: 20,
+      },
+      sector_momentum: {
+        sector_etf: 'XLK',
+        ticker_perf_3m: 12.0,
+        sector_perf_3m: 6.0,
+        relative_perf_3m: 6.0,
+        score: 20,
+        max_score: 20,
+      },
+      f1_score: 93,
+      f1_grade: 'STRONG BUY',
+    });
+  }),
 ];

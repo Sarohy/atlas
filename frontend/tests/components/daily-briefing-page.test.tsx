@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
-import DailyBriefingPage from '@/app/daily-briefing/page';
+import DailyBriefingPage from '@/app/(atlas)/daily-briefing/page';
 
 function wrapper(children: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -20,15 +20,10 @@ describe('Daily briefing page', () => {
     render(wrapper(await DailyBriefingPage()));
   }
 
-  it('renders the daily briefing shell with the daily briefing nav item active', async () => {
+  it('renders the daily briefing content area', async () => {
     await renderPage();
 
     expect(screen.getByTestId('atlas-daily-briefing-page')).toBeInTheDocument();
-    expect(screen.getByText('ATLAS v7.0')).toBeInTheDocument();
-    expect(screen.getByText('Daily Briefing')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByText('Portfolio')).not.toHaveAttribute('aria-current', 'page');
-    expect(screen.getByText('Frameworks')).toBeInTheDocument();
-    expect(screen.getByText('Logout')).toBeInTheDocument();
   });
 
   it('renders the daily briefing question sets, pro forma table, and deploy plan', async () => {

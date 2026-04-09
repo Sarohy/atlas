@@ -1,16 +1,9 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 
-import {
-  AtlasActionsRail,
-  AtlasHeader,
-  AtlasHoldingsRail,
-  AtlasNavigation,
-} from '@/components/atlas/atlas-chrome';
 import {
   useClusters,
   useCreateCluster,
@@ -41,10 +34,6 @@ const PALETTE = [
   '#818cf8',
   '#34d399',
 ] as const;
-
-// ─── Singleton QueryClient ────────────────────────────────────────────────────
-
-const queryClient = new QueryClient();
 
 // ─── SVG icons ────────────────────────────────────────────────────────────────
 
@@ -473,21 +462,7 @@ function ClustersContent() {
   );
 }
 
-export function ClustersScreen({ data }: { data: ClustersScreenData }) {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <div className="atlas-portfolio-shell" data-testid="atlas-clusters-page">
-        <AtlasHeader appTitle={data.appTitle} />
-        <AtlasNavigation labels={data.navItems} />
-        <div className="atlas-portfolio-layout">
-          <AtlasHoldingsRail />
-          <ClustersContent />
-          <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
-        </div>
-      </div>
-    </QueryClientProvider>
-  );
+export function ClustersScreen() {
+  return <ClustersContent />;
 }
 
-// Re-export screen data type so the page import is clean.
-export type { ClustersScreenData };

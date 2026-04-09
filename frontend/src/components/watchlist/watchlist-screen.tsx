@@ -1,18 +1,6 @@
 'use client';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
-import {
-  AtlasActionsRail,
-  AtlasHeader,
-  AtlasHoldingsRail,
-  AtlasNavigation,
-} from '@/components/atlas/atlas-chrome';
 import { WatchlistTable } from './watchlist-table';
-import type { WatchlistScreenData } from '@/lib/api/watchlist-shell';
-
-// Module-level singleton — safe because this is client-only ('use client').
-const queryClient = new QueryClient();
 
 // ─── Content ──────────────────────────────────────────────────────────────────
 
@@ -39,21 +27,6 @@ function WatchlistContent() {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export function WatchlistScreen({ data }: { data: WatchlistScreenData }) {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <div className="atlas-portfolio-shell" data-testid="atlas-watchlist-page">
-        <AtlasHeader appTitle={data.appTitle} />
-        <AtlasNavigation labels={data.navItems} />
-        <div className="atlas-portfolio-layout">
-          <AtlasHoldingsRail />
-          <WatchlistContent />
-          <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
-        </div>
-      </div>
-    </QueryClientProvider>
-  );
+export function WatchlistScreen() {
+  return <WatchlistContent />;
 }
-
-// Re-export screen data type so the page import is clean.
-export type { WatchlistScreenData };

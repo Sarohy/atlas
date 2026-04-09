@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { LogoutButton } from '@/components/auth/logout-button';
 import { useAdjustCash, usePortfolioSummary } from '@/lib/hooks/use-portfolio-summary';
 import { useTickers, useSyncTickers } from '@/lib/hooks/use-tickers';
@@ -132,18 +134,22 @@ export function AtlasHeader({ appTitle }: { appTitle: string }) {
 }
 
 export function AtlasNavigation({ labels }: { labels: readonly PortfolioNavItem[] }) {
+  const pathname = usePathname();
   return (
     <nav aria-label="Primary" className="atlas-portfolio-nav">
-      {labels.map((item) => (
-        <a
-          aria-current={item.isActive ? 'page' : undefined}
-          className={cn('atlas-portfolio-nav-item', item.isActive && 'is-active')}
-          href={item.href}
-          key={item.label}
-        >
-          {item.label}
-        </a>
-      ))}
+      {labels.map((item) => {
+        const isActive = pathname === item.href;
+        return (
+          <Link
+            aria-current={isActive ? 'page' : undefined}
+            className={cn('atlas-portfolio-nav-item', isActive && 'is-active')}
+            href={item.href}
+            key={item.label}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

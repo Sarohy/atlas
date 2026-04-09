@@ -1,9 +1,3 @@
-import {
-  AtlasActionsRail,
-  AtlasHeader,
-  AtlasHoldingsRail,
-  AtlasNavigation,
-} from '@/components/atlas/atlas-chrome';
 import { cn } from '@/lib/utils';
 import type {
   FrameworkCard,
@@ -17,27 +11,19 @@ type FrameworksScreenProps = {
 
 export function FrameworksScreen({ data }: FrameworksScreenProps) {
   return (
-    <div className="atlas-portfolio-shell" data-testid="atlas-frameworks-page">
-      <AtlasHeader appTitle={data.appTitle} />
-      <AtlasNavigation labels={data.navItems} />
-      <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail />
-        <main className="atlas-portfolio-main atlas-frameworks-main">
-          <section className="atlas-frameworks-overview">
-            {data.overviewCards.map((card) => (
-              <OverviewCard card={card} key={card.label} />
-            ))}
-          </section>
+    <main className="atlas-portfolio-main atlas-frameworks-main" data-testid="atlas-frameworks-page">
+      <section className="atlas-frameworks-overview">
+        {data.overviewCards.map((card) => (
+          <OverviewCard card={card} key={card.label} />
+        ))}
+      </section>
 
-          <section className="atlas-frameworks-cards">
-            {data.frameworks.map((framework) => (
-              <FrameworkRuleCard framework={framework} key={framework.title} />
-            ))}
-          </section>
-        </main>
-        <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
-      </div>
-    </div>
+      <section className="atlas-frameworks-cards">
+        {data.frameworks.map((framework) => (
+          <FrameworkRuleCard framework={framework} key={framework.title} />
+        ))}
+      </section>
+    </main>
   );
 }
 

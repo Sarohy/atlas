@@ -9,13 +9,19 @@ import type {
 const APP_TITLE = 'ATLAS v7.0';
 const LOGOUT_LABEL = 'Logout';
 
-const NAV_ITEMS = [
+/** Used by both the route-group layout and individual screen loaders. */
+export const ATLAS_APP_TITLE = APP_TITLE;
+
+/** Canonical nav items — Portfolio lives at /portfolio, not /. */
+export const ATLAS_NAV_ITEMS = [
   { href: '/daily-briefing', label: 'Daily Briefing' },
-  { href: '/', label: 'Portfolio' },
+  { href: '/portfolio', label: 'Portfolio' },
   { href: '/frameworks', label: 'Frameworks' },
   { href: '/clusters', label: 'Clusters' },
   { href: '/watchlist', label: 'Watchlist' },
 ] as const;
+
+const NAV_ITEMS = ATLAS_NAV_ITEMS;
 
 const HOLDING_SECTIONS: readonly PortfolioHoldingSection[] = [
   {
@@ -147,8 +153,9 @@ const HOLDING_SECTIONS: readonly PortfolioHoldingSection[] = [
   },
 ] as const;
 
-const ACTIONS_TITLE = "Today's Actions";
-const ACTIONS: readonly PortfolioAction[] = [
+export const ATLAS_ACTIONS_TITLE = "Today's Actions";
+/** Exported for use by the persistent atlas route-group layout. */
+export const ATLAS_ACTIONS: readonly PortfolioAction[] = [
   {
     description: '$3.585M sitting ready. Saturday binary 36h away. No deploys.',
     metadata: 'FRAMEWORK #7 · #17',
@@ -221,8 +228,8 @@ export function loadActionsRail(): Promise<{
   actionsTitle: string;
 }> {
   return Promise.resolve({
-    actions: ACTIONS,
-    actionsTitle: ACTIONS_TITLE,
+    actions: ATLAS_ACTIONS,
+    actionsTitle: ATLAS_ACTIONS_TITLE,
   });
 }
 

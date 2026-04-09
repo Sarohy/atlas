@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import FrameworksPage from '@/app/frameworks/page';
+import FrameworksPage from '@/app/(atlas)/frameworks/page';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
 
 function wrapper(children: React.ReactNode) {
@@ -18,24 +18,10 @@ describe('Frameworks page', () => {
     render(wrapper(await FrameworksPage()));
   }
 
-  it('renders the frameworks shell with the frameworks nav item active', async () => {
+  it('renders the frameworks content area', async () => {
     await renderPage();
 
     expect(screen.getByTestId('atlas-frameworks-page')).toBeInTheDocument();
-    expect(screen.getByText('ATLAS v7.0')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Frameworks' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    expect(screen.getByRole('link', { name: 'Daily Briefing' })).not.toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    expect(screen.getByRole('link', { name: 'Portfolio' })).not.toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    expect(screen.getByText('Logout')).toBeInTheDocument();
   });
 
   it('renders regime cards, framework cards, and trigger scenarios', async () => {

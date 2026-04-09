@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthSessionProvider } from '@/components/auth/auth-session-provider';
-import PortfolioPage from '@/app/portfolio/page';
+import PortfolioPage from '@/app/(atlas)/portfolio/page';
 
 function wrapper(children: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -18,15 +18,10 @@ describe('Home portfolio page', () => {
     render(wrapper(await PortfolioPage()));
   }
 
-  it('renders the portfolio workspace shell and primary navigation', async () => {
+  it('renders the portfolio main content area', async () => {
     await renderPage();
 
     expect(screen.getByTestId('atlas-portfolio-page')).toBeInTheDocument();
-    expect(screen.getByText('ATLAS v7.0')).toBeInTheDocument();
-    expect(screen.getByText('Daily Briefing')).toBeInTheDocument();
-    expect(screen.getByText('Portfolio')).toBeInTheDocument();
-    expect(screen.getByText('Frameworks')).toBeInTheDocument();
-    expect(screen.getByText('Logout')).toBeInTheDocument();
   });
 
   it('renders the portfolio holdings, analytics cards, and actions rail', async () => {
@@ -46,10 +41,5 @@ describe('Home portfolio page', () => {
 
     // Live cash panel
     expect(screen.getByText('Current Balance')).toBeInTheDocument();
-
-    // Actions rail (still static)
-    expect(screen.getByText("Today's Actions")).toBeInTheDocument();
-    expect(screen.getByText('HOLD CASH')).toBeInTheDocument();
-    expect(screen.getByText('SELL ANET')).toBeInTheDocument();
   });
 });

@@ -1,9 +1,3 @@
-import {
-  AtlasActionsRail,
-  AtlasHeader,
-  AtlasHoldingsRail,
-  AtlasNavigation,
-} from '@/components/atlas/atlas-chrome';
 import { cn } from '@/lib/utils';
 import type {
   BriefingDeployPlanRow,
@@ -20,12 +14,7 @@ type DailyBriefingScreenProps = {
 
 export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
   return (
-    <div className="atlas-portfolio-shell" data-testid="atlas-daily-briefing-page">
-      <AtlasHeader appTitle={data.appTitle} />
-      <AtlasNavigation labels={data.navItems} />
-      <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail />
-        <main className="atlas-portfolio-main atlas-briefing-main">
+    <main className="atlas-portfolio-main atlas-briefing-main" data-testid="atlas-daily-briefing-page">
           <section className="atlas-briefing-hero">
             <div>
               <h1 className="atlas-briefing-title">{data.briefingDate}</h1>
@@ -104,9 +93,6 @@ export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
             </div>
           </div>
         </main>
-        <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
-      </div>
-    </div>
   );
 }
 

@@ -62,10 +62,7 @@ export function F2EarningsPanel() {
   const { data, isFetching, isError, error } = useEarnings(activeTicker);
 
   return (
-    <section
-      className="atlas-frameworks-panel atlas-f2-panel"
-      data-testid="f2-earnings-panel"
-    >
+    <section className="atlas-frameworks-panel atlas-f2-panel" data-testid="f2-earnings-panel">
       <header className="atlas-frameworks-panel-header atlas-f2-panel-header">
         <h2 className="atlas-frameworks-panel-title">F2 Earnings Quality</h2>
         {tickersLoading && (
@@ -94,9 +91,7 @@ export function F2EarningsPanel() {
           />
         )}
         {!isFetching && !isError && data && <EarningsContent data={data} />}
-        {!isFetching && !isError && !data && activeTicker && (
-          <EmptyState ticker={activeTicker} />
-        )}
+        {!isFetching && !isError && !data && activeTicker && <EmptyState ticker={activeTicker} />}
       </div>
     </section>
   );
@@ -283,8 +278,7 @@ function RevenueGrowthCard({ rev }: { rev: RevenueGrowthIndicator }) {
 }
 
 function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
-  const beatsLabel =
-    eps.quarters_beat !== null ? `${eps.quarters_beat}/4` : '—';
+  const beatsLabel = eps.quarters_beat !== null ? `${eps.quarters_beat}/4` : '—';
 
   return (
     <IndicatorCard label="EPS Beats" score={eps.score} maxScore={eps.max_score}>
@@ -341,7 +335,9 @@ function BacklogBtbCard({ btb }: { btb: BacklogBtbIndicator }) {
         <div className="atlas-f2-dl-row">
           <dt>BTB Proxy</dt>
           <dd className={btbTone(btb.btb_proxy)}>
-            {btb.btb_proxy !== null ? `${btb.btb_proxy >= 0 ? '+' : ''}${btb.btb_proxy.toFixed(2)}` : '—'}
+            {btb.btb_proxy !== null
+              ? `${btb.btb_proxy >= 0 ? '+' : ''}${btb.btb_proxy.toFixed(2)}`
+              : '—'}
           </dd>
         </div>
         {btb.revenue_acceleration !== null && (

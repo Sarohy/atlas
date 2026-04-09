@@ -60,10 +60,7 @@ describe('fetchEarnings', () => {
 
     await fetchEarnings('AAPL');
 
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/v1/earnings/AAPL',
-      expect.anything(),
-    );
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/earnings/AAPL', expect.anything());
   });
 
   it('upper-cases the ticker in the URL', async () => {
@@ -71,10 +68,7 @@ describe('fetchEarnings', () => {
 
     await fetchEarnings('nvda');
 
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/v1/earnings/NVDA',
-      expect.anything(),
-    );
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/earnings/NVDA', expect.anything());
   });
 
   it('returns the parsed earnings response', async () => {

@@ -8,11 +8,15 @@ import type { TickerSearchResult } from '@/lib/schemas/ticker';
 interface TickerSearchProps {
   onSelect: (ticker: TickerSearchResult) => void;
   autoFocus?: boolean;
+  /** Ticker symbols (upper-cased) that should be hidden from results. */
+  excludeTickers?: Set<string>;
 }
 
-export function TickerSearch({ onSelect, autoFocus }: TickerSearchProps) {
+export function TickerSearch({ onSelect, autoFocus, excludeTickers }: TickerSearchProps) {
   const [query, setQuery] = useState('');
-  const { data: results, isFetching } = useTickerSearch(query);
+  const { data: rawResults, isFetching } = useTickerSearch(query);
+
+  const results = rawResults?.filter((r) => !excludeTickers?.has(r.ticker.toUpperCase()));
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);

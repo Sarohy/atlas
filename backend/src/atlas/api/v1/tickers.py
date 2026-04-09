@@ -49,7 +49,7 @@ async def update_ticker(
 ) -> TickerResponse:
     """Update the share count for an existing ticker."""
     service = TickerService(session)
-    ticker = await service.update_shares(ticker_id, data.shares)
+    ticker = await service.update_shares(ticker_id, data.shares, data.cluster_id)
     if ticker is None:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker_id} not found.")
     return ticker  # type: ignore[return-value]

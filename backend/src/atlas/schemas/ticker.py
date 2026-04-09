@@ -42,9 +42,11 @@ class TickerCreate(BaseModel):
 
 
 class TickerUpdate(BaseModel):
-    """Payload to update the share count for an existing ticker."""
+    """Payload to patch an existing ticker — shares required, cluster_id optional."""
 
     shares: Decimal = Field(gt=Decimal("0"))
+    # Explicitly nullable: pass null to unassign from a cluster.
+    cluster_id: int | None = None
 
 
 class TickerResponse(BaseModel):

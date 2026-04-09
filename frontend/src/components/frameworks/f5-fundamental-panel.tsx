@@ -245,8 +245,7 @@ type IndicatorCardProps = {
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
-  const weightPct = Math.round(weight * 100);
+function IndicatorCard({ label, score, children }: IndicatorCardProps) {
   return (
     <article
       className="atlas-f5-indicator"
@@ -254,13 +253,10 @@ function IndicatorCard({ label, score, weight, children }: IndicatorCardProps) {
     >
       <header className="atlas-f5-indicator-header">
         <span className="atlas-f5-indicator-label">{label}</span>
-        <div className="atlas-f5-indicator-meta">
-          <span className="atlas-f5-indicator-weight">{weightPct}%</span>
-          <span className="atlas-f5-indicator-score">
-            {score}
-            <span className="atlas-f5-indicator-max">/100</span>
-          </span>
-        </div>
+        <span className="atlas-f5-indicator-score">
+          {score}
+          <span className="atlas-f5-indicator-max">/100</span>
+        </span>
       </header>
       <div className="atlas-f5-indicator-body">{children}</div>
     </article>

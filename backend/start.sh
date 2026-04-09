@@ -1,11 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "=== Finding alembic ==="
-find / -name "alembic" -type f 2>/dev/null
+export PATH="/mise/shims:$PATH"
 
-echo "=== Python location ==="
-which python
-
-echo "=== PATH ==="
-echo $PATH
+python -c "from alembic.config import main; main()" upgrade head
+python -m atlas.seed
+python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port 8080

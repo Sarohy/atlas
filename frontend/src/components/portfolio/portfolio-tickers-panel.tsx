@@ -21,20 +21,18 @@ import type { ClusterResponse } from '@/lib/schemas/cluster';
 /** Cycling accent palette matching the ATLAS design system */
 const ACCENTS = ['#38bdf8', '#4ade80', '#fbbf24', '#a78bfa', '#f472b6'] as const;
 
-// ─── Add-form schema ─────────────────────────────────────────────────────────
+// ─── Schema ──────────────────────────────────────────────────────────────────
 
 const addSchema = z.object({
   shares: z
     .string()
     .min(1, 'Required')
     .refine((v) => Number(v) > 0, { message: 'Must be > 0' }),
-  cluster_id: z.number().nullable().optional(),
 });
 type AddForm = z.infer<typeof addSchema>;
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
 
-/** Format a position value compactly: $X.XXM, $XXXK, or — if null. */
 function fmtPositionValue(value: number | null | undefined): string {
   if (value == null) return '—';
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
@@ -42,7 +40,6 @@ function fmtPositionValue(value: number | null | undefined): string {
   return `$${Math.round(value)}`;
 }
 
-/** Format a nullable percentage and return text + colour tone. */
 function fmtChange(pct: number | null | undefined): {
   text: string;
   tone: 'green' | 'red' | 'default';
@@ -178,18 +175,13 @@ interface ClusterSelectProps {
   clusters: ClusterResponse[] | undefined;
   value: number | null;
   onChange: (v: number | null) => void;
-  /** Accent colour used for the floating label and border tint. */
-  accentColor?: string;
 }
 
-function ClusterSelect({
-  clusters,
-  value,
-  onChange,
-  accentColor = '#4a90d9',
-}: ClusterSelectProps) {
+function ClusterSelect({ clusters, value, onChange }: ClusterSelectProps) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selected = clusters?.find((c) => c.id === value) ?? null;
 
   useEffect(() => {
@@ -198,79 +190,98 @@ function ClusterSelect({
         setOpen(false);
       }
     }
+    // Also close when the page scrolls (trigger rect becomes stale)
+    function onScroll() {
+      setOpen(false);
+    }
     document.addEventListener('mousedown', onOutsideClick);
-    return () => document.removeEventListener('mousedown', onOutsideClick);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onOutsideClick);
+      document.removeEventListener('scroll', onScroll, true);
+    };
   }, []);
 
-  function select(id: number | null) {
+  function handleOpen() {
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      // Render below the trigger; flip up if not enough room
+      const spaceBelow = window.innerHeight - r.bottom;
+      const dropHeight = Math.min(176 /* max-h-44 */, (clusters?.length ?? 0) * 44 + 44);
+      const top = spaceBelow >= dropHeight ? r.bottom + 4 : r.top - dropHeight - 4;
+      setDropdownStyle({
+        position: 'fixed',
+        top,
+        left: r.left,
+        width: r.width,
+        zIndex: 9999,
+      });
+    }
+    setOpen((v) => !v);
+  }
+
+  function pick(id: number | null) {
     onChange(id);
     setOpen(false);
   }
 
   return (
-    <div ref={containerRef} className="relative flex-1">
-      {/* Floating "Cluster" label */}
-      <span
-        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono uppercase tracking-wider pointer-events-none z-10 select-none"
-        style={{ color: `${accentColor}70` }}
-      >
+    <div ref={containerRef}>
+      <p className="text-[10px] font-mono text-[#4a5568] uppercase tracking-widest mb-1.5">
         Cluster
-      </span>
-
-      {/* Trigger */}
+      </p>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleOpen}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="w-full flex items-center gap-1.5 pl-16 pr-2.5 py-2 bg-[#0b1120] border rounded-lg font-mono text-sm focus:outline-none transition-colors"
-        style={{ borderColor: `${accentColor}40` }}
+        className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#0b1120] border border-[#2d3f5c] rounded-lg font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors"
       >
         {selected ? (
           <>
             <span
-              className="w-2 h-2 rounded-full shrink-0"
+              className="w-2.5 h-2.5 rounded-full shrink-0"
               style={{ background: selected.color }}
             />
             <span className="flex-1 truncate text-[#e8edf5] text-left">{selected.name}</span>
           </>
         ) : (
-          <span className="flex-1 text-left text-[#4a5568]">None</span>
+          <span className="flex-1 text-left text-[#4a5568]">No cluster</span>
         )}
-        <IconChevronDown className="shrink-0 text-[#4a5568] ml-auto" />
+        <IconChevronDown className="shrink-0 text-[#4a5568]" />
       </button>
 
-      {/* Dropdown */}
       {open && (
         <div
           role="listbox"
-          className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#111827] border border-[#2d3f5c] rounded-lg shadow-xl overflow-y-auto max-h-36"
+          style={dropdownStyle}
+          className="bg-[#111827] border border-[#2d3f5c] rounded-lg shadow-2xl overflow-y-auto max-h-44"
         >
           <button
             type="button"
             role="option"
             aria-selected={value === null}
-            onClick={() => select(null)}
-            className={`w-full flex items-center gap-2 px-3 py-2 font-mono text-sm text-left transition-colors hover:bg-white/5 ${
+            onClick={() => pick(null)}
+            className={`w-full flex items-center gap-2.5 px-3 py-2.5 font-mono text-sm text-left transition-colors hover:bg-white/5 ${
               value === null ? 'text-[#e8edf5]' : 'text-[#4a5568]'
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-[#2d3f5c] shrink-0" />
-            None
+            <span className="w-2.5 h-2.5 rounded-full bg-[#2d3f5c] shrink-0" />
+            No cluster
           </button>
-
           {clusters?.map((c) => (
             <button
               key={c.id}
               type="button"
               role="option"
               aria-selected={value === c.id}
-              onClick={() => select(c.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 font-mono text-sm text-left transition-colors hover:bg-white/5 ${
+              onClick={() => pick(c.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 font-mono text-sm text-left transition-colors hover:bg-white/5 ${
                 value === c.id ? 'text-[#e8edf5]' : 'text-[#8a95a8]'
               }`}
             >
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
               {c.name}
             </button>
           ))}
@@ -280,217 +291,188 @@ function ClusterSelect({
   );
 }
 
-// ─── PositionCard ─────────────────────────────────────────────────────────────
+// ─── Dialog shell ─────────────────────────────────────────────────────────────
 
-function PositionCard({ position, index }: { position: TickerResponse; index: number }) {
-  const [mode, setMode] = useState<'view' | 'edit' | 'confirmDelete'>('view');
+interface DialogProps {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function Dialog({ title, subtitle, onClose, children }: DialogProps) {
+  // Close on Escape key
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md bg-[#111827] border border-[#1e2a3f] rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 pt-6 pb-5 shrink-0">
+          <div>
+            <h2 className="font-mono font-bold text-base text-[#e8edf5] tracking-widest uppercase">
+              {title}
+            </h2>
+            {subtitle && <p className="mt-1 text-xs text-[#4a5568]">{subtitle}</p>}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 flex items-center justify-center rounded-xl text-[#3a4a5e] hover:text-[#8a95a8] hover:bg-white/5 transition-colors shrink-0 ml-4"
+          >
+            <IconX />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 pb-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── EditTickerDialog ─────────────────────────────────────────────────────────
+
+interface EditTickerDialogProps {
+  position: TickerResponse;
+  accent: string;
+  onClose: () => void;
+}
+
+function EditTickerDialog({ position, accent, onClose }: EditTickerDialogProps) {
   const [sharesInput, setSharesInput] = useState(String(position.shares));
   const [clusterInput, setClusterInput] = useState<number | null>(position.cluster_id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { mutate: update, isPending: saving } = useUpdateTicker();
-  const { mutate: del, isPending: deleting } = useDeleteTicker();
   const { data: clusters } = useClusters();
-  const accent = ACCENTS[index % ACCENTS.length];
-  const change = fmtChange(position.day_change_pct);
+  // Use the cluster colour assigned at dialog-open time for the header badge;
+  // fall back to the cycling accent colour so unassigned tickers still look distinct.
+  const initialCluster = clusters?.find((c) => c.id === (position.cluster_id ?? null)) ?? null;
+  const dialogColor = initialCluster?.color ?? accent;
 
   useEffect(() => {
-    if (mode === 'edit') {
+    // Slight delay so the dialog animation settles before focusing
+    const id = setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
-    }
-  }, [mode]);
+    }, 60);
+    return () => clearTimeout(id);
+  }, []);
 
-  function startEdit() {
-    setSharesInput(String(position.shares));
-    setClusterInput(position.cluster_id ?? null);
-    setMode('edit');
-  }
-
-  function cancelEdit() {
-    setSharesInput(String(position.shares));
-    setMode('view');
-  }
-
-  function saveEdit() {
+  function save() {
     const n = Number(sharesInput);
-    if (
-      !sharesInput.trim() ||
-      n <= 0 ||
-      (n === position.shares && clusterInput === (position.cluster_id ?? null))
-    ) {
-      cancelEdit();
+    if (!sharesInput.trim() || n <= 0) return;
+    // No-op if nothing actually changed
+    if (n === position.shares && clusterInput === (position.cluster_id ?? null)) {
+      onClose();
       return;
     }
     update(
       { id: position.id, shares: sharesInput, cluster_id: clusterInput },
-      {
-        onSuccess: (updated) => {
-          setSharesInput(String(updated.shares));
-          setClusterInput(updated.cluster_id ?? null);
-          setMode('view');
-        },
-      },
+      { onSuccess: onClose },
     );
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault();
-      saveEdit();
+      save();
     }
-    if (e.key === 'Escape') cancelEdit();
+    if (e.key === 'Escape') onClose();
   }
 
-  // ── Confirm-delete ────────────────────────────────────────────────────────
-  if (mode === 'confirmDelete') {
-    return (
-      <div className="atlas-portfolio-ticker-expanded flex items-center gap-3 rounded-xl bg-[#f87171]/5 border border-[#f87171]/20 px-4 py-3">
+  return (
+    <Dialog
+      title="Edit Position"
+      subtitle={`${position.ticker}${position.company_name ? ` · ${position.company_name}` : ''}`}
+      onClose={onClose}
+    >
+      {/* Ticker badge */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 rounded-xl mb-5"
+        style={{ background: `${dialogColor}0d`, border: `1px solid ${dialogColor}25` }}
+      >
         <div
-          className="shrink-0 w-9 h-9 rounded-xl grid place-items-center font-bold text-sm"
-          style={{ background: `${accent}15`, color: accent }}
+          className="w-10 h-10 rounded-xl grid place-items-center font-bold text-base shrink-0"
+          style={{ background: `${dialogColor}18`, color: dialogColor }}
         >
           {position.ticker.slice(0, 1)}
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-mono font-semibold text-sm text-[#f87171]">
-            Remove {position.ticker}?
+        <div>
+          <p className="font-mono font-semibold text-sm" style={{ color: dialogColor }}>
+            {position.ticker}
           </p>
-          <p className="text-[11px] text-[#8a95a8] mt-0.5">This cannot be undone</p>
+          <p className="text-[11px] text-[#8a95a8] mt-0.5">{position.company_name}</p>
         </div>
+      </div>
+
+      {/* Shares field */}
+      <div className="mb-4">
+        <p className="text-[10px] font-mono text-[#4a5568] uppercase tracking-widest mb-1.5">
+          Shares
+        </p>
+        <input
+          ref={inputRef}
+          type="number"
+          step="any"
+          min="0.0001"
+          value={sharesInput}
+          onChange={(e) => setSharesInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          className="w-full px-3 py-2.5 bg-[#0b1120] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors text-right"
+        />
+      </div>
+
+      {/* Cluster field */}
+      <div className="mb-6">
+        <ClusterSelect clusters={clusters} value={clusterInput} onChange={setClusterInput} />
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3">
         <button
-          onClick={() => del(position.id)}
-          disabled={deleting}
-          className="h-8 px-3 bg-[#f87171] hover:bg-[#ef4444] text-white font-mono font-bold text-xs rounded-lg transition-colors disabled:opacity-50"
+          onClick={save}
+          disabled={saving || !sharesInput.trim() || Number(sharesInput) <= 0}
+          className="flex-1 flex items-center justify-center gap-2 h-10 rounded-lg font-mono font-bold text-sm text-[#0a0e1a] transition-colors disabled:opacity-40"
+          style={{ background: dialogColor }}
         >
-          {deleting ? '…' : 'Remove'}
+          {saving ? (
+            '…'
+          ) : (
+            <>
+              <IconCheck /> Save
+            </>
+          )}
         </button>
         <button
-          onClick={() => setMode('view')}
-          className="h-8 px-2 text-[#8a95a8] hover:text-[#e8edf5] text-xs transition-colors"
+          onClick={onClose}
+          className="flex-1 h-10 rounded-lg font-mono text-sm text-[#8a95a8] bg-white/5 hover:bg-white/10 transition-colors"
         >
           Cancel
         </button>
       </div>
-    );
-  }
-
-  // ── Edit ──────────────────────────────────────────────────────────────────
-  if (mode === 'edit') {
-    return (
-      <div
-        className="atlas-portfolio-ticker-expanded flex items-start gap-3 rounded-xl border px-4 py-3 transition-all"
-        style={{ background: `${accent}08`, borderColor: `${accent}30` }}
-      >
-        <div
-          className="shrink-0 w-9 h-9 rounded-xl grid place-items-center font-bold text-sm mt-0.5"
-          style={{ background: `${accent}18`, color: accent, border: `1px solid ${accent}30` }}
-        >
-          {position.ticker.slice(0, 1)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p
-            className="font-mono font-semibold text-sm leading-tight mb-0.5"
-            style={{ color: accent }}
-          >
-            {position.ticker}
-          </p>
-          <p className="text-[11px] text-[#8a95a8] truncate">{position.company_name}</p>
-
-          <div className="flex items-center gap-2 mt-2">
-            {/* Shares */}
-            <div className="relative flex-1">
-              <span
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono uppercase tracking-wider pointer-events-none"
-                style={{ color: `${accent}60` }}
-              >
-                Shares
-              </span>
-              <input
-                ref={inputRef}
-                type="number"
-                step="any"
-                min="0.0001"
-                value={sharesInput}
-                onChange={(e) => setSharesInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="w-full pl-14 pr-3 py-2 bg-[#0b1120] border rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none transition-colors text-right"
-                style={{ borderColor: `${accent}40` }}
-              />
-            </div>
-
-            {/* Cluster with colour swatches */}
-            <ClusterSelect
-              clusters={clusters}
-              value={clusterInput}
-              onChange={setClusterInput}
-              accentColor={accent}
-            />
-
-            {/* Save */}
-            <button
-              onClick={saveEdit}
-              disabled={saving}
-              aria-label="Save"
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-[#0a0e1a] transition-colors shrink-0"
-              style={{ background: accent }}
-            >
-              {saving ? <span className="text-xs">…</span> : <IconCheck />}
-            </button>
-
-            {/* Cancel */}
-            <button
-              onClick={cancelEdit}
-              aria-label="Cancel"
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-[#4a5568] hover:text-[#8a95a8] hover:bg-white/5 transition-colors shrink-0"
-            >
-              <IconX />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── View ──────────────────────────────────────────────────────────────────
-  return (
-    <article className="atlas-portfolio-ticker">
-      <div
-        className="atlas-portfolio-ticker-badge"
-        style={{ background: `${accent}12`, color: accent }}
-      >
-        {position.ticker.slice(0, 1)}
-      </div>
-      <div className="atlas-portfolio-ticker-copy">
-        <p className="atlas-portfolio-ticker-symbol">{position.ticker}</p>
-        <p className="atlas-portfolio-ticker-label">{position.company_name ?? position.ticker}</p>
-      </div>
-      <div className="atlas-portfolio-ticker-metrics">
-        <p className="atlas-portfolio-ticker-price">{fmtPositionValue(position.position_value)}</p>
-        <p className={`atlas-portfolio-ticker-change is-${change.tone}`}>{change.text}</p>
-      </div>
-      <div className="atlas-portfolio-ticker-actions">
-        <button
-          onClick={startEdit}
-          aria-label={`Edit ${position.ticker}`}
-          className="atlas-portfolio-ticker-action"
-        >
-          <IconPencil />
-        </button>
-        <button
-          onClick={() => setMode('confirmDelete')}
-          aria-label={`Remove ${position.ticker}`}
-          className="atlas-portfolio-ticker-action atlas-portfolio-ticker-action--danger"
-        >
-          <IconTrash />
-        </button>
-      </div>
-    </article>
+    </Dialog>
   );
 }
 
-// ─── AddPositionPanel ─────────────────────────────────────────────────────────
+// ─── AddTickerDialog ──────────────────────────────────────────────────────────
 
-function AddPositionPanel({ onClose }: { onClose: () => void }) {
+interface AddTickerDialogProps {
+  onClose: () => void;
+}
+
+function AddTickerDialog({ onClose }: AddTickerDialogProps) {
   const [selectedTicker, setSelectedTicker] = useState<TickerSearchResult | null>(null);
   const [clusterValue, setClusterValue] = useState<number | null>(null);
   const sharesRef = useRef<HTMLInputElement | null>(null);
@@ -511,7 +493,7 @@ function AddPositionPanel({ onClose }: { onClose: () => void }) {
     if (selectedTicker) sharesRef.current?.focus();
   }, [selectedTicker]);
 
-  function handleCancel() {
+  function handleClose() {
     reset();
     setSelectedTicker(null);
     setClusterValue(null);
@@ -541,94 +523,187 @@ function AddPositionPanel({ onClose }: { onClose: () => void }) {
   const { ref: sharesFormRef, ...sharesRest } = register('shares');
 
   return (
-    <form
-      onSubmit={handleSubmit(onSubmit)}
-      className="mt-3 mb-1 rounded-xl border border-[#4a90d9]/25 bg-[#0b1120]"
+    <Dialog
+      title="Add Ticker"
+      subtitle="Search for a ticker and set the number of shares"
+      onClose={handleClose}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-[#0f1a2e] rounded-t-xl">
-        <div className="flex items-center gap-2">
-          <span className="w-6 h-6 rounded-md bg-[#4a90d9]/15 grid place-items-center text-[#4a90d9] shrink-0">
-            <IconPlus />
-          </span>
-          <p className="font-mono font-bold text-xs text-[#e8edf5] uppercase tracking-widest">
-            New Position
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {/* Ticker chip or live search */}
+        <div>
+          <p className="text-[10px] font-mono text-[#4a5568] uppercase tracking-widest mb-1.5">
+            Ticker
           </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleCancel}
-          aria-label="Close"
-          className="text-[#3a4a5e] hover:text-[#8a95a8] transition-colors"
-        >
-          <IconX />
-        </button>
-      </div>
-
-      <div className="px-4 pb-4 pt-3 space-y-3">
-        {/* Ticker chip or search */}
-        {selectedTicker ? (
-          <div className="flex items-center gap-2 px-3 py-2.5 bg-[#111827] border border-[#4a90d9]/40 rounded-lg">
-            <span className="w-7 h-7 rounded-md bg-[#4a90d9]/15 grid place-items-center font-mono font-bold text-xs text-[#4a90d9] shrink-0">
-              {selectedTicker.ticker.slice(0, 1)}
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="font-mono font-bold text-sm text-[#4a90d9]">{selectedTicker.ticker}</p>
-              <p className="text-[11px] text-[#8a95a8] truncate">{selectedTicker.name}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedTicker(null)}
-              aria-label="Clear ticker"
-              className="text-[#3a4a5e] hover:text-[#8a95a8] transition-colors"
-            >
-              <IconX />
-            </button>
-          </div>
-        ) : (
-          <TickerSearch onSelect={setSelectedTicker} autoFocus excludeTickers={excludedTickers} />
-        )}
-
-        {/* Shares + cluster + submit — only visible after a ticker is chosen */}
-        {selectedTicker && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#3a4a5e] uppercase tracking-widest pointer-events-none">
-                  Shares
-                </span>
-                <input
-                  type="number"
-                  step="any"
-                  min="0.0001"
-                  placeholder="0.0000"
-                  {...sharesRest}
-                  ref={(el) => {
-                    sharesFormRef(el);
-                    sharesRef.current = el;
-                  }}
-                  className="w-full pl-16 pr-3 py-2.5 bg-[#111827] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors text-right"
-                />
+          {selectedTicker ? (
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-[#0b1120] border border-[#4a90d9]/40 rounded-lg">
+              <span className="w-7 h-7 rounded-md bg-[#4a90d9]/15 grid place-items-center font-mono font-bold text-xs text-[#4a90d9] shrink-0">
+                {selectedTicker.ticker.slice(0, 1)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="font-mono font-bold text-sm text-[#4a90d9]">
+                  {selectedTicker.ticker}
+                </p>
+                <p className="text-[11px] text-[#8a95a8] truncate">{selectedTicker.name}</p>
               </div>
               <button
-                type="submit"
-                disabled={isPending}
-                className="shrink-0 h-10 px-5 bg-[#4a90d9] hover:bg-[#3a7bc8] text-[#0a0e1a] font-mono font-bold text-sm rounded-lg transition-colors disabled:opacity-40"
+                type="button"
+                onClick={() => setSelectedTicker(null)}
+                aria-label="Clear ticker"
+                className="text-[#3a4a5e] hover:text-[#8a95a8] transition-colors shrink-0"
               >
-                {isPending ? '…' : 'Add'}
+                <IconX />
               </button>
             </div>
+          ) : (
+            <TickerSearch onSelect={setSelectedTicker} autoFocus excludeTickers={excludedTickers} />
+          )}
+        </div>
 
-            {/* Cluster select with colour swatches */}
+        {/* Shares + cluster — only visible once a ticker is chosen */}
+        {selectedTicker && (
+          <>
+            {/* Shares */}
+            <div>
+              <p className="text-[10px] font-mono text-[#4a5568] uppercase tracking-widest mb-1.5">
+                Shares
+              </p>
+              <input
+                type="number"
+                step="any"
+                min="0.0001"
+                placeholder="0.0000"
+                {...sharesRest}
+                ref={(el) => {
+                  sharesFormRef(el);
+                  sharesRef.current = el;
+                }}
+                className="w-full px-3 py-2.5 bg-[#0b1120] border border-[#2d3f5c] rounded-lg text-[#e8edf5] font-mono text-sm focus:outline-none focus:border-[#4a90d9] transition-colors text-right"
+              />
+              {errors.shares && (
+                <p className="text-[11px] text-[#f87171] mt-1">{errors.shares.message}</p>
+              )}
+            </div>
+
+            {/* Cluster */}
             <ClusterSelect clusters={clusters} value={clusterValue} onChange={setClusterValue} />
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={isPending}
+              className="w-full flex items-center justify-center gap-2 h-10 bg-[#4a90d9] hover:bg-[#3a7bc8] text-[#0a0e1a] font-mono font-bold text-sm rounded-lg transition-colors disabled:opacity-40 mt-2"
+            >
+              {isPending ? (
+                '…'
+              ) : (
+                <>
+                  <IconPlus /> Add Position
+                </>
+              )}
+            </button>
+          </>
+        )}
+      </form>
+    </Dialog>
+  );
+}
+
+// ─── PositionCard ─────────────────────────────────────────────────────────────
+
+interface PositionCardProps {
+  position: TickerResponse;
+  index: number;
+  onEdit: (position: TickerResponse) => void;
+}
+
+function PositionCard({ position, index, onEdit }: PositionCardProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { mutate: del, isPending: deleting } = useDeleteTicker();
+  const { data: clusters } = useClusters();
+  const accent = ACCENTS[index % ACCENTS.length] ?? ACCENTS[0];
+  const cluster = clusters?.find((c) => c.id === position.cluster_id) ?? null;
+  // Use the assigned cluster's hex colour as the badge colour; fall back to the
+  // cycling accent palette so unassigned tickers still look distinct.
+  const badgeColor = cluster?.color ?? accent;
+  const change = fmtChange(position.day_change_pct);
+
+  if (confirmDelete) {
+    return (
+      <div className="atlas-portfolio-ticker-expanded flex items-center gap-3 rounded-xl bg-[#f87171]/5 border border-[#f87171]/20 px-4 py-3">
+        <div
+          className="shrink-0 w-9 h-9 rounded-xl grid place-items-center font-bold text-sm"
+          style={{ background: `${badgeColor}15`, color: badgeColor }}
+        >
+          {position.ticker.slice(0, 1)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-mono font-semibold text-sm text-[#f87171]">
+            Remove {position.ticker}?
+          </p>
+          <p className="text-[11px] text-[#8a95a8] mt-0.5">This cannot be undone</p>
+        </div>
+        <button
+          onClick={() => del(position.id)}
+          disabled={deleting}
+          className="h-8 px-3 bg-[#f87171] hover:bg-[#ef4444] text-white font-mono font-bold text-xs rounded-lg transition-colors disabled:opacity-50"
+        >
+          {deleting ? '…' : 'Remove'}
+        </button>
+        <button
+          onClick={() => setConfirmDelete(false)}
+          className="h-8 px-2 text-[#8a95a8] hover:text-[#e8edf5] text-xs transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <article className="atlas-portfolio-ticker">
+      {/* Badge — cluster colour when assigned; hover shows cluster name tooltip */}
+      <div className="relative group/badge shrink-0">
+        <div
+          className="atlas-portfolio-ticker-badge"
+          style={{ background: `${badgeColor}20`, color: badgeColor }}
+        >
+          {position.ticker.slice(0, 1)}
+        </div>
+        {cluster && (
+          <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 rounded bg-[#1e2a3f] border border-[#2d3f5c] text-[10px] font-mono text-[#e8edf5] whitespace-nowrap opacity-0 group-hover/badge:opacity-100 transition-opacity z-20 flex items-center gap-1.5">
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ background: cluster.color }}
+            />
+            {cluster.name}
           </div>
         )}
-
-        {errors.shares && (
-          <p className="text-[11px] text-[#f87171]">{errors.shares.message}</p>
-        )}
       </div>
-    </form>
+      <div className="atlas-portfolio-ticker-copy">
+        <p className="atlas-portfolio-ticker-symbol">{position.ticker}</p>
+        <p className="atlas-portfolio-ticker-label">{position.company_name ?? position.ticker}</p>
+      </div>
+      <div className="atlas-portfolio-ticker-metrics">
+        <p className="atlas-portfolio-ticker-price">{fmtPositionValue(position.position_value)}</p>
+        <p className={`atlas-portfolio-ticker-change is-${change.tone}`}>{change.text}</p>
+      </div>
+      <div className="atlas-portfolio-ticker-actions">
+        <button
+          onClick={() => onEdit(position)}
+          aria-label={`Edit ${position.ticker}`}
+          className="atlas-portfolio-ticker-action"
+        >
+          <IconPencil />
+        </button>
+        <button
+          onClick={() => setConfirmDelete(true)}
+          aria-label={`Remove ${position.ticker}`}
+          className="atlas-portfolio-ticker-action atlas-portfolio-ticker-action--danger"
+        >
+          <IconTrash />
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -636,43 +711,48 @@ function AddPositionPanel({ onClose }: { onClose: () => void }) {
 
 export function PortfolioTickersPanel() {
   const [addOpen, setAddOpen] = useState(false);
+  const [editPosition, setEditPosition] = useState<TickerResponse | null>(null);
   const { data: positions, isLoading } = useTickers();
 
+  const editIndex = editPosition ? (positions?.findIndex((p) => p.id === editPosition.id) ?? 0) : 0;
+  const editAccent = ACCENTS[editIndex % ACCENTS.length] ?? ACCENTS[0];
+
   return (
-    <section className="atlas-portfolio-panel">
-      <div className="atlas-portfolio-panel-header">
-        <h2 className="atlas-portfolio-panel-title">All Tickers</h2>
-        {!addOpen && (
-          <button
-            type="button"
-            className="atlas-portfolio-link"
-            onClick={() => setAddOpen(true)}
-          >
+    <>
+      <section className="atlas-portfolio-panel">
+        <div className="atlas-portfolio-panel-header">
+          <h2 className="atlas-portfolio-panel-title">All Tickers</h2>
+          <button type="button" className="atlas-portfolio-link" onClick={() => setAddOpen(true)}>
             + Add Ticker
           </button>
-        )}
-      </div>
+        </div>
 
-      {/* Inline add form — sits above the ticker list, not inside it */}
-      {addOpen && <AddPositionPanel onClose={() => setAddOpen(false)} />}
+        <div className="atlas-portfolio-ticker-list">
+          {isLoading && (
+            <p className="atlas-portfolio-ticker-label" style={{ paddingTop: '1rem' }}>
+              Loading…
+            </p>
+          )}
+          {!isLoading && (!positions || positions.length === 0) && (
+            <p className="atlas-portfolio-ticker-label" style={{ paddingTop: '1rem' }}>
+              No positions yet — click Add Ticker to get started.
+            </p>
+          )}
+          {positions?.map((pos, i) => (
+            <PositionCard key={pos.id} position={pos} index={i} onEdit={setEditPosition} />
+          ))}
+        </div>
+      </section>
 
-      <div className="atlas-portfolio-ticker-list">
-        {isLoading && (
-          <p className="atlas-portfolio-ticker-label" style={{ paddingTop: '1rem' }}>
-            Loading…
-          </p>
-        )}
+      {addOpen && <AddTickerDialog onClose={() => setAddOpen(false)} />}
 
-        {!isLoading && (!positions || positions.length === 0) && (
-          <p className="atlas-portfolio-ticker-label" style={{ paddingTop: '1rem' }}>
-            No positions yet — click Add Ticker to get started.
-          </p>
-        )}
-
-        {positions?.map((pos, i) => (
-          <PositionCard key={pos.id} position={pos} index={i} />
-        ))}
-      </div>
-    </section>
+      {editPosition && (
+        <EditTickerDialog
+          position={editPosition}
+          accent={editAccent}
+          onClose={() => setEditPosition(null)}
+        />
+      )}
+    </>
   );
 }

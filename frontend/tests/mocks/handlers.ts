@@ -315,4 +315,71 @@ export const handlers = [
       f3_grade: 'STRONG BUY',
     });
   }),
+
+  // ── Framework Score ───────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/framework-score/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      factors: [
+        {
+          key: 'f1',
+          name: 'Momentum',
+          score: 86,
+          weight: 0.2,
+          contribution: 17.2,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f2',
+          name: 'Earnings Quality',
+          score: 94,
+          weight: 0.25,
+          contribution: 23.5,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f3',
+          name: 'Analyst Sentiment',
+          score: 100,
+          weight: 0.15,
+          contribution: 15.0,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f4',
+          name: 'Options Flow',
+          score: 82,
+          weight: 0.15,
+          contribution: 12.3,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f5',
+          name: 'Fundamental Quality',
+          score: 78,
+          weight: 0.2,
+          contribution: 15.6,
+          grade: 'BUY',
+          available: true,
+        },
+      ],
+      raw_total: 83.6,
+      regime: {
+        regime: 'CAUTION',
+        brent_price: 98.5,
+        modifier: -5,
+        cash_floor_pct: 0.25,
+      },
+      final_score: 79,
+      action: 'HOLD',
+      action_tone: 'tone-yellow',
+      f5_blocked: false,
+      flags: [],
+    });
+  }),
 ];

@@ -9,6 +9,7 @@ import { F2EarningsPanel } from './f2-earnings-panel';
 import { F3AnalystPanel } from './f3-analyst-panel';
 import { F4OptionsPanel } from './f4-options-panel';
 import { F5FundamentalPanel } from './f5-fundamental-panel';
+import { FrameworkScorePanel } from './framework-score-panel';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -72,6 +73,7 @@ export function FrameworksPanelsSection() {
         )}
       </div>
 
+      <FrameworkScorePanel ticker={activeTicker} />
       <F1MomentumPanel ticker={activeTicker} />
       <F2EarningsPanel ticker={activeTicker} />
       <F3AnalystPanel ticker={activeTicker} />

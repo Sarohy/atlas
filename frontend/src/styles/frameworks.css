@@ -1829,3 +1829,359 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Framework Score Panel  (.atlas-fws-*)
+   Sits above F1-F5 in the Frameworks screen.  Follows the same design tokens
+   as the individual factor panels (border-radius 5px, same header style, etc.)
+   ========================================================================== */
+
+.atlas-fws-panel {
+  background: #0d1b2a;
+  border: 1px solid #1e2d40;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.atlas-fws-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #111827;
+  background: #0b1623;
+}
+
+.atlas-fws-subtitle {
+  font-size: 0.6rem;
+  font-family: 'Courier New', Courier, monospace;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-left: auto;
+}
+
+.atlas-fws-panel-body {
+  padding: 8px 10px;
+}
+
+/* --- State messages --- */
+
+.atlas-fws-state-msg {
+  font-size: 0.7rem;
+  color: #4b6070;
+  padding: 16px 0;
+  text-align: center;
+}
+
+.atlas-fws-state-msg--error {
+  color: #ef4444;
+}
+
+/* --- Main content wrapper --- */
+
+.atlas-fws-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Hero ── */
+
+.atlas-fws-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.atlas-fws-score-ring {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  line-height: 1;
+}
+
+.atlas-fws-score-number {
+  font-size: 3.2rem;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.atlas-fws-score-number.is-green {
+  color: #22c55e;
+}
+.atlas-fws-score-number.is-cyan {
+  color: #22d3ee;
+}
+.atlas-fws-score-number.is-yellow {
+  color: #eab308;
+}
+.atlas-fws-score-number.is-orange {
+  color: #f97316;
+}
+.atlas-fws-score-number.is-red {
+  color: #ef4444;
+}
+
+.atlas-fws-score-denom {
+  font-size: 0.7rem;
+  color: #4b6070;
+  font-family: 'Courier New', Courier, monospace;
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+
+.atlas-fws-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-fws-action-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+}
+
+.atlas-fws-regime-pill {
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+}
+
+.atlas-fws-regime-pill--sm {
+  font-size: 0.55rem;
+  padding: 1px 5px;
+}
+
+.atlas-fws-block-pill {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  animation: atlas-fws-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes atlas-fws-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* ── Score bar ── */
+
+.atlas-fws-score-bar {
+  display: flex;
+  gap: 3px;
+  height: 6px;
+}
+
+.atlas-fws-score-seg {
+  flex: 1;
+  border-radius: 2px;
+  background: #1e2d40;
+  display: block;
+}
+
+.atlas-fws-score-seg.is-green {
+  background: #22c55e;
+}
+.atlas-fws-score-seg.is-cyan {
+  background: #22d3ee;
+}
+.atlas-fws-score-seg.is-yellow {
+  background: #eab308;
+}
+.atlas-fws-score-seg.is-orange {
+  background: #f97316;
+}
+.atlas-fws-score-seg.is-red {
+  background: #ef4444;
+}
+.atlas-fws-score-seg.is-empty {
+  background: #1e2d40;
+}
+
+/* ── Factor breakdown table ── */
+
+.atlas-fws-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-fws-breakdown-header {
+  display: grid;
+  grid-template-columns: 1fr 48px 52px 80px;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 0.55rem;
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4b6070;
+  border-bottom: 1px solid #111827;
+  margin-bottom: 2px;
+}
+
+.atlas-fws-breakdown-header > span:not(:first-child) {
+  text-align: right;
+}
+
+.atlas-fws-factor-row {
+  display: grid;
+  grid-template-columns: 1fr 48px 52px 80px;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: #0b1623;
+  align-items: center;
+}
+
+.atlas-fws-factor-row.is-muted {
+  opacity: 0.5;
+}
+
+.atlas-fws-factor-name {
+  font-size: 0.6rem;
+  color: #90a4ae;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-fws-factor-key {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.atlas-fws-unavailable-tag {
+  font-size: 0.52rem;
+  color: #4b6070;
+  flex-shrink: 0;
+}
+
+.atlas-fws-factor-score {
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: 'Courier New', Courier, monospace;
+  text-align: right;
+}
+
+.atlas-fws-factor-score.is-green {
+  color: #22c55e;
+}
+.atlas-fws-factor-score.is-cyan {
+  color: #22d3ee;
+}
+.atlas-fws-factor-score.is-yellow {
+  color: #eab308;
+}
+.atlas-fws-factor-score.is-orange {
+  color: #f97316;
+}
+.atlas-fws-factor-score.is-red {
+  color: #ef4444;
+}
+
+.atlas-fws-factor-weight {
+  font-size: 0.58rem;
+  color: #4b6070;
+  text-align: right;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.atlas-fws-factor-contribution {
+  font-size: 0.63rem;
+  color: #90a4ae;
+  text-align: right;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+/* ── Calculation footer ── */
+
+.atlas-fws-breakdown-divider {
+  height: 1px;
+  background: #111827;
+  margin: 4px 0;
+}
+
+.atlas-fws-calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 6px;
+  gap: 8px;
+}
+
+.atlas-fws-calc-row--total {
+  border-top: 1px solid #1e2d40;
+  margin-top: 2px;
+  padding-top: 5px;
+}
+
+.atlas-fws-calc-label {
+  font-size: 0.6rem;
+  color: #4b6070;
+  font-family: 'Courier New', Courier, monospace;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.atlas-fws-calc-value {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #90a4ae;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.atlas-fws-calc-value.is-green {
+  color: #22c55e;
+}
+.atlas-fws-calc-value.is-cyan {
+  color: #22d3ee;
+}
+.atlas-fws-calc-value.is-yellow {
+  color: #eab308;
+}
+.atlas-fws-calc-value.is-orange {
+  color: #f97316;
+}
+.atlas-fws-calc-value.is-red {
+  color: #ef4444;
+}
+
+/* ── Flags ── */
+
+.atlas-fws-flags {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 3px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-fws-flag-item {
+  font-size: 0.58rem;
+  color: #f97316;
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1.4;
+  margin: 0;
+}

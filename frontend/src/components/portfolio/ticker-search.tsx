@@ -53,7 +53,22 @@ export function TickerSearch({ onSelect, autoFocus, excludeTickers }: TickerSear
         autoFocus={autoFocus}
       />
       {isFetching && (
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4a5568] text-xs">…</span>
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4a5568]">
+          <svg
+            aria-label="Searching…"
+            className="w-4 h-4 animate-spin"
+            fill="none"
+            role="status"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2.5}
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+          </svg>
+        </span>
       )}
       {results && results.length > 0 && query.length > 0 && (
         <ul

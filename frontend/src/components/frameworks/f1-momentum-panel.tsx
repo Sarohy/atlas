@@ -294,7 +294,7 @@ function MaCard({ ma }: { ma: MaAlignmentIndicator }) {
       <dl className="atlas-f1-dl">
         <div className="atlas-f1-dl-row">
           <dt>Alignment</dt>
-          <dd className={maAlignmentTone(ma.label)}>{ma.label.replace('_', ' ')}</dd>
+          <dd className={maAlignmentTone(ma.label)}>{ma.label.replaceAll('_', ' ')}</dd>
         </div>
         <div className="atlas-f1-dl-row">
           <dt>MA 20</dt>
@@ -349,7 +349,7 @@ function PerfCard({ perf }: { perf: PerformanceIndicator }) {
           <dt>1 Month</dt>
           <dd className={perfTone(perf.perf_1m)}>
             {formatPct(perf.perf_1m)}
-            <span className="atlas-f1-sub-score"> ({perf.score_1m}/10)</span>
+            <span className="atlas-f1-sub-score"> ({perf.score_1m}/15)</span>
           </dd>
         </div>
         <div className="atlas-f1-dl-row">
@@ -373,18 +373,18 @@ function SectorCard({ sector }: { sector: SectorMomentumIndicator }) {
           <dd>{sector.sector_etf}</dd>
         </div>
         <div className="atlas-f1-dl-row">
-          <dt>Ticker 3M</dt>
-          <dd className={perfTone(sector.ticker_perf_3m)}>{formatPct(sector.ticker_perf_3m)}</dd>
+          <dt>Ticker 6M</dt>
+          <dd className={perfTone(sector.ticker_perf_6m)}>{formatPct(sector.ticker_perf_6m)}</dd>
         </div>
         <div className="atlas-f1-dl-row">
-          <dt>Sector 3M</dt>
-          <dd>{formatPct(sector.sector_perf_3m)}</dd>
+          <dt>Sector 6M</dt>
+          <dd>{formatPct(sector.sector_perf_6m)}</dd>
         </div>
         <div className="atlas-f1-dl-row">
           <dt>Relative</dt>
-          <dd className={perfTone(sector.relative_perf_3m)}>
-            {sector.relative_perf_3m >= 0 ? '+' : ''}
-            {formatPct(sector.relative_perf_3m)}
+          <dd className={perfTone(sector.relative_perf_6m)}>
+            {sector.relative_perf_6m >= 0 ? '+' : ''}
+            {formatPct(sector.relative_perf_6m)}
           </dd>
         </div>
       </dl>
@@ -407,29 +407,29 @@ function formatPct(value: number): string {
 
 function rsiTone(value: number | null): string {
   if (value === null) return '';
-  if (value >= 60 && value < 80) return 'is-green';
-  if (value >= 50) return 'is-cyan';
-  if (value < 30) return 'is-red';
-  return 'is-yellow';
+  if (value >= 70) return 'is-green';
+  if (value >= 55) return 'is-cyan';
+  if (value >= 45) return 'is-yellow';
+  if (value >= 35) return 'is-orange';
+  return 'is-red';
 }
 
 function rsiZoneLabel(value: number | null): string {
   if (value === null) return '—';
-  if (value >= 80) return 'Overbought';
-  if (value >= 60) return 'Strong';
-  if (value >= 50) return 'Moderate';
-  if (value >= 40) return 'Weak';
-  if (value >= 30) return 'Bearish';
+  if (value >= 90) return 'Extremely Strong';
+  if (value >= 70) return 'Overbought';
+  if (value >= 55) return 'Healthy';
+  if (value >= 45) return 'Neutral';
+  if (value >= 35) return 'Weak';
   return 'Oversold';
 }
 
 function maAlignmentTone(label: string): string {
   const map: Record<string, string> = {
-    FULL_BULL: 'is-green',
-    BULL: 'is-cyan',
-    MIXED: 'is-yellow',
-    BEAR: 'is-orange',
-    FULL_BEAR: 'is-red',
+    ABOVE_ALL: 'is-green',
+    ABOVE_50_200: 'is-cyan',
+    ABOVE_200: 'is-yellow',
+    BELOW_ALL: 'is-red',
   };
   return map[label] ?? '';
 }

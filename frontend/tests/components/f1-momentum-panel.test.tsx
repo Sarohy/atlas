@@ -72,7 +72,7 @@ describe('F1MomentumPanel', () => {
     await waitFor(() => screen.getByTestId('f1-content'));
 
     expect(screen.getByText('62.5')).toBeInTheDocument();
-    expect(screen.getByText('FULL BULL')).toBeInTheDocument();
+    expect(screen.getByText('ABOVE ALL')).toBeInTheDocument();
   });
 
   it('re-fetches when the user selects a different ticker', async () => {

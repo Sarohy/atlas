@@ -1,21 +1,23 @@
 """F1 Momentum scoring service.
 
-Computes six momentum indicators — RSI, MACD, MA alignment, 52-week position,
-1M/6M performance, and relative sector momentum — then rolls them into a
-0-100 composite F1 score.
+Computes seven momentum inputs, scores each 0-100, applies the internal F1
+weights defined in the Factor_Mapping_Guide, and produces a 0-100 composite
+F1 score.
 
 All calculation helpers are pure functions (no I/O, no side-effects) so they
 can be tested in isolation without any network calls.  The ``MomentumService``
 class owns all Polygon API access and calls the pure helpers once the raw bar
 data has been fetched.
 
-Scoring weights (max 100 pts total):
-  RSI              0-20 pts
-  MACD             0-20 pts
-  MA alignment     0-20 pts
-  52-week position 0-20 pts
-  1M/6M perf       0-20 pts  (10 pts per sub-window)
-  Sector momentum  0-20 pts  (capped so total never exceeds 100)
+F1 internal weights (from Factor_Mapping_Guide):
+  RSI (14-day)       20%   → max  20.0 pts contribution
+  MACD Signal        15%   → max  15.0 pts contribution
+  Price vs MAs       20%   → max  20.0 pts contribution
+  52-Week Position   15%   → max  15.0 pts contribution
+  1-Month Return     15%   → max  15.0 pts contribution
+  6-Month Return     10%   → max  10.0 pts contribution
+  vs Sector (6M)      5%   → max   5.0 pts contribution
+  TOTAL             100%   → max 100.0 pts
 """
 
 from __future__ import annotations
@@ -56,11 +58,18 @@ _LOOKBACK_6M_BARS: Final[int] = 126
 # One calendar year of daily bars for 52-week range and indicators.
 _LOOKBACK_DAYS: Final[int] = 365
 
-# Three months for sector relative comparison.
-_LOOKBACK_3M_BARS: Final[int] = 63
-
 # Max concurrent Polygon requests within the service.
 _MAX_CONCURRENCY: Final[int] = 5
+
+# F1 internal weights (Factor_Mapping_Guide §F1).
+# Each input is scored 0-100; multiplied by its weight to get the contribution.
+_W_RSI: Final[float] = 0.20        # 20% — RSI (14-day)
+_W_MACD: Final[float] = 0.15       # 15% — MACD signal
+_W_MA: Final[float] = 0.20         # 20% — Price vs MAs
+_W_52W: Final[float] = 0.15        # 15% — 52-week position
+_W_1M: Final[float] = 0.15         # 15% — 1-month return
+_W_6M: Final[float] = 0.10         # 10% — 6-month return
+_W_SECTOR: Final[float] = 0.05     # 5%  — vs sector (6-month)
 
 # Polygon endpoints.
 _POLYGON_AGGS_URL: Final[str] = (
@@ -169,27 +178,27 @@ def _compute_rsi(
 
 
 def _score_rsi(rsi: float) -> int:
-    """Map RSI value to a 0-20 point momentum score.
+    """Map RSI value to a raw 0-100 input score (Factor_Mapping_Guide §F1).
 
-    Scoring rationale:
-      60-79 = strong momentum zone, but not yet overextended → 20 pts
-      50-59 = constructive momentum → 15 pts
-      80+   = overbought, still trending but caution → 10 pts
-      40-49 = below midline, weak → 5 pts
-      30-39 = bearish → 2 pts
-      <30   = oversold → 0 pts
+    Scoring bands:
+      >= 90  → 100 pts  (extremely overbought — still strong signal)
+      70-89  → 85 pts   (overbought / strong momentum)
+      55-69  → 70 pts   (healthy momentum zone)
+      45-54  → 55 pts   (neutral)
+      35-44  → 40 pts   (weak / below midline)
+      < 35   → 20 pts   (oversold / bearish)
     """
-    if 60.0 <= rsi < 80.0:
-        return 20
-    if 50.0 <= rsi < 60.0:
-        return 15
-    if rsi >= 80.0:
-        return 10
-    if 40.0 <= rsi < 50.0:
-        return 5
-    if 30.0 <= rsi < 40.0:
-        return 2
-    return 0  # rsi < 30
+    if rsi >= 90.0:
+        return 100
+    if rsi >= 70.0:
+        return 85
+    if rsi >= 55.0:
+        return 70
+    if rsi >= 45.0:
+        return 55
+    if rsi >= 35.0:
+        return 40
+    return 20
 
 
 def _ema(values: list[float], period: int) -> list[float]:
@@ -233,29 +242,34 @@ def _compute_macd(
     return last_macd, last_signal, histogram
 
 
-def _score_macd(macd: float, signal: float, histogram: float) -> int:
-    """Map MACD state to a 0-20 point momentum score.
+def _score_macd(
+    macd: float,
+    signal: float,
+    histogram: float,
+    prev_histogram: float | None = None,
+) -> int:
+    """Map MACD state to a raw 0-100 input score (Factor_Mapping_Guide §F1).
 
-    Scoring:
-      MACD > signal AND histogram > 0 AND macd > 0 → 20 pts (bull expansion)
-      MACD > signal AND histogram > 0              → 15 pts (bull crossover)
-      MACD > signal                                → 10 pts (positive cross)
-      MACD < signal AND histogram < 0 but shrinking → 5 pts (possible bottom)
-      MACD < signal AND histogram < 0              → 0 pts (bearish)
+    Scoring bands:
+      MACD > Signal AND rising histogram → 100 pts  (bull expansion)
+      MACD > Signal AND flat histogram   → 75 pts   (bull crossover, momentum plateauing)
+      MACD < Signal AND histogram rising → 50 pts   (bearish but recovering)
+      MACD < Signal AND falling          → 20 pts   (bearish decline)
+
+    'Rising' is detected by comparing ``histogram`` to ``prev_histogram``.
+    When ``prev_histogram`` is None (unavailable) the histogram sign is used
+    as a proxy: positive hist = rising, negative = falling.
     """
     above_signal = macd > signal
-    positive_hist = histogram > 0
+    hist_rising = histogram > prev_histogram if prev_histogram is not None else histogram > 0
 
-    if above_signal and positive_hist and macd > 0:
-        return 20
-    if above_signal and positive_hist:
-        return 15
+    if above_signal and hist_rising:
+        return 100
     if above_signal:
-        return 10
-    if not above_signal and histogram > -0.05:
-        # histogram is small-negative — momentum may be bottoming
-        return 5
-    return 0
+        return 75
+    if hist_rising:  # below signal but recovering
+        return 50
+    return 20
 
 
 def _compute_ma_alignment(
@@ -265,12 +279,11 @@ def _compute_ma_alignment(
 
     Returns ``(ma20, ma50, ma200, label)`` or None when < 200 bars exist.
 
-    Labels:
-      FULL_BULL   price > MA20 > MA50 > MA200
-      BULL        price > MA20 and MA20 > MA50
-      MIXED       price > MA20 only
-      BEAR        price < MA20 but above MA200
-      FULL_BEAR   price < MA200
+    Labels follow the Factor_Mapping_Guide §F1 four-tier rule:
+      ABOVE_ALL   price > MA20, MA50, MA200 (all three) → 100 pts
+      ABOVE_50_200  price above MA50 and MA200 only      → 80 pts
+      ABOVE_200   price above MA200 only                 → 55 pts
+      BELOW_ALL   price below all MAs                    → 20 pts
     """
     closes = [float(b["c"]) for b in bars if b.get("c") is not None]
     if len(closes) < 200:
@@ -281,29 +294,33 @@ def _compute_ma_alignment(
     ma200 = sum(closes[-200:]) / 200
     current = closes[-1]
 
-    if current > ma20 > ma50 > ma200:
-        label = "FULL_BULL"
-    elif current > ma20 and ma20 > ma50:
-        label = "BULL"
-    elif current > ma20:
-        label = "MIXED"
-    elif current >= ma200:
-        label = "BEAR"
+    if current > ma20 and current > ma50 and current > ma200:
+        label = "ABOVE_ALL"
+    elif current > ma50 and current > ma200:
+        label = "ABOVE_50_200"
+    elif current > ma200:
+        label = "ABOVE_200"
     else:
-        label = "FULL_BEAR"
+        label = "BELOW_ALL"
 
     return ma20, ma50, ma200, label
 
 
 def _score_ma_alignment(label: str) -> int:
-    """Map MA alignment label to a 0-20 point momentum score."""
+    """Map MA alignment label to a raw 0-100 input score (Factor_Mapping_Guide §F1).
+
+    Bands:
+      ABOVE_ALL     → 100 pts  (above MA20, MA50, MA200)
+      ABOVE_50_200  → 80 pts   (above MA50 and MA200)
+      ABOVE_200     → 55 pts   (above MA200 only)
+      BELOW_ALL     → 20 pts   (below all MAs)
+    """
     return {
-        "FULL_BULL": 20,
-        "BULL": 15,
-        "MIXED": 10,
-        "BEAR": 5,
-        "FULL_BEAR": 0,
-    }.get(label, 0)
+        "ABOVE_ALL": 100,
+        "ABOVE_50_200": 80,
+        "ABOVE_200": 55,
+        "BELOW_ALL": 20,
+    }.get(label, 20)
 
 
 def _compute_52w_position(
@@ -331,23 +348,24 @@ def _compute_52w_position(
 
 
 def _score_52w_position(position_pct: float) -> int:
-    """Map 52-week position percentage to a 0-20 point score.
+    """Map 52-week position percentage to a raw 0-100 input score (Factor_Mapping_Guide §F1).
 
-    Top quintile (≥80%) → 20 pts
-    Second quintile (60-79%) → 15 pts
-    Middle (40-59%) → 10 pts
-    Fourth quintile (20-39%) → 5 pts
-    Bottom quintile (<20%) → 0 pts
+    Bands:
+      > 80%   → 100 pts  (near 52-week high)
+      60-80%  → 80 pts   (upper range)
+      40-60%  → 60 pts   (mid-range)
+      20-40%  → 40 pts   (lower range)
+      < 20%   → 20 pts   (near 52-week low)
     """
-    if position_pct >= 80.0:
-        return 20
+    if position_pct > 80.0:
+        return 100
     if position_pct >= 60.0:
-        return 15
+        return 80
     if position_pct >= 40.0:
-        return 10
+        return 60
     if position_pct >= 20.0:
-        return 5
-    return 0
+        return 40
+    return 20
 
 
 def _compute_performance(
@@ -375,67 +393,102 @@ def _compute_performance(
 
 
 def _score_1m_perf(perf_pct: float) -> int:
-    """Map 1-month performance to a 0-10 point sub-score."""
-    if perf_pct >= 10.0:
-        return 10
+    """Map 1-month return to a raw 0-100 input score (Factor_Mapping_Guide §F1).
+
+    Bands:
+      > +10%         → 100 pts
+      +5% to +10%    → 85 pts
+      +2% to +5%     → 70 pts
+      0% to +2%      → 55 pts
+      -2% to 0%      → 40 pts
+      < -5%          → 20 pts  (also covers -5% to -2% conservatively)
+    """
+    if perf_pct > 10.0:
+        return 100
     if perf_pct >= 5.0:
-        return 8
+        return 85
+    if perf_pct >= 2.0:
+        return 70
     if perf_pct >= 0.0:
-        return 5
-    if perf_pct >= -5.0:
-        return 2
-    return 0
+        return 55
+    if perf_pct >= -2.0:
+        return 40
+    return 20
 
 
 def _score_6m_perf(perf_pct: float) -> int:
-    """Map 6-month performance to a 0-10 point sub-score."""
-    if perf_pct >= 20.0:
-        return 10
-    if perf_pct >= 10.0:
-        return 8
-    if perf_pct >= 0.0:
-        return 5
-    if perf_pct >= -10.0:
-        return 2
-    return 0
+    """Map 6-month return to a raw 0-100 input score (Factor_Mapping_Guide §F1).
 
-
-def _compute_sector_score(ticker_perf_3m: float, sector_perf_3m: float) -> int:
-    """Score relative 3-month outperformance vs sector ETF (0-20 pts).
-
-    Relative = ticker_perf_3m - sector_perf_3m
-
-    > +5%  → 20 pts  (strong outperformance)
-    0-5%   → 15 pts  (mild outperformance)
-    within ±2% → 10 pts (in-line)
-    -5-0%  → 5 pts   (mild underperformance)
-    < -5%  → 0 pts   (significant underperformance)
+    Bands:
+      > +40%         → 100 pts
+      +25% to +40%   → 85 pts
+      +15% to +25%   → 70 pts
+      +5% to +15%    → 55 pts
+      0% to +5%      → 40 pts
+      < 0%           → 20 pts
     """
-    relative = ticker_perf_3m - sector_perf_3m
+    if perf_pct > 40.0:
+        return 100
+    if perf_pct >= 25.0:
+        return 85
+    if perf_pct >= 15.0:
+        return 70
+    if perf_pct >= 5.0:
+        return 55
+    if perf_pct >= 0.0:
+        return 40
+    return 20
+
+
+def _compute_sector_score(ticker_perf_6m: float, sector_perf_6m: float) -> int:
+    """Score 6-month outperformance vs sector ETF as raw 0-100 input score.
+
+    Uses the 6-month (126-day) rolling return window per the Factor_Mapping_Guide
+    §F1 SOXX Sector Comparison rules.
+
+    Relative = ticker_perf_6m - sector_perf_6m
+
+    > +5%   → 100 pts  (strong outperformance)
+    0-+5%   → 75 pts   (mild outperformance)
+    ~0%     → 60 pts   (in-line — also used as fallback when sector data unavailable)
+    < 0%    → 30 pts   (underperformance)
+    """
+    relative = ticker_perf_6m - sector_perf_6m
     if relative > 5.0:
-        return 20
+        return 100
     if relative > 0.0:
-        return 15
-    if relative >= -2.0:
-        return 10
-    if relative >= -5.0:
-        return 5
-    return 0
+        return 75
+    if relative >= -1.0:  # within ±1 % = effectively in-line
+        return 60
+    return 30
 
 
 def _compute_f1_score(
-    rsi_score: int,
-    macd_score: int,
-    ma_score: int,
-    week52_score: int,
-    perf_score: int,
-    sector_score: int,
+    rsi_raw: int,
+    macd_raw: int,
+    ma_raw: int,
+    week52_raw: int,
+    perf_1m_raw: int,
+    perf_6m_raw: int,
+    sector_raw: int,
 ) -> tuple[int, str]:
-    """Aggregate sub-scores into the 0-100 F1 composite and assign a grade.
+    """Apply guide weights to raw 0-100 input scores and return (total, grade).
 
-    Total is hard-capped at 100 even if inputs sum above it.
+    Each raw score is 0-100; weighted by the Factor_Mapping_Guide §F1 percentages:
+      RSI 20% + MACD 15% + MAs 20% + 52W 15% + 1M 15% + 6M 10% + Sector 5% = 100%
+
+    Total is rounded to nearest integer and hard-capped at 100.
     """
-    total = min(100, rsi_score + macd_score + ma_score + week52_score + perf_score + sector_score)
+    weighted = (
+        rsi_raw * _W_RSI
+        + macd_raw * _W_MACD
+        + ma_raw * _W_MA
+        + week52_raw * _W_52W
+        + perf_1m_raw * _W_1M
+        + perf_6m_raw * _W_6M
+        + sector_raw * _W_SECTOR
+    )
+    total = min(100, round(weighted))
     grade = _grade_from_total(total)
     return total, grade
 
@@ -495,107 +548,127 @@ class MomentumService:
 
         # ---- RSI ----
         rsi_value = _compute_rsi(ticker_bars)
-        rsi_score = _score_rsi(rsi_value) if rsi_value is not None else 0
+        rsi_raw = _score_rsi(rsi_value) if rsi_value is not None else 55  # neutral fallback
 
         # ---- MACD ----
+        # Compute twice (full series and series-minus-one) to get prev histogram for
+        # 'rising vs flat' detection per the Factor_Mapping_Guide.
         macd_result = _compute_macd(ticker_bars)
+        macd_result_prev = _compute_macd(ticker_bars[:-1]) if len(ticker_bars) > 1 else None
         if macd_result is not None:
             macd_val, macd_signal, macd_hist = macd_result
-            macd_score = _score_macd(macd_val, macd_signal, macd_hist)
+            prev_hist = macd_result_prev[2] if macd_result_prev is not None else None
+            macd_raw = _score_macd(macd_val, macd_signal, macd_hist, prev_hist)
         else:
             macd_val = macd_signal = macd_hist = 0.0
-            macd_score = 0
+            macd_raw = 50  # neutral fallback
 
         # ---- MA alignment ----
         ma_result = _compute_ma_alignment(ticker_bars)
         if ma_result is not None:
             ma20, ma50, ma200, ma_label = ma_result
-            ma_score = _score_ma_alignment(ma_label)
+            ma_raw = _score_ma_alignment(ma_label)
         else:
             ma20 = ma50 = ma200 = 0.0
             ma_label = "INSUFFICIENT_DATA"
-            ma_score = 0
+            ma_raw = 55  # neutral fallback
 
         # ---- 52-week position ----
         w52_result = _compute_52w_position(ticker_bars)
         if w52_result is not None:
             high52, low52, pos52 = w52_result
-            week52_score = _score_52w_position(pos52)
+            week52_raw = _score_52w_position(pos52)
         else:
             high52 = low52 = pos52 = 0.0
-            week52_score = 0
+            week52_raw = 40  # conservative fallback
 
         # ---- 1M / 6M performance ----
         perf_result = _compute_performance(ticker_bars)
         if perf_result is not None:
             perf_1m, perf_6m = perf_result
-            score_1m = _score_1m_perf(perf_1m)
-            score_6m = _score_6m_perf(perf_6m)
+            perf_1m_raw = _score_1m_perf(perf_1m)
+            perf_6m_raw = _score_6m_perf(perf_6m)
         else:
             perf_1m = perf_6m = 0.0
-            score_1m = score_6m = 0
-        perf_score = score_1m + score_6m
+            perf_1m_raw = perf_6m_raw = 40  # conservative fallback
 
-        # ---- Sector momentum ----
-        ticker_3m = self._perf_3m(ticker_bars)
-        sector_3m = self._perf_3m(sector_bars)
-        sector_score = _compute_sector_score(ticker_3m, sector_3m)
+        # ---- Sector momentum (6-month per guide) ----
+        ticker_6m = self._perf_6m(ticker_bars)
+        sector_6m = self._perf_6m(sector_bars)
+        sector_raw = _compute_sector_score(ticker_6m, sector_6m)
 
         # ---- F1 composite ----
         f1_total, f1_grade = _compute_f1_score(
-            rsi_score=rsi_score,
-            macd_score=macd_score,
-            ma_score=ma_score,
-            week52_score=week52_score,
-            perf_score=perf_score,
-            sector_score=sector_score,
+            rsi_raw=rsi_raw,
+            macd_raw=macd_raw,
+            ma_raw=ma_raw,
+            week52_raw=week52_raw,
+            perf_1m_raw=perf_1m_raw,
+            perf_6m_raw=perf_6m_raw,
+            sector_raw=sector_raw,
         )
+
+        # Weighted contribution scores for display (raw x weight = pts contributed)
+        rsi_contrib = round(rsi_raw * _W_RSI)
+        macd_contrib = round(macd_raw * _W_MACD)
+        ma_contrib = round(ma_raw * _W_MA)
+        week52_contrib = round(week52_raw * _W_52W)
+        perf_1m_contrib = round(perf_1m_raw * _W_1M)
+        perf_6m_contrib = round(perf_6m_raw * _W_6M)
+        sector_contrib = round(sector_raw * _W_SECTOR)
 
         return MomentumResponse(
             ticker=ticker.upper(),
             sector_etf=sector_etf,
             rsi=RsiIndicator(
                 value=round(rsi_value, 2) if rsi_value is not None else None,
-                score=rsi_score,
-                max_score=20,
+                raw_score=rsi_raw,
+                score=rsi_contrib,
+                max_score=round(_W_RSI * 100),
             ),
             macd=MacdIndicator(
                 macd_line=round(macd_val, 4),
                 signal_line=round(macd_signal, 4),
                 histogram=round(macd_hist, 4),
-                score=macd_score,
-                max_score=20,
+                raw_score=macd_raw,
+                score=macd_contrib,
+                max_score=round(_W_MACD * 100),
             ),
             ma_alignment=MaAlignmentIndicator(
                 ma_20=round(ma20, 2),
                 ma_50=round(ma50, 2),
                 ma_200=round(ma200, 2),
                 label=ma_label,
-                score=ma_score,
-                max_score=20,
+                raw_score=ma_raw,
+                score=ma_contrib,
+                max_score=round(_W_MA * 100),
             ),
             week_52_position=Week52PositionIndicator(
                 high_52w=round(high52, 2),
                 low_52w=round(low52, 2),
                 position_pct=round(pos52, 1),
-                score=week52_score,
-                max_score=20,
+                raw_score=week52_raw,
+                score=week52_contrib,
+                max_score=round(_W_52W * 100),
             ),
             performance=PerformanceIndicator(
                 perf_1m=round(perf_1m, 2),
                 perf_6m=round(perf_6m, 2),
-                score_1m=score_1m,
-                score_6m=score_6m,
-                score=perf_score,
-                max_score=20,
+                raw_score_1m=perf_1m_raw,
+                raw_score_6m=perf_6m_raw,
+                score_1m=perf_1m_contrib,
+                score_6m=perf_6m_contrib,
+                score=perf_1m_contrib + perf_6m_contrib,
+                max_score=round((_W_1M + _W_6M) * 100),
             ),
             sector_momentum=SectorMomentumIndicator(
                 sector_etf=sector_etf,
-                ticker_perf_3m=round(ticker_3m, 2),
-                sector_perf_3m=round(sector_3m, 2),
-                relative_perf_3m=round(ticker_3m - sector_3m, 2),
-                score=sector_score,
-                max_score=20,
+                ticker_perf_6m=round(ticker_6m, 2),
+                sector_perf_6m=round(sector_6m, 2),
+                relative_perf_6m=round(ticker_6m - sector_6m, 2),
+                raw_score=sector_raw,
+                score=sector_contrib,
+                max_score=round(_W_SECTOR * 100),
             ),
             f1_score=f1_total,
             f1_grade=f1_grade,
@@ -661,16 +734,18 @@ class MomentumService:
         return results
 
     @staticmethod
-    def _perf_3m(bars: list[dict]) -> float:  # type: ignore[type-arg]
-        """Return 3-month (63-bar) total return as a percentage.
+    def _perf_6m(bars: list[dict]) -> float:  # type: ignore[type-arg]
+        """Return 6-month (126-bar) total return as a percentage.
 
-        Returns 0.0 when insufficient bars are available.
+        The Factor_Mapping_Guide uses a rolling 126-day (6-month) window for
+        the sector comparison input.  Returns 0.0 when insufficient bars are
+        available (triggers the neutral 60-pt fallback in the caller).
         """
         closes = [float(b["c"]) for b in bars if b.get("c") is not None]
-        if len(closes) < _LOOKBACK_3M_BARS + 1:
+        if len(closes) < _LOOKBACK_6M_BARS + 1:
             return 0.0
         price_now = closes[-1]
-        price_then = closes[-(_LOOKBACK_3M_BARS + 1)]
+        price_then = closes[-(_LOOKBACK_6M_BARS + 1)]
         if price_then == 0:
             return 0.0
         return (price_now - price_then) / price_then * 100.0

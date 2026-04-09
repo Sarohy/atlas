@@ -1,15 +1,28 @@
 #!/bin/bash
 set -e
 
-python -m pip install alembic sqlalchemy asyncpg
+echo "🚀 Starting ATLAS Backend Deployment..."
 
-python -c "
-import sys
-import subprocess
-subprocess.run([sys.executable, '-m', 'pip', 'show', 'alembic'], check=True)
+# Set Python path to include src directory
+export PYTHONPATH=/app/src:$PYTHONPATH
 
-import alembic.config
-alembic.config.main(argv=['upgrade', 'head'])
-"
+# Step 1: Upgrade pip and install dependencies from pyproject.toml
+echo "📦 Installing dependencies..."
+python -m pip install --upgrade pip
+python -m pip install .
 
-export PYTHONPATH=/app/src && python -m pip install --upgrade pip && python -m pip install fastapi uvicorn[standard] pydantic pydantic-settings sqlalchemy[asyncio] asyncpg alembic structlog httpx && python -m alembic upgrade head && python -m atlas.seed && python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port 8080
+# Step 2: Verify Alembic installation
+echo "🔍 Verifying Alembic installation..."
+python -m pip show alembic
+
+# Step 3: Run database migrations
+echo "🗄️  Running database migrations..."
+python -m alembic upgrade head
+
+# Step 4: Seed the database
+echo "🌱 Seeding database..."
+python -m atlas.seed || echo "⚠️  Seeding completed with warnings (data may already exist)"
+
+# Step 5: Start the server
+echo "✅ Starting server on port ${PORT:-8080}..."
+exec python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8080}

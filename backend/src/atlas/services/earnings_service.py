@@ -4,10 +4,10 @@ Computes five earnings-quality indicators per the Factor_Mapping_Guide,
 scores each 0-100, applies internal F2 weights, and produces a 0-100
 composite F2 score.
 
-Data sources (all Alpha Vantage):
-  INCOME_STATEMENT          — quarterly totalRevenue + grossProfit
-  EARNINGS                  — quarterly reportedEPS vs estimatedEPS (last 3Q)
-  EARNINGS_CALL_TRANSCRIPT  — latest transcript for guidance + backlog NLP
+Data sources:
+  Alpha Vantage INCOME_STATEMENT  — quarterly totalRevenue + grossProfit
+  Alpha Vantage EARNINGS          — quarterly reportedEPS vs estimatedEPS (last 3Q)
+  FMP earning-call-transcript     — latest transcript for guidance + backlog NLP
 
 F2 internal weights (Factor_Mapping_Guide §F2):
   Revenue Growth YoY      30%  → max 30 pts contribution
@@ -47,11 +47,11 @@ from atlas.schemas.earnings import (
 
 # Each input is scored 0-100 (raw_score); multiplied by its weight to give
 # the contribution that sums to the composite F2 score (0-100).
-_W_REVENUE: Final[float] = 0.30   # 30% — Revenue Growth YoY
+_W_REVENUE: Final[float] = 0.30  # 30% — Revenue Growth YoY
 _W_EPS_BEAT: Final[float] = 0.20  # 20% — EPS Beat History (rolling 3Q)
 _W_GUIDANCE: Final[float] = 0.20  # 20% — Guidance Direction (transcript)
-_W_MARGIN: Final[float] = 0.15    # 15% — Gross Margin Trend
-_W_BACKLOG: Final[float] = 0.15   # 15% — Backlog / Visibility (transcript)
+_W_MARGIN: Final[float] = 0.15  # 15% — Gross Margin Trend
+_W_BACKLOG: Final[float] = 0.15  # 15% — Backlog / Visibility (transcript)
 
 # Number of consecutive quarters to evaluate for EPS beat history.
 _EPS_BEAT_QUARTERS: Final[int] = 3
@@ -74,18 +74,18 @@ _GRADE_WEAK_MIN: Final[int] = 20
 
 # Categorical guidance scores mapped from transcript analysis.
 _GUIDANCE_SCORES: Final[dict[str, int]] = {
-    "RAISE_FULL_YEAR": 100,   # management raised full-year guidance
-    "MAINTAIN": 70,           # guidance maintained / reaffirmed
-    "NARROW_RANGE": 55,       # guidance range narrowed
-    "LOWER": 20,              # guidance cut / lowered
+    "RAISE_FULL_YEAR": 100,  # management raised full-year guidance
+    "MAINTAIN": 70,  # guidance maintained / reaffirmed
+    "NARROW_RANGE": 55,  # guidance range narrowed
+    "LOWER": 20,  # guidance cut / lowered
 }
 
 # Categorical backlog/visibility scores mapped from transcript analysis.
 _BACKLOG_SCORES: Final[dict[str, int]] = {
     "EXPLICIT_MULTI_QUARTER": 100,  # explicit dollar amount + multi-quarter visibility
-    "STRONG": 80,                   # strong demand / pipeline commentary
-    "LIMITED": 50,                  # limited or uncertain visibility
-    "NO_COMMENTARY": 30,            # no backlog or visibility mentioned
+    "STRONG": 80,  # strong demand / pipeline commentary
+    "LIMITED": 50,  # limited or uncertain visibility
+    "NO_COMMENTARY": 30,  # no backlog or visibility mentioned
 }
 
 # ---------------------------------------------------------------------------
@@ -93,6 +93,11 @@ _BACKLOG_SCORES: Final[dict[str, int]] = {
 # ---------------------------------------------------------------------------
 
 _AV_BASE_URL: Final[str] = "https://www.alphavantage.co/query"
+
+# Base URL for the FMP stable earnings-call-transcript endpoint.
+# Docs: https://site.financialmodelingprep.com/developer/docs/stable/search-transcripts
+# Pattern: GET /stable/earning-call-transcript?symbol={S}&year={Y}&quarter={Q}&apikey={K}
+_FMP_TRANSCRIPT_URL: Final[str] = "https://financialmodelingprep.com/stable/earning-call-transcript"
 
 # ---------------------------------------------------------------------------
 # Named constants — transcript regex patterns (compiled once at import time)
@@ -329,8 +334,16 @@ class EarningsService:
     """Fetches financial data from Alpha Vantage and computes the F2 Earnings
     Quality score for a given ticker."""
 
-    def __init__(self, api_key: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        transcript_api_key: str,
+        client: httpx.AsyncClient,
+    ) -> None:
+        # Used for INCOME_STATEMENT and EARNINGS endpoints.
         self._api_key = api_key
+        # Used exclusively for EARNINGS_CALL_TRANSCRIPT endpoint.
+        self._transcript_api_key = transcript_api_key
         self._client = client
 
     async def compute_earnings(self, ticker: str) -> EarningsResponse:
@@ -348,11 +361,14 @@ class EarningsService:
         income_data = await self._fetch_income_statement(ticker)
         earnings_data = await self._fetch_earnings(ticker)
 
-        # Determine latest quarter for transcript fetch.
-        latest_quarter = self._latest_quarter_from_earnings(earnings_data)
+        # Determine latest quarter for transcript fetch (FMP requires separate year + quarter).
+        year_quarter = self._latest_year_quarter_from_earnings(earnings_data)
+        transcript_quarter_str: str | None = None
         transcript_text = ""
-        if latest_quarter:
-            transcript_text = await self._fetch_transcript_text(ticker, latest_quarter)
+        if year_quarter:
+            year, quarter = year_quarter
+            transcript_quarter_str = f"{year}Q{quarter}"
+            transcript_text = await self._fetch_transcript_text(ticker, year, quarter)
 
         # ---- Revenue Growth YoY ----
         # Use most recent quarter vs same quarter one year prior (index 4).
@@ -403,7 +419,7 @@ class EarningsService:
             ),
             guidance=GuidanceIndicator(
                 guidance_label=guidance_label,
-                transcript_quarter=latest_quarter,
+                transcript_quarter=transcript_quarter_str,
                 raw_score=guidance_raw,
                 score=guidance_score,
                 max_score=20,
@@ -467,29 +483,34 @@ class EarningsService:
         except (httpx.HTTPStatusError, httpx.RequestError):
             return {}
 
-    async def _fetch_transcript_text(self, ticker: str, quarter: str) -> str:
-        """Fetch and join the earnings call transcript text from Alpha Vantage.
+    async def _fetch_transcript_text(self, ticker: str, year: int, quarter: int) -> str:
+        """Fetch the earnings call transcript text from Financial Modeling Prep.
 
-        ``quarter`` must be in 'YYYYQn' format (e.g. '2024Q3').
-        Returns empty string on error or when transcript is unavailable.
+        Calls the FMP stable earnings-call-transcript endpoint:
+          GET /stable/earning-call-transcript
+              ?symbol={SYMBOL}&year={YYYY}&quarter={Q}&apikey={KEY}
+
+        FMP returns a list with a single record whose ``content`` field
+        contains the full transcript as a single string.  Returns an empty
+        string when the transcript is unavailable or the request fails.
         """
         try:
             response = await self._client.get(
-                _AV_BASE_URL,
+                _FMP_TRANSCRIPT_URL,
                 params={
-                    "function": "EARNINGS_CALL_TRANSCRIPT",
                     "symbol": ticker,
+                    "year": year,
                     "quarter": quarter,
-                    "apikey": self._api_key,
+                    "apikey": self._transcript_api_key,
                 },
                 timeout=20.0,
             )
             response.raise_for_status()
-            payload: dict = response.json()  # type: ignore[type-arg]
-            segments: list[dict] = payload.get("transcript", [])  # type: ignore[type-arg]
-            return " ".join(
-                str(seg.get("content", "")) for seg in segments if seg.get("content")
-            )
+            records: list[dict[str, object]] = response.json()
+            if not records:
+                return ""
+            content = records[0].get("content", "")
+            return str(content) if content else ""
         except (httpx.HTTPStatusError, httpx.RequestError):
             return ""
 
@@ -507,7 +528,7 @@ class EarningsService:
         """
         reports: list[dict] = income_data.get("quarterlyReports", [])  # type: ignore[type-arg]
         revenues: list[float] = []
-        for r in reversed(reports[: _INCOME_STMT_QUARTERS]):
+        for r in reversed(reports[:_INCOME_STMT_QUARTERS]):
             raw = r.get("totalRevenue", "None")
             if raw and raw not in ("None", "N/A", ""):
                 with contextlib.suppress(ValueError):
@@ -563,10 +584,7 @@ class EarningsService:
         for r in reversed(reports[:3]):
             gp_raw = r.get("grossProfit", "None")
             rev_raw = r.get("totalRevenue", "None")
-            if (
-                gp_raw in ("None", "N/A", "")
-                or rev_raw in ("None", "N/A", "")
-            ):
+            if gp_raw in ("None", "N/A", "") or rev_raw in ("None", "N/A", ""):
                 continue
             try:
                 gp = float(gp_raw)
@@ -589,21 +607,26 @@ class EarningsService:
         return gross_margins[-1] - gross_margins[0]
 
     @staticmethod
-    def _latest_quarter_from_earnings(earnings_data: dict) -> str | None:  # type: ignore[type-arg]
-        """Derive the most recent fiscal quarter string (e.g. '2024Q3') from
-        the EARNINGS API response.
+    def _latest_year_quarter_from_earnings(
+        earnings_data: dict[str, object],
+    ) -> tuple[int, int] | None:
+        """Derive the most recent fiscal (year, quarter) from the EARNINGS response.
+
+        FMP requires ``year`` and ``quarter`` as separate integer parameters.
+        Quarter is derived from the fiscal month: Jan-Mar->Q1, Apr-Jun->Q2,
+        Jul-Sep->Q3, Oct-Dec->Q4.
 
         Returns None when data is unavailable.
         """
-        quarterly: list[dict] = earnings_data.get("quarterlyEarnings", [])  # type: ignore[type-arg]
+        quarterly: list[dict[str, object]] = earnings_data.get("quarterlyEarnings", [])  # type: ignore[assignment]
         if not quarterly:
             return None
         fiscal_date = quarterly[0].get("fiscalDateEnding", "")
         if not fiscal_date:
             return None
         try:
-            year_str, month_str, _ = fiscal_date.split("-")
-            quarter = (int(month_str) - 1) // 3 + 1
-            return f"{year_str}Q{quarter}"
+            year_str, month_str, _ = str(fiscal_date).split("-")
+            quarter_num = (int(month_str) - 1) // 3 + 1
+            return int(year_str), quarter_num
         except (ValueError, AttributeError):
             return None

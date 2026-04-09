@@ -21,10 +21,15 @@ async def get_earnings(ticker: str) -> EarningsResponse:
     Returns 503 when ``ALPHAVANTAGE_API_KEY`` is not configured.
     """
     settings = get_settings()
+    missing: list[str] = []
     if not settings.alphavantage_api_key:
+        missing.append("ALPHAVANTAGE_API_KEY")
+    if not settings.earnings_transcript_api_key:
+        missing.append("EARNINGS_TRANSCRIPT_API_KEY")
+    if missing:
         raise HTTPException(
             status_code=503,
-            detail="Earnings analysis unavailable: ALPHAVANTAGE_API_KEY is not configured.",
+            detail=f"Earnings analysis unavailable: {', '.join(missing)} not configured.",
         )
 
     normalised = ticker.strip().upper()
@@ -32,5 +37,9 @@ async def get_earnings(ticker: str) -> EarningsResponse:
         raise HTTPException(status_code=422, detail="Ticker symbol must not be empty.")
 
     async with httpx.AsyncClient() as client:
-        service = EarningsService(api_key=settings.alphavantage_api_key, client=client)
+        service = EarningsService(
+            api_key=settings.alphavantage_api_key,
+            transcript_api_key=settings.earnings_transcript_api_key,
+            client=client,
+        )
         return await service.compute_earnings(normalised)

@@ -18,8 +18,12 @@ class Settings(BaseSettings):
     polygon_api_key: str = Field(default="")
 
     # Alpha Vantage API key — required for F2 Earnings Quality scoring
-    # (INCOME_STATEMENT, EARNINGS, EARNINGS_CALL_TRANSCRIPT endpoints)
+    # (INCOME_STATEMENT and EARNINGS endpoints)
     alphavantage_api_key: str = Field(default="")
+
+    # Earnings Call Transcript API key — required for Guidance Direction
+    # and Backlog / Visibility scoring (EARNINGS_CALL_TRANSCRIPT endpoint)
+    earnings_transcript_api_key: str = Field(default="")
 
 
 def get_settings() -> Settings:

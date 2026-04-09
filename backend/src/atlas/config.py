@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     # and Backlog / Visibility scoring (EARNINGS_CALL_TRANSCRIPT endpoint)
     earnings_transcript_api_key: str = Field(default="")
 
+    # Benzinga API key — required for F3 Analyst Conviction scoring
+    # (consensus-ratings and calendar/ratings endpoints)
+    benzinga_api_key: str = Field(default="")
+
+    # Unusual Whales API key — required for F4 Options Flow scoring
+    # (flow-alerts, options-volume, darkpool endpoints)
+    unusual_whales_api_key: str = Field(default="")
+
 
 def get_settings() -> Settings:
     """Return a Settings instance (cached via dependency injection in prod)."""

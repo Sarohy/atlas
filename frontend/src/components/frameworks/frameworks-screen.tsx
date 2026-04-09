@@ -7,6 +7,7 @@ import type {
   FrameworkOverviewCard,
   FrameworksScreenData,
 } from '@/types/frameworks';
+import { F4OptionsPanel } from './f4-options-panel';
 
 type FrameworksScreenProps = {
   data: FrameworksScreenData;
@@ -33,6 +34,7 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
       <F1MomentumPanel />
       <F2EarningsPanel />
       <F3AnalystPanel />
+      <F4OptionsPanel />
     </main>
   );
 }

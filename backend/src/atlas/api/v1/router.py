@@ -9,6 +9,7 @@ from atlas.api.v1 import (
     earnings,
     health,
     momentum,
+    options_flow,
     portfolio,
     ticker_search,
     tickers,
@@ -26,3 +27,4 @@ router.include_router(watchlist.router)
 router.include_router(momentum.router)
 router.include_router(earnings.router)
 router.include_router(analyst.router)
+router.include_router(options_flow.router)

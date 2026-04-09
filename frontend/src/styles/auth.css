@@ -178,21 +178,16 @@
 }
 
 .atlas-auth-input-frame {
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--atlas-auth-control-radius);
   height: var(--atlas-auth-field-height);
   position: relative;
+  transition: border-color 150ms ease;
   width: var(--atlas-auth-field-width);
 }
 
-.atlas-auth-input-frame::before {
-  background-image: var(--atlas-auth-input-frame-url);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
-  content: '';
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
+.atlas-auth-input-frame:hover {
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .atlas-auth-input {
@@ -221,13 +216,9 @@
   outline: none;
 }
 
-.atlas-auth-input-frame:has(.atlas-auth-input:focus-visible)::after {
-  border: 1px solid color-mix(in srgb, var(--atlas-auth-accent) 60%, transparent);
-  border-radius: var(--atlas-auth-control-radius);
-  content: '';
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
+.atlas-auth-input-frame:has(.atlas-auth-input:focus-visible) {
+  border-color: color-mix(in srgb, var(--atlas-auth-accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--atlas-auth-accent) 15%, transparent);
 }
 
 .atlas-auth-visibility {
@@ -246,10 +237,16 @@
   width: 20px;
 }
 
-.atlas-auth-visibility img {
+.atlas-auth-visibility svg {
+  color: rgba(255, 255, 255, 0.55);
   display: block;
+  flex-shrink: 0;
   height: 20px;
-  width: 19px;
+  width: 20px;
+}
+
+.atlas-auth-visibility:hover svg {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .atlas-auth-error {
@@ -425,4 +422,42 @@
   .atlas-auth-button {
     margin-top: 24px;
   }
+}
+
+/* ── Browser autofill & credential-badge overrides ───────────────────────── */
+
+/* Hide Edge / IE native password reveal and clear buttons */
+.atlas-auth-input::-ms-reveal,
+.atlas-auth-input::-ms-clear {
+  display: none;
+}
+
+/* Hide Safari / Chrome native credential autofill badge inside the field */
+.atlas-auth-input::-webkit-credentials-auto-fill-button,
+.atlas-auth-input::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Restore dark-theme colours when the browser activates autofill.
+   Hard-coded hex values are used intentionally: CSS custom properties are
+   not resolved inside :-webkit-autofill in some browser versions. */
+.atlas-auth-input:-webkit-autofill,
+.atlas-auth-input:-webkit-autofill:hover,
+.atlas-auth-input:-webkit-autofill:focus {
+  /* Inset box-shadow fakes the background colour, overriding the browser highlight. */
+  -webkit-box-shadow: 0 0 0 1000px #0f1524 inset;
+  -webkit-text-fill-color: #ffffff;
+  caret-color: #ffffff;
+  /* Delay the transition so the override stays in place well after autofill completes. */
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Light-theme autofill */
+.atlas-auth-shell[data-theme='light'] .atlas-auth-input:-webkit-autofill,
+.atlas-auth-shell[data-theme='light'] .atlas-auth-input:-webkit-autofill:hover,
+.atlas-auth-shell[data-theme='light'] .atlas-auth-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+  -webkit-text-fill-color: #122033;
+  caret-color: #122033;
 }

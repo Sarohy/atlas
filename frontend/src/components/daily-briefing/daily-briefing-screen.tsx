@@ -1,9 +1,3 @@
-import {
-  AtlasActionsRail,
-  AtlasHeader,
-  AtlasHoldingsRail,
-  AtlasNavigation,
-} from '@/components/atlas/atlas-chrome';
 import { cn } from '@/lib/utils';
 import type {
   BriefingDeployPlanRow,
@@ -20,93 +14,88 @@ type DailyBriefingScreenProps = {
 
 export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
   return (
-    <div className="atlas-portfolio-shell" data-testid="atlas-daily-briefing-page">
-      <AtlasHeader appTitle={data.appTitle} />
-      <AtlasNavigation labels={data.navItems} />
-      <div className="atlas-portfolio-layout">
-        <AtlasHoldingsRail />
-        <main className="atlas-portfolio-main atlas-briefing-main">
-          <section className="atlas-briefing-hero">
-            <div>
-              <h1 className="atlas-briefing-title">{data.briefingDate}</h1>
-              <p className="atlas-briefing-subtitle">{data.briefingSubtitle}</p>
-            </div>
-            <span className={cn('atlas-briefing-badge', `is-${data.badgeTone}`)}>
-              {data.badgeLabel}
-            </span>
+    <main
+      className="atlas-portfolio-main atlas-briefing-main"
+      data-testid="atlas-daily-briefing-page"
+    >
+      <section className="atlas-briefing-hero">
+        <div>
+          <h1 className="atlas-briefing-title">{data.briefingDate}</h1>
+          <p className="atlas-briefing-subtitle">{data.briefingSubtitle}</p>
+        </div>
+        <span className={cn('atlas-briefing-badge', `is-${data.badgeTone}`)}>
+          {data.badgeLabel}
+        </span>
+      </section>
+
+      <div className="atlas-briefing-grid">
+        <div className="atlas-briefing-column">
+          {data.questionSections.map((section) => (
+            <section className="atlas-briefing-block" key={section.title}>
+              <h2 className="atlas-briefing-question">{section.title}</h2>
+              <div className="atlas-briefing-list">
+                {section.rows.map((row) => (
+                  <BriefingRow key={`${section.title}-${row.symbol}`} row={row} />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          <section className="atlas-briefing-block">
+            <h2 className="atlas-briefing-question">{data.q2Title}</h2>
+            <div className="atlas-briefing-callout">{data.q2Callout}</div>
           </section>
 
-          <div className="atlas-briefing-grid">
-            <div className="atlas-briefing-column">
-              {data.questionSections.map((section) => (
-                <section className="atlas-briefing-block" key={section.title}>
-                  <h2 className="atlas-briefing-question">{section.title}</h2>
-                  <div className="atlas-briefing-list">
-                    {section.rows.map((row) => (
-                      <BriefingRow key={`${section.title}-${row.symbol}`} row={row} />
-                    ))}
-                  </div>
-                </section>
+          <section className="atlas-briefing-block">
+            <h2 className="atlas-briefing-question">Q5 — What changes this today?</h2>
+            <div className="atlas-briefing-trigger-list">
+              {data.triggerRows.map((row) => (
+                <TriggerRow key={row.title} row={row} />
               ))}
-
-              <section className="atlas-briefing-block">
-                <h2 className="atlas-briefing-question">{data.q2Title}</h2>
-                <div className="atlas-briefing-callout">{data.q2Callout}</div>
-              </section>
-
-              <section className="atlas-briefing-block">
-                <h2 className="atlas-briefing-question">Q5 — What changes this today?</h2>
-                <div className="atlas-briefing-trigger-list">
-                  {data.triggerRows.map((row) => (
-                    <TriggerRow key={row.title} row={row} />
-                  ))}
-                </div>
-              </section>
             </div>
+          </section>
+        </div>
 
-            <div className="atlas-briefing-column">
-              <section className="atlas-briefing-block">
-                <h2 className="atlas-briefing-question">Q4 — Pro forma after all actions</h2>
-                <div className="atlas-briefing-proforma">
-                  <div className="atlas-briefing-proforma-header">
-                    <span>Ticker</span>
-                    <span>Value</span>
-                    <span>Wt%</span>
-                    <span>Cluster</span>
-                    <span>Beta</span>
-                    <span>Action</span>
-                  </div>
-                  {data.proFormaRows.map((row) => (
-                    <ProFormaRow key={row.symbol} row={row} />
-                  ))}
-                </div>
-                <div className="atlas-briefing-stats">
-                  {data.summaryStats.map((stat) => (
-                    <SummaryStat key={stat.label} stat={stat} />
-                  ))}
-                </div>
-              </section>
-
-              <section className="atlas-briefing-block">
-                <h2 className="atlas-briefing-question">{data.deployPlanTitle}</h2>
-                <div className="atlas-briefing-deploy-table">
-                  <div className="atlas-briefing-deploy-header">
-                    <span>Ticker</span>
-                    <span>Entry</span>
-                    <span>Size</span>
-                    <span>Phase</span>
-                  </div>
-                  {data.deployPlanRows.map((row) => (
-                    <DeployPlanRow key={row.symbol} row={row} />
-                  ))}
-                </div>
-              </section>
+        <div className="atlas-briefing-column">
+          <section className="atlas-briefing-block">
+            <h2 className="atlas-briefing-question">Q4 — Pro forma after all actions</h2>
+            <div className="atlas-briefing-proforma">
+              <div className="atlas-briefing-proforma-header">
+                <span>Ticker</span>
+                <span>Value</span>
+                <span>Wt%</span>
+                <span>Cluster</span>
+                <span>Beta</span>
+                <span>Action</span>
+              </div>
+              {data.proFormaRows.map((row) => (
+                <ProFormaRow key={row.symbol} row={row} />
+              ))}
             </div>
-          </div>
-        </main>
-        <AtlasActionsRail actions={data.actions} title={data.actionsTitle} />
+            <div className="atlas-briefing-stats">
+              {data.summaryStats.map((stat) => (
+                <SummaryStat key={stat.label} stat={stat} />
+              ))}
+            </div>
+          </section>
+
+          <section className="atlas-briefing-block">
+            <h2 className="atlas-briefing-question">{data.deployPlanTitle}</h2>
+            <div className="atlas-briefing-deploy-table">
+              <div className="atlas-briefing-deploy-header">
+                <span>Ticker</span>
+                <span>Entry</span>
+                <span>Size</span>
+                <span>Phase</span>
+              </div>
+              {data.deployPlanRows.map((row) => (
+                <DeployPlanRow key={row.symbol} row={row} />
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
 

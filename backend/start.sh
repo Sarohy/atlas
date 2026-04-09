@@ -12,4 +12,4 @@ import alembic.config
 alembic.config.main(argv=['upgrade', 'head'])
 "
 
-python -m pip install . && PYTHONPATH=/app/src python -m alembic upgrade head && PYTHONPATH=/app/src python -m atlas.seed && PYTHONPATH=/app/src python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port 8080
+export PYTHONPATH=/app/src && python -m pip install --upgrade pip && python -m pip install fastapi uvicorn[standard] pydantic pydantic-settings sqlalchemy[asyncio] asyncpg alembic structlog httpx && python -m alembic upgrade head && python -m atlas.seed && python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port 8080

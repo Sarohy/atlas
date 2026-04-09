@@ -12,5 +12,5 @@ import alembic.config
 alembic.config.main(argv=['upgrade', 'head'])
 "
 
-python -m atlas.seed
+python -m src/atlas/seed
 python -m uvicorn atlas.main:create_app --factory --host 0.0.0.0 --port 8080

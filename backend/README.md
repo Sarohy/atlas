@@ -79,6 +79,47 @@ Expected response:
 
 ---
 
+## API Reference
+
+Base URL: `http://localhost:8000/api/v1`  
+All requests/responses are JSON. Full documentation with request bodies, response shapes, and error codes: [`src/atlas/api/v1/README.md`](src/atlas/api/v1/README.md)
+
+### Quick reference
+
+| Method   | Path                     | Description                                                         |
+| -------- | ------------------------ | ------------------------------------------------------------------- |
+| `GET`    | `/health`                | Service liveness — `{ "status": "ok", "service": "atlas-backend" }` |
+| `POST`   | `/auth/sign-in`          | Authenticate — body: `{ email, password }`                          |
+| `POST`   | `/auth/logout`           | Session cleanup (stateless)                                         |
+| `GET`    | `/tickers`               | All portfolio tickers                                               |
+| `POST`   | `/tickers`               | Add ticker — body: `{ ticker, shares, cluster_id? }`                |
+| `PATCH`  | `/tickers/:id`           | Update shares / cluster — body: `{ shares?, cluster_id? }`          |
+| `DELETE` | `/tickers/:id`           | Remove ticker                                                       |
+| `POST`   | `/tickers/sync`          | Refresh market data from Polygon.io                                 |
+| `GET`    | `/tickers/search?q=`     | Autocomplete ticker search via Polygon.io                           |
+| `GET`    | `/portfolio/summary`     | NAV, cash breakdown, portfolio beta                                 |
+| `GET`    | `/portfolio/cash`        | Current cash balance + floor %                                      |
+| `PUT`    | `/portfolio/cash`        | Replace cash balance — body: `{ cash_balance, cash_floor_pct }`     |
+| `POST`   | `/portfolio/cash/adjust` | Delta cash update — body: `{ amount }`                              |
+| `GET`    | `/clusters`              | All clusters with assigned tickers                                  |
+| `POST`   | `/clusters`              | Create cluster — body: `{ name, color }`                            |
+| `PATCH`  | `/clusters/:id`          | Rename / recolour — body: `{ name?, color? }`                       |
+| `DELETE` | `/clusters/:id`          | Delete cluster (tickers become unassigned)                          |
+| `GET`    | `/watchlist`             | All watchlist items                                                 |
+| `POST`   | `/watchlist`             | Add to watchlist — body: `{ ticker }`                               |
+| `DELETE` | `/watchlist/:id`         | Remove from watchlist                                               |
+| `POST`   | `/watchlist/sync`        | Refresh watchlist market data from Polygon.io                       |
+
+### Interactive docs
+
+When the dev server is running, FastAPI auto-generates interactive docs:
+
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
+- **OpenAPI JSON:** `http://localhost:8000/openapi.json`
+
+---
+
 ## Quality Gate
 
 Run before every commit:

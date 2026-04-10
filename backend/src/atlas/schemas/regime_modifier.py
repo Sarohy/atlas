@@ -1,7 +1,5 @@
 """Pydantic schemas for the Regime Modifier endpoint."""
 
-from decimal import Decimal
-
 from pydantic import BaseModel, Field
 
 
@@ -47,11 +45,11 @@ class RegimeModifierResponse(BaseModel):
 
     # ── Cash guidance — USD amounts ───────────────────────────────────────
     # None when the ticker is not present in the portfolio DB.
-    min_cash_usd: Decimal | None = Field(
+    min_cash_usd: float | None = Field(
         description="Minimum cash in USD (min_cash_pct x position_value). "
         "None when ticker is not in the portfolio.",
     )
-    max_cash_usd: Decimal | None = Field(
+    max_cash_usd: float | None = Field(
         description="Maximum cash in USD (max_cash_pct x position_value). "
         "None when ticker is not in the portfolio.",
     )

@@ -2140,3 +2140,307 @@
   line-height: 1.4;
   margin: 0;
 }
+
+/* ==========================================================================
+   Regime Modifier Panel  (.atlas-regime-*)
+   Sits alongside the Framework Score Panel in the Frameworks screen.
+   Follows the same structural classes (.atlas-fws-panel, .atlas-fws-panel-body)
+   and adds regime-specific layout classes.
+   ========================================================================== */
+
+/* ── Layout: side-by-side panels row ── */
+
+.atlas-regime-panels-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.atlas-fws-panel--half-width {
+  flex: 1;
+  width: auto;
+  align-self: auto;
+}
+
+.atlas-regime-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── War zone toggle button (lives in the panel header) ── */
+
+.atlas-regime-war-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: transparent;
+  color: #4b6070;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease;
+  margin-left: auto;
+}
+
+.atlas-regime-war-btn:hover {
+  border-color: #64748b;
+  color: #94a3b8;
+}
+
+.atlas-regime-war-btn.is-active {
+  border-color: #ef4444;
+  background: rgb(239 68 68 / 12%);
+  color: #ef4444;
+}
+
+.atlas-regime-war-icon {
+  font-size: 0.65rem;
+}
+
+/* ── Main content wrapper ── */
+
+.atlas-regime-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Market conditions row: Brent · VIX · (War badge) ── */
+
+.atlas-regime-market-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+}
+
+.atlas-regime-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-regime-stat-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-regime-stat-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e8edf5;
+  line-height: 1;
+}
+
+.atlas-regime-stat-divider {
+  width: 1px;
+  height: 28px;
+  background: #1e2d40;
+  flex-shrink: 0;
+}
+
+.atlas-regime-war-pill {
+  font-size: 0.48rem;
+  letter-spacing: 0.08em;
+  animation: atlas-fws-pulse 1.8s ease-in-out infinite;
+}
+
+/* ── Rule badge row ── */
+
+.atlas-regime-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.atlas-regime-rule-badge {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.atlas-regime-rule-badge.is-red {
+  color: #ef4444;
+}
+
+.atlas-regime-rule-badge.is-orange {
+  color: #f97316;
+}
+
+.atlas-regime-rule-badge.is-green {
+  color: #22c55e;
+}
+
+.atlas-regime-rule-badge.is-muted {
+  color: #4b6070;
+}
+
+.atlas-regime-delta {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
+
+.atlas-regime-delta.is-red {
+  color: #ef4444;
+}
+
+.atlas-regime-delta.is-orange {
+  color: #f97316;
+}
+
+.atlas-regime-delta.is-green {
+  color: #22c55e;
+}
+
+/* ── Score adjustment hero: BASE → ADJUSTED ── */
+
+.atlas-regime-score-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.atlas-regime-score-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.atlas-regime-score-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-regime-score-num {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.atlas-regime-score-num--base {
+  font-size: 1.5rem;
+  opacity: 0.55;
+}
+
+.atlas-regime-score-num.is-green {
+  color: #22c55e;
+}
+.atlas-regime-score-num.is-cyan {
+  color: #22d3ee;
+}
+.atlas-regime-score-num.is-yellow {
+  color: #eab308;
+}
+.atlas-regime-score-num.is-orange {
+  color: #f97316;
+}
+.atlas-regime-score-num.is-red {
+  color: #ef4444;
+}
+
+.atlas-regime-arrow {
+  color: #334155;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* ── Cash guidance block ── */
+
+.atlas-regime-cash-block {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-regime-cash-title {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+  border-bottom: 1px solid #111827;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.atlas-regime-cash-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.atlas-regime-cash-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #4b6070;
+  letter-spacing: 0.03em;
+}
+
+.atlas-regime-cash-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #e8edf5;
+  text-align: right;
+}
+
+/* ── Output text instruction ── */
+
+.atlas-regime-output {
+  background: #070e18;
+  border: 1px solid #1e2d40;
+  border-left: 3px solid #4b6070;
+  border-radius: 0 4px 4px 0;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.atlas-regime-output-line {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  line-height: 1.6;
+  color: #94a3b8;
+}
+

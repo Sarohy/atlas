@@ -289,3 +289,35 @@ class TestComputeRegimeOutput:
         _, _, _, min_usd, max_usd, _ = _compute_regime_output(None, 82, position_value)
         assert min_usd is None
         assert max_usd is None
+
+
+# ---------------------------------------------------------------------------
+# active_war with no market data — regression for Rule 1 via _compute_regime_output
+# ---------------------------------------------------------------------------
+
+
+class TestActiveWarNoMarketData:
+    """Verify Rule 1 output is correct when active_war=True but Brent/VIX are null.
+
+    The service sets rule=1 directly when market data is absent but active_war
+    is True.  _compute_regime_output(1, base_score, ...) must still return the
+    correct crisis adjustment.
+    """
+
+    def test_rule1_fires_with_score_57(self) -> None:
+        """base_score=57, active_war=True, no market data → adjusted=47."""
+        adjusted, min_pct, max_pct, *_ = _compute_regime_output(1, 57, None)
+        assert adjusted == 47
+        assert min_pct == pytest.approx(0.35)
+        assert max_pct == pytest.approx(0.40)
+
+    def test_rule1_output_text_present_with_score_57(self) -> None:
+        *_, output_text = _compute_regime_output(1, 57, None)
+        assert output_text != ""
+
+    def test_rule1_usd_guidance_when_position_known(self) -> None:
+        """Position value $10 000 → min $3 500, max $4 000 cash required."""
+        position = Decimal("10000")
+        _, _, _, min_usd, max_usd, _ = _compute_regime_output(1, 57, position)
+        assert min_usd == pytest.approx(3500.0)
+        assert max_usd == pytest.approx(4000.0)

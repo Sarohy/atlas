@@ -1,6 +1,6 @@
 """Regime Modifier service.
 
-Fetches live Brent crude and VIX values from Polygon.io, retrieves the base
+Fetches live Brent crude and VIX values from Alpha Vantage, retrieves the base
 Framework Score for a ticker, and applies one of three market-regime rules to
 produce an adjusted conviction score with cash-management guidance.
 
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, timedelta
 from decimal import Decimal
 from typing import Final
 
@@ -33,23 +32,20 @@ from atlas.services.ticker_service import TickerService
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Polygon.io ticker symbols
+# Alpha Vantage endpoints
 # ---------------------------------------------------------------------------
 
-# Brent Crude Oil continuous contract on Polygon.io commodities feed.
-_BRENT_SYMBOL: Final[str] = "C:BCO"
+# Brent crude oil daily prices (USD per barrel).
+# Returns JSON: {"data": [{"date": "YYYY-MM-DD", "value": "65.10"}, ...]}
+# Data is returned in descending date order.
+_AV_BRENT_URL: Final[str] = "https://www.alphavantage.co/query"
 
-# CBOE Volatility Index on Polygon.io indices feed.
-_VIX_SYMBOL: Final[str] = "I:VIX"
+# CBOE VIX index — fetched via GLOBAL_QUOTE for the most recent value.
+# Returns JSON: {"Global Quote": {"05. price": "22.50", ...}}
+_AV_GLOBAL_QUOTE_URL: Final[str] = "https://www.alphavantage.co/query"
 
-# Polygon.io daily aggregates endpoint template.
-_POLYGON_AGGS_URL: Final[str] = (
-    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
-)
-
-# Number of calendar days to look back when fetching recent daily bars.
-# 10 calendar days guarantees at least 2 trading sessions even around holidays.
-_BAR_LOOKBACK_DAYS: Final[int] = 10
+# Number of most-recent Brent data points needed (2 for consecutive check).
+_BRENT_NUM_CLOSES: Final[int] = 2
 
 # ---------------------------------------------------------------------------
 # Rule 1 — Crisis thresholds
@@ -220,8 +216,8 @@ class RegimeModifierService:
     """Computes the regime-adjusted conviction score for a single ticker.
 
     Concurrently fetches:
-      • Brent crude bars (last 2 trading days) from Polygon.io
-      • VIX bars (last trading day) from Polygon.io
+      • Brent crude daily closes from Alpha Vantage (function=BRENT)
+      • VIX latest value from Alpha Vantage (GLOBAL_QUOTE ^VIX)
       • Framework Score for the ticker
 
     Also reads the ticker's ``position_value`` from the database to compute
@@ -230,9 +226,10 @@ class RegimeModifierService:
     Parameters
     ----------
     polygon_api_key:
-        Polygon.io API key (required for Brent and VIX data).
-    alphavantage_api_key, transcript_api_key, benzinga_api_key,
-    unusual_whales_api_key, sec_api_key:
+        Polygon.io API key — forwarded to the internal FrameworkScoreService.
+    alphavantage_api_key:
+        Alpha Vantage key — used for Brent crude and VIX data.
+    transcript_api_key, benzinga_api_key, unusual_whales_api_key, sec_api_key:
         Keys forwarded to the internal ``FrameworkScoreService`` instance.
     session:
         SQLAlchemy async session used to look up portfolio position value.
@@ -248,7 +245,7 @@ class RegimeModifierService:
         sec_api_key: str,
         session: AsyncSession,
     ) -> None:
-        self._polygon_key = polygon_api_key
+        self._av_key = alphavantage_api_key
         self._fw_service = FrameworkScoreService(
             polygon_api_key=polygon_api_key,
             alphavantage_api_key=alphavantage_api_key,
@@ -267,16 +264,16 @@ class RegimeModifierService:
         """Return the regime-adjusted score and cash guidance for ``ticker``.
 
         Runs three concurrent tasks:
-          1. Fetch Brent crude daily bars (last 2 closes)
-          2. Fetch VIX daily bar (last close)
+          1. Fetch Brent crude daily closes from Alpha Vantage
+          2. Fetch VIX latest value from Alpha Vantage
           3. Compute Framework Score for the ticker
         """
         async with httpx.AsyncClient() as client:
-            brent_task = self._fetch_bars(client, _BRENT_SYMBOL, num_bars=2)
-            vix_task = self._fetch_bars(client, _VIX_SYMBOL, num_bars=1)
+            brent_task = self._fetch_brent(client)
+            vix_task = self._fetch_vix(client)
             fw_task = self._fw_service.compute_framework_score(ticker)
 
-            brent_bars, vix_bars, fw_result = await asyncio.gather(
+            brent_closes, vix_value_raw, fw_result = await asyncio.gather(
                 brent_task,
                 vix_task,
                 fw_task,
@@ -286,26 +283,24 @@ class RegimeModifierService:
         # ── Extract Brent price and consecutive-close flag ─────────────────
         brent_price: float | None = None
         brent_consecutive_below_95 = False
-        if isinstance(brent_bars, list) and brent_bars:
-            brent_price = float(brent_bars[-1]["c"])
-            if len(brent_bars) >= 2:
-                brent_consecutive_below_95 = all(
-                    float(bar["c"]) < _RULE3_BRENT_CLEAR for bar in brent_bars[-2:]
-                )
+        if isinstance(brent_closes, list) and brent_closes:
+            brent_price = brent_closes[0]
+            if len(brent_closes) >= 2:
+                brent_consecutive_below_95 = all(v < _RULE3_BRENT_CLEAR for v in brent_closes[:2])
         else:
             logger.warning(
                 "Brent crude fetch failed or returned no data",
-                extra={"error": repr(brent_bars)},
+                extra={"error": repr(brent_closes)},
             )
 
         # ── Extract VIX value ─────────────────────────────────────────────
         vix_value: float | None = None
-        if isinstance(vix_bars, list) and vix_bars:
-            vix_value = float(vix_bars[-1]["c"])
+        if isinstance(vix_value_raw, float):
+            vix_value = vix_value_raw
         else:
             logger.warning(
                 "VIX fetch failed or returned no data",
-                extra={"error": repr(vix_bars)},
+                extra={"error": repr(vix_value_raw)},
             )
 
         # ── Extract base Framework Score ──────────────────────────────────
@@ -316,7 +311,6 @@ class RegimeModifierService:
                 "Framework Score fetch failed",
                 extra={"ticker": ticker, "error": repr(fw_result)},
             )
-            # Neutral fallback — cannot compute modifier without base score.
             base_score = 50
 
         # ── Look up position value from DB ────────────────────────────────
@@ -326,6 +320,9 @@ class RegimeModifierService:
             position_value_usd = db_ticker.position_value
 
         # ── Apply regime rules ────────────────────────────────────────────
+        # active_war alone is sufficient to trigger Rule 1; market data is
+        # only required when the war flag is not set (Brent/VIX thresholds
+        # cannot be evaluated without real values).
         if brent_price is not None and vix_value is not None:
             rule = _determine_rule(
                 active_war=active_war,
@@ -333,8 +330,10 @@ class RegimeModifierService:
                 vix_value=vix_value,
                 brent_consecutive_below_95=brent_consecutive_below_95,
             )
+        elif active_war:
+            # No market data but war is confirmed — Rule 1 fires unconditionally.
+            rule = 1
         else:
-            # Cannot determine regime without market data.
             rule = None
 
         (
@@ -356,41 +355,57 @@ class RegimeModifierService:
             rule_triggered=rule,
             min_cash_pct=min_cash_pct,
             max_cash_pct=max_cash_pct,
-            min_cash_usd=min_cash_usd,
-            max_cash_usd=max_cash_usd,
+            min_cash_usd=float(min_cash_usd) if min_cash_usd is not None else None,
+            max_cash_usd=float(max_cash_usd) if max_cash_usd is not None else None,
             output_text=output_text,
         )
 
-    async def _fetch_bars(
-        self,
-        client: httpx.AsyncClient,
-        polygon_ticker: str,
-        num_bars: int,
-    ) -> list[dict]:  # type: ignore[type-arg]
-        """Fetch the most recent ``num_bars`` daily bars from Polygon.io.
+    async def _fetch_brent(self, client: httpx.AsyncClient) -> list[float]:
+        """Fetch the two most recent Brent crude daily closes from Alpha Vantage.
 
-        Returns an empty list on any error.
+        Calls function=BRENT (daily). Returns a list of up to 2 floats
+        in descending date order (most recent first). Returns [] on failure.
         """
-        to_date = date.today()
-        from_date = to_date - timedelta(days=_BAR_LOOKBACK_DAYS)
-        url = _POLYGON_AGGS_URL.format(
-            ticker=polygon_ticker,
-            from_date=from_date.isoformat(),
-            to_date=to_date.isoformat(),
-        )
         try:
             response = await client.get(
-                url,
-                params={"apiKey": self._polygon_key, "adjusted": "true", "sort": "asc"},
+                _AV_BRENT_URL,
+                params={"function": "BRENT", "interval": "daily", "apikey": self._av_key},
                 timeout=10.0,
             )
             response.raise_for_status()
             payload: dict = response.json()  # type: ignore[type-arg]
-            results: list[dict] = payload.get("results", [])  # type: ignore[type-arg]
-            return results[-num_bars:] if results else []
+            data: list[dict] = payload.get("data", [])  # type: ignore[type-arg]
+            # Alpha Vantage returns entries newest-first; skip "." values
+            closes: list[float] = []
+            for entry in data:
+                raw = entry.get("value", ".")
+                if raw != ".":
+                    closes.append(float(raw))
+                if len(closes) >= _BRENT_NUM_CLOSES:
+                    break
+            return closes
         except Exception:
-            logger.exception(
-                "Polygon.io bar fetch failed",
-                extra={"ticker": polygon_ticker},
-            )
+            logger.exception("Alpha Vantage Brent fetch failed")
             return []
+
+    async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:
+        """Fetch the latest VIX index value from Alpha Vantage GLOBAL_QUOTE.
+
+        Returns the close price as a float, or None on failure.
+        """
+        try:
+            response = await client.get(
+                _AV_GLOBAL_QUOTE_URL,
+                params={"function": "GLOBAL_QUOTE", "symbol": "^VIX", "apikey": self._av_key},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            payload: dict = response.json()  # type: ignore[type-arg]
+            quote: dict = payload.get("Global Quote", {})  # type: ignore[type-arg]
+            price_str: str = quote.get("05. price", "")
+            if price_str:
+                return float(price_str)
+            return None
+        except Exception:
+            logger.exception("Alpha Vantage VIX fetch failed")
+            return None

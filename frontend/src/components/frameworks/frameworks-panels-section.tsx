@@ -10,6 +10,7 @@ import { F3AnalystPanel } from './f3-analyst-panel';
 import { F4OptionsPanel } from './f4-options-panel';
 import { F5FundamentalPanel } from './f5-fundamental-panel';
 import { FrameworkScorePanel } from './framework-score-panel';
+import { RegimeModifierPanel } from './regime-modifier-panel';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -91,10 +92,14 @@ export function FrameworksPanelsSection() {
         )}
       </div>
 
-      <FrameworkScorePanel
-        ticker={activeTicker}
-        onPreviewDetails={() => setDetailsOverlayOpen(true)}
-      />
+      <div className="atlas-regime-panels-row">
+        <FrameworkScorePanel
+          ticker={activeTicker}
+          onPreviewDetails={() => setDetailsOverlayOpen(true)}
+        />
+
+        <RegimeModifierPanel ticker={activeTicker} />
+      </div>
 
       {detailsOverlayOpen && (
         <div

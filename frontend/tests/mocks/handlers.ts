@@ -16,6 +16,7 @@ export const handlers = [
         ticker: 'AAPL',
         company_name: 'Apple Inc.',
         shares: '100',
+        position_value: 100000,
         created_at: '2026-04-07T00:00:00Z',
         updated_at: '2026-04-07T00:00:00Z',
       },
@@ -313,6 +314,42 @@ export const handlers = [
       },
       f3_score: 100,
       f3_grade: 'STRONG BUY',
+    });
+  }),
+
+  // ── Market Conditions ─────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/market/conditions`, () => {
+    return HttpResponse.json({
+      brent_price: 97.5,
+      brent_prev_price: 96.8,
+      vix_value: 27.3,
+    });
+  }),
+
+  // ── Regime Modifier ──────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/regime-modifier/:ticker`, ({ params, request }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    const url = new URL(request.url);
+    const activeWar = url.searchParams.get('active_war') === 'true';
+    // Rule 1 triggers when war is active; otherwise Rule 2 (Brent $97.50 + VIX 27.30)
+    const ruleTriggered = activeWar ? 1 : 2;
+    const baseScore = 79;
+    const adjustedScore = activeWar ? baseScore - 10 : baseScore - 5;
+    return HttpResponse.json({
+      ticker,
+      active_war: activeWar,
+      brent_price: 97.5,
+      vix_value: 27.3,
+      base_score: baseScore,
+      adjusted_score: adjustedScore,
+      rule_triggered: ruleTriggered,
+      min_cash_pct: activeWar ? 0.35 : 0.25,
+      max_cash_pct: activeWar ? 0.4 : 0.35,
+      min_cash_usd: null,
+      max_cash_usd: null,
+      output_text: activeWar
+        ? 'must stay in cash\ncannot be touched\nfor any trade'
+        : 'must stay in cash',
     });
   }),
 

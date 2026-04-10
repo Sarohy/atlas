@@ -171,11 +171,11 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 type IndicatorCardProps = {
   label: string;
   score: number;
-  weight: number;
+  maxScore: number;
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, children }: IndicatorCardProps) {
+function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps) {
   return (
     <article
       className="atlas-f3-indicator"
@@ -185,7 +185,7 @@ function IndicatorCard({ label, score, children }: IndicatorCardProps) {
         <span className="atlas-f3-indicator-label">{label}</span>
         <span className="atlas-f3-indicator-score">
           {score}
-          <span className="atlas-f3-indicator-max">/100</span>
+          <span className="atlas-f3-indicator-max">/{maxScore}</span>
         </span>
       </header>
       <div className="atlas-f3-indicator-body">{children}</div>
@@ -199,7 +199,11 @@ function IndicatorCard({ label, score, children }: IndicatorCardProps) {
 
 function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicator }) {
   return (
-    <IndicatorCard label="Consensus Rating" score={consensus.score} weight={consensus.weight}>
+    <IndicatorCard
+      label="Consensus Rating"
+      score={Math.round(consensus.score * consensus.weight)}
+      maxScore={Math.round(consensus.weight * 100)}
+    >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Consensus</dt>
@@ -253,7 +257,11 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
 
 function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator }) {
   return (
-    <IndicatorCard label="Analyst Count" score={coverage.score} weight={coverage.weight}>
+    <IndicatorCard
+      label="Analyst Count"
+      score={Math.round(coverage.score * coverage.weight)}
+      maxScore={Math.round(coverage.weight * 100)}
+    >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Analysts</dt>
@@ -272,7 +280,11 @@ function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator 
 
 function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
   return (
-    <IndicatorCard label="PT vs Current Price" score={pt.score} weight={pt.weight}>
+    <IndicatorCard
+      label="PT vs Current Price"
+      score={Math.round(pt.score * pt.weight)}
+      maxScore={Math.round(pt.weight * 100)}
+    >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Upside</dt>
@@ -299,7 +311,11 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
 
 function PtRevisionCard({ revision }: { revision: PtRevisionIndicator }) {
   return (
-    <IndicatorCard label="PT Revision Direction" score={revision.score} weight={revision.weight}>
+    <IndicatorCard
+      label="PT Revision Direction"
+      score={Math.round(revision.score * revision.weight)}
+      maxScore={Math.round(revision.weight * 100)}
+    >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Signal</dt>

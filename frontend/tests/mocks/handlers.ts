@@ -369,12 +369,6 @@ export const handlers = [
         },
       ],
       raw_total: 83.6,
-      regime: {
-        regime: 'CAUTION',
-        brent_price: 98.5,
-        modifier: -5,
-        cash_floor_pct: 0.25,
-      },
       final_score: 79,
       action: 'HOLD',
       action_tone: 'tone-yellow',

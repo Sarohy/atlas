@@ -64,6 +64,13 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ─── Backend ──────────────────────────────────────────────────────────────────
+apply_backend_migrations() {
+  log "Applying pending backend migrations…"
+  cd "$ROOT_DIR/backend"
+  uv run alembic upgrade head
+  ok "Backend migrations are up to date."
+}
+
 start_backend() {
   log "Starting backend on :8000…"
   cd "$ROOT_DIR/backend"
@@ -88,6 +95,7 @@ start_frontend() {
 main() {
   log "ATLAS dev server starting…"
   ensure_node
+  apply_backend_migrations
   start_backend
   # Brief pause so the backend boots before the frontend makes auth calls.
   sleep 1

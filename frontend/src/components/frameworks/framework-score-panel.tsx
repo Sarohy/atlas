@@ -21,13 +21,6 @@ const ACTION_TONE_CLASS: Record<string, string> = {
   'tone-dark-red': 'is-red',
 };
 
-/** Display name for each regime label. */
-const REGIME_DISPLAY: Record<string, { label: string; tone: string }> = {
-  'CRISIS HALT': { label: 'Crisis Halt', tone: 'is-red' },
-  CAUTION: { label: 'Caution', tone: 'is-orange' },
-  CLEAR: { label: 'Clear', tone: 'is-green' },
-};
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -43,8 +36,7 @@ type FrameworkScorePanelProps = {
 
 /**
  * Framework Score panel — shows the final ATLAS conviction score that
- * aggregates F1-F5 with their Factor_Mapping_Guide weightings and the
- * Brent-crude regime modifier.
+ * aggregates F1-F5 with their Factor_Mapping_Guide weightings.
  *
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
@@ -109,10 +101,6 @@ function EmptyState({ ticker }: { ticker: string }) {
 
 function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
   const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
-  const regimeMeta = REGIME_DISPLAY[data.regime.regime] ?? {
-    label: data.regime.regime,
-    tone: 'is-yellow',
-  };
   const filledSegs = Math.round(data.final_score / SCORE_BAR_SEGMENTS);
 
   return (
@@ -132,16 +120,6 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
             data-testid="fws-action"
           >
             {data.action}
-          </span>
-
-          <span
-            className={cn('atlas-frameworks-pill atlas-fws-regime-pill', regimeMeta.tone)}
-            data-testid="fws-regime"
-          >
-            {regimeMeta.label}
-            {data.regime.brent_price !== null && (
-              <> · ${data.regime.brent_price.toFixed(1)} Brent</>
-            )}
           </span>
 
           {data.f5_blocked && (
@@ -182,24 +160,6 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
         <div className="atlas-fws-calc-row">
           <span className="atlas-fws-calc-label">Raw total</span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
-        </div>
-        <div className="atlas-fws-calc-row">
-          <span className="atlas-fws-calc-label">
-            Regime modifier{' '}
-            <span
-              className={cn('atlas-frameworks-pill atlas-fws-regime-pill--sm', regimeMeta.tone)}
-            >
-              {data.regime.regime}
-            </span>
-          </span>
-          <span
-            className={cn(
-              'atlas-fws-calc-value',
-              data.regime.modifier >= 0 ? 'is-green' : 'is-red',
-            )}
-          >
-            {data.regime.modifier > 0 ? `+${data.regime.modifier}` : data.regime.modifier}
-          </span>
         </div>
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
           <span className="atlas-fws-calc-label">Final score</span>

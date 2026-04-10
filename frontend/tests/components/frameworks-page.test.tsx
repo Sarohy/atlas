@@ -24,14 +24,16 @@ describe('Frameworks page', () => {
     expect(screen.getByTestId('atlas-frameworks-page')).toBeInTheDocument();
   });
 
-  it('renders regime cards, framework cards, and trigger scenarios', async () => {
+  it('renders the overview and analysis panels without the legacy rule cards', async () => {
     await renderPage();
 
     expect(screen.getByText('VIX Regime')).toBeInTheDocument();
     expect(screen.getByText('VIX 25.33 · declining from 30+')).toBeInTheDocument();
-    expect(screen.getByText('#1 VIX Regime Gate')).toBeInTheDocument();
-    expect(screen.getByText('#17 Geopolitical Monitor')).toBeInTheDocument();
-    expect(screen.getByText('#31 Data Oracle')).toBeInTheDocument();
+    expect(screen.getByTestId('frameworks-panels-section')).toBeInTheDocument();
+    expect(screen.getByTestId('frameworks-ticker-bar')).toBeInTheDocument();
+    expect(screen.queryByText('#1 VIX Regime Gate')).not.toBeInTheDocument();
+    expect(screen.queryByText('#17 Geopolitical Monitor')).not.toBeInTheDocument();
+    expect(screen.queryByText('#31 Data Oracle')).not.toBeInTheDocument();
     expect(screen.queryByText('Scenario Router')).not.toBeInTheDocument();
     expect(screen.queryByText('Live Diplomatic Signals')).not.toBeInTheDocument();
     expect(screen.queryByText('DEAL / EXTENSION')).not.toBeInTheDocument();

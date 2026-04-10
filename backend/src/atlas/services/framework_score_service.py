@@ -2,31 +2,23 @@
 
 Formula (Factor_Mapping_Guide §Final Score):
   Raw Total   = (F1 x 0.20) + (F2 x 0.25) + (F3 x 0.15) + (F4 x 0.15) + (F5 x 0.20)
-  Final Score = round(Raw Total + Regime Modifier), clamped [0, 100]
+  Final Score = round(Raw Total), clamped [0, 100]
 
   Maximum raw total = 95 (all factors at 100, weights sum to 0.95).
-  The remaining 5 pts come from a CLEAR regime modifier (+5).
 
-Regime modifier (Brent crude, USD per barrel):
-  CRISIS HALT  > $110  ->  -10  cash floor 40 %
-  CAUTION      $95-$110 ->  -5  cash floor 25 %
-  CLEAR        < $95   ->  +5   cash floor 10 %
-  None (no data) -> CAUTION  (conservative fallback)
+All pure helpers (_map_action, _compute_raw_total, _compute_final_score) are
+side-effect-free and unit-testable without mocks.
 
-All pure helpers (_classify_regime, _map_action, _compute_raw_total,
-_compute_final_score) are side-effect-free and unit-testable without mocks.
-
-The ``FrameworkScoreService`` class orchestrates all five sub-services and
-the Brent price fetch concurrently via ``asyncio.gather``.  Any sub-service
-failure (missing key, network error) falls back to a neutral factor score of
-50 and records a flag message rather than aborting the entire request.
+The ``FrameworkScoreService`` class orchestrates all five sub-services
+concurrently via ``asyncio.gather``.  Any sub-service failure (missing key,
+network error) falls back to a neutral factor score of 50 and records a flag
+message rather than aborting the entire request.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, timedelta
 from typing import Final
 
 import httpx
@@ -36,7 +28,6 @@ from atlas.schemas.earnings import EarningsResponse
 from atlas.schemas.framework_score import (
     FactorBreakdown,
     FrameworkScoreResponse,
-    RegimeInfo,
 )
 from atlas.schemas.fundamental import FundamentalResponse
 from atlas.schemas.momentum import MomentumResponse
@@ -53,34 +44,13 @@ logger = logging.getLogger(__name__)
 # Framework-level weights (Factor_Mapping_Guide §Final Score)
 # ---------------------------------------------------------------------------
 
-# Each factor is scored 0-100; multiplied by its weight to contribute to
-# the raw total.  Weights deliberately sum to 0.95 — the remaining 5 pts
-# come from the CLEAR regime modifier (+5).
+# Each factor is scored 0-100; multiplied by its weight to contribute to the
+# raw total.  Weights sum to 0.95 (maximum raw total = 95).
 _W_F1: Final[float] = 0.20  # Momentum
 _W_F2: Final[float] = 0.25  # Earnings Quality
 _W_F3: Final[float] = 0.15  # Analyst Sentiment
 _W_F4: Final[float] = 0.15  # Options Flow
 _W_F5: Final[float] = 0.20  # Fundamental Quality
-
-# ---------------------------------------------------------------------------
-# Regime thresholds (USD per barrel of Brent crude)
-# ---------------------------------------------------------------------------
-
-# Brent price above this triggers CRISIS HALT regime.
-_BRENT_CRISIS_THRESHOLD: Final[float] = 110.0
-
-# Brent price at or above this (and ≤ _BRENT_CRISIS_THRESHOLD) → CAUTION.
-_BRENT_CAUTION_LOW: Final[float] = 95.0
-
-# Regime modifier constants.
-_MODIFIER_CRISIS: Final[int] = -10
-_MODIFIER_CAUTION: Final[int] = -5
-_MODIFIER_CLEAR: Final[int] = 5
-
-# Cash floor percentages per regime.
-_CASH_FLOOR_CRISIS: Final[float] = 0.40
-_CASH_FLOOR_CAUTION: Final[float] = 0.25
-_CASH_FLOOR_CLEAR: Final[float] = 0.10
 
 # Score thresholds for action map (inclusive lower bound).
 _ACTION_MAX_MIN: Final[int] = 90
@@ -92,39 +62,10 @@ _ACTION_REDUCE_FURTHER_MIN: Final[int] = 55
 # Neutral fallback score when a factor service is unavailable.
 _NEUTRAL_SCORE: Final[int] = 50
 
-# Polygon.io endpoint for Brent Crude (prior day close).
-_BRENT_SYMBOL: Final[str] = "C:BCO"
-_POLYGON_AGGS_URL: Final[str] = (
-    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
-)
-_TIMEOUT: Final[float] = 15.0
-
 
 # ---------------------------------------------------------------------------
 # Pure helpers — no I/O, no side effects
 # ---------------------------------------------------------------------------
-
-
-def _classify_regime(
-    brent_price: float | None,
-) -> tuple[str, int, float]:
-    """Return (regime_label, modifier, cash_floor_pct) from a Brent price.
-
-    Pure function — no I/O.
-
-    Rules (Factor_Mapping_Guide §Regime Modifier):
-      brent_price > $110  ->  CRISIS HALT,  -10,  40 %
-      $95 <= price <= $110  ->  CAUTION,    -5,   25 %
-      price < $95           ->  CLEAR,      +5,   10 %
-      None (no data)        ->  CAUTION (conservative fallback)
-    """
-    if brent_price is None:
-        return "CAUTION", _MODIFIER_CAUTION, _CASH_FLOOR_CAUTION
-    if brent_price > _BRENT_CRISIS_THRESHOLD:
-        return "CRISIS HALT", _MODIFIER_CRISIS, _CASH_FLOOR_CRISIS
-    if brent_price >= _BRENT_CAUTION_LOW:
-        return "CAUTION", _MODIFIER_CAUTION, _CASH_FLOOR_CAUTION
-    return "CLEAR", _MODIFIER_CLEAR, _CASH_FLOOR_CLEAR
 
 
 def _map_action(final_score: int) -> tuple[str, str]:
@@ -161,49 +102,12 @@ def _compute_raw_total(f1: int, f2: int, f3: int, f4: int, f5: int) -> float:
     return f1 * _W_F1 + f2 * _W_F2 + f3 * _W_F3 + f4 * _W_F4 + f5 * _W_F5
 
 
-def _compute_final_score(raw_total: float, modifier: int) -> int:
-    """Add the regime modifier and clamp to [0, 100].
+def _compute_final_score(raw_total: float) -> int:
+    """Clamp the raw total to [0, 100].
 
     Pure function — no I/O.
     """
-    return max(0, min(100, round(raw_total + modifier)))
-
-
-# ---------------------------------------------------------------------------
-# Brent crude price fetch (async, network-dependent)
-# ---------------------------------------------------------------------------
-
-
-async def _fetch_brent_price(
-    api_key: str,
-    client: httpx.AsyncClient,
-) -> float | None:
-    """Fetch the most recent Brent crude (C:BCO) close price from Polygon.io.
-
-    Returns None on any failure so the caller can fall back to CAUTION.
-    """
-    today = date.today()
-    from_date = (today - timedelta(days=10)).isoformat()
-    to_date = today.isoformat()
-    url = _POLYGON_AGGS_URL.format(
-        ticker=_BRENT_SYMBOL,
-        from_date=from_date,
-        to_date=to_date,
-    )
-    try:
-        resp = await client.get(
-            url,
-            params={"adjusted": "true", "sort": "desc", "limit": 1, "apiKey": api_key},
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("results", [])
-        if results:
-            return float(results[0]["c"])
-    except Exception:
-        logger.warning("Failed to fetch Brent crude price from Polygon.io", exc_info=True)
-    return None
+    return max(0, min(100, round(raw_total)))
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +168,10 @@ class FrameworkScoreService:
                 self._fetch_f3(ticker),
                 self._fetch_f4(ticker),
                 self._fetch_f5(ticker),
-                _fetch_brent_price(self._polygon_key, client),
                 return_exceptions=True,
             )
 
-        f1_result, f2_result, f3_result, f4_result, f5_result, brent_result = results
+        f1_result, f2_result, f3_result, f4_result, f5_result = results
 
         flags: list[str] = []
 
@@ -295,12 +198,6 @@ class FrameworkScoreService:
             f5_blocked = True
             flags.append("F5 HARD BLOCK: Altman Z-Score below 1.8 — no new capital.")
 
-        # --- Regime ---
-        brent_price = brent_result if isinstance(brent_result, float) else None
-        if not isinstance(brent_result, float) and brent_result is not None:
-            flags.append("Brent crude price unavailable — defaulting to CAUTION regime.")
-        regime_label, modifier, cash_floor_pct = _classify_regime(brent_price)
-
         # --- Assemble factor breakdowns ---
         factor_meta: list[tuple[str, str, int, float, str, bool]] = [
             ("f1", "Momentum", f1_score, _W_F1, f1_grade, f1_ok),
@@ -324,19 +221,13 @@ class FrameworkScoreService:
 
         # --- Final calculation ---
         raw_total = round(_compute_raw_total(f1_score, f2_score, f3_score, f4_score, f5_score), 4)
-        final_score = _compute_final_score(raw_total, modifier)
+        final_score = _compute_final_score(raw_total)
         action, action_tone = _map_action(final_score)
 
         return FrameworkScoreResponse(
             ticker=ticker.upper(),
             factors=factors,
             raw_total=raw_total,
-            regime=RegimeInfo(
-                regime=regime_label,
-                brent_price=brent_price,
-                modifier=modifier,
-                cash_floor_pct=cash_floor_pct,
-            ),
             final_score=final_score,
             action=action,
             action_tone=action_tone,

@@ -5,10 +5,9 @@ the deterministic pure functions (no I/O) so the suite runs without any
 network calls or API keys.
 
 Pure functions under test:
-  _classify_regime   — Brent price → (regime, modifier, cash_floor_pct)
   _map_action        — final_score → (action, action_tone)
   _compute_raw_total — (f1,f2,f3,f4,f5) → weighted sum (max 95)
-  _compute_final_score — (raw_total, modifier) → clamped int [0,100]
+  _compute_final_score — raw_total → clamped int [0,100]
 """
 
 from __future__ import annotations
@@ -16,69 +15,10 @@ from __future__ import annotations
 import pytest
 
 from atlas.services.framework_score_service import (
-    _classify_regime,
     _compute_final_score,
     _compute_raw_total,
     _map_action,
 )
-
-# ---------------------------------------------------------------------------
-# _classify_regime
-# ---------------------------------------------------------------------------
-
-
-class TestClassifyRegime:
-    """Brent crude price → (regime, modifier, cash_floor_pct)."""
-
-    def test_crisis_halt_above_110(self) -> None:
-        regime, modifier, cash_floor = _classify_regime(115.0)
-        assert regime == "CRISIS HALT"
-        assert modifier == -10
-        assert cash_floor == pytest.approx(0.40)
-
-    def test_crisis_halt_at_110_01(self) -> None:
-        regime, modifier, _ = _classify_regime(110.01)
-        assert regime == "CRISIS HALT"
-        assert modifier == -10
-
-    def test_caution_at_110_exactly(self) -> None:
-        """Boundary: $110 is the last CAUTION point (not CRISIS)."""
-        regime, modifier, cash_floor = _classify_regime(110.0)
-        assert regime == "CAUTION"
-        assert modifier == -5
-        assert cash_floor == pytest.approx(0.25)
-
-    def test_caution_mid_band(self) -> None:
-        regime, modifier, cash_floor = _classify_regime(100.0)
-        assert regime == "CAUTION"
-        assert modifier == -5
-        assert cash_floor == pytest.approx(0.25)
-
-    def test_caution_at_95_exactly(self) -> None:
-        """Boundary: $95 is the first CAUTION point (not CLEAR)."""
-        regime, modifier, cash_floor = _classify_regime(95.0)
-        assert regime == "CAUTION"
-        assert modifier == -5
-        assert cash_floor == pytest.approx(0.25)
-
-    def test_clear_just_below_95(self) -> None:
-        regime, modifier, cash_floor = _classify_regime(94.99)
-        assert regime == "CLEAR"
-        assert modifier == 5
-        assert cash_floor == pytest.approx(0.10)
-
-    def test_clear_far_below_95(self) -> None:
-        regime, modifier, _ = _classify_regime(60.0)
-        assert regime == "CLEAR"
-        assert modifier == 5
-
-    def test_none_brent_defaults_to_caution(self) -> None:
-        """No live Brent data → conservative fallback to CAUTION."""
-        regime, modifier, cash_floor = _classify_regime(None)
-        assert regime == "CAUTION"
-        assert modifier == -5
-        assert cash_floor == pytest.approx(0.25)
-
 
 # ---------------------------------------------------------------------------
 # _map_action
@@ -181,36 +121,24 @@ class TestComputeRawTotal:
 
 
 class TestComputeFinalScore:
-    """raw_total + modifier → clamped int [0, 100]."""
+    """raw_total → clamped int [0, 100]."""
 
-    def test_typical_clear_regime(self) -> None:
-        # 83.6 + 5 = 88.6 → rounds to 89
-        assert _compute_final_score(83.60, 5) == 89
-
-    def test_caution_regime(self) -> None:
-        # 83.6 - 5 = 78.6 → rounds to 79
-        assert _compute_final_score(83.60, -5) == 79
-
-    def test_crisis_halt_regime(self) -> None:
-        # 83.6 - 10 = 73.6 → rounds to 74
-        assert _compute_final_score(83.60, -10) == 74
+    def test_typical_score(self) -> None:
+        # 83.6 → rounds to 84
+        assert _compute_final_score(83.60) == 84
 
     def test_clamp_at_100(self) -> None:
-        # 95 + 5 = 100 → 100
-        assert _compute_final_score(95.0, 5) == 100
+        assert _compute_final_score(100.0) == 100
 
     def test_clamp_at_0(self) -> None:
-        # 0 - 10 = -10 → clamped to 0
-        assert _compute_final_score(0.0, -10) == 0
+        assert _compute_final_score(0.0) == 0
 
-    def test_max_possible_score_is_100(self) -> None:
-        """Perfect score on all factors in CLEAR regime gives exactly 100."""
+    def test_max_possible_score_is_95(self) -> None:
+        """Perfect score on all factors gives 95 (weights sum to 0.95)."""
         raw = _compute_raw_total(100, 100, 100, 100, 100)  # 95.0
-        final = _compute_final_score(raw, 5)  # 95 + 5 = 100
-        assert final == 100
+        final = _compute_final_score(raw)  # 95
+        assert final == 95
 
-    def test_rounding_half_up(self) -> None:
-        # 77.5 + 5 = 82.5 → rounds to 83 (Python round ties-to-even = 82, but
-        # we use round() which is banker's rounding; 82.5 → 82 in Python3).
-        # Testing a non-tie case to avoid ambiguity.
-        assert _compute_final_score(77.6, 5) == 83
+    def test_rounding(self) -> None:
+        # 82.6 → rounds to 83
+        assert _compute_final_score(82.6) == 83

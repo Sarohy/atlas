@@ -2,8 +2,8 @@
 
 GET /api/v1/framework-score/{ticker}
 
-Aggregates F1-F5 scores using the Factor_Mapping_Guide weightings, adds the
-Brent-crude regime modifier, and returns the complete Framework Score response.
+Aggregates F1-F5 scores using the Factor_Mapping_Guide weightings and returns
+the complete Framework Score response.
 
 Returns 503 when the minimum required API key (POLYGON_API_KEY) is not set.
 Other factor services degrade gracefully to a neutral score of 50 when their
@@ -24,20 +24,18 @@ async def get_framework_score(ticker: str) -> FrameworkScoreResponse:
     """Compute the complete ATLAS Framework Score for a single ticker.
 
     Aggregates five factor scores (F1-F5) with their Factor_Mapping_Guide
-    weightings, fetches the current Brent crude price to determine the regime
-    modifier, and returns:
+    weightings and returns:
 
     - Per-factor breakdowns (score, weight, contribution, grade)
-    - Regime info (label, Brent price, modifier, cash floor)
-    - Raw total (weighted sum before modifier, max 95)
-    - Final score (raw_total + modifier, clamped 0-100)
+    - Raw total (weighted sum, max 95)
+    - Final score (raw_total clamped 0-100)
     - Recommended action (MAXIMUM POSITION / HOLD / ADD / REDUCE / EXIT)
     - F5 hard block flag (Altman Z < 1.8)
     - Human-readable flags for any degraded factors
 
     Returns 503 when POLYGON_API_KEY is not configured (required for F1
-    Momentum and Brent crude price).  All other factor services degrade to
-    a neutral score of 50 when their API keys are absent.
+    Momentum).  All other factor services degrade to a neutral score of 50
+    when their API keys are absent.
     """
     settings = get_settings()
     if not settings.polygon_api_key:

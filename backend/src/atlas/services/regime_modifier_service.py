@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Final
+from typing import Any, Final
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,11 @@ _AV_BRENT_URL: Final[str] = "https://www.alphavantage.co/query"
 # CBOE VIX index — fetched via GLOBAL_QUOTE for the most recent value.
 # Returns JSON: {"Global Quote": {"05. price": "22.50", ...}}
 _AV_GLOBAL_QUOTE_URL: Final[str] = "https://www.alphavantage.co/query"
+
+# Yahoo Finance chart API — fallback for VIX when Alpha Vantage returns empty.
+# Returns JSON: {"chart": {"result": [{"meta": {"regularMarketPrice": 19.99, ...}}]}}
+# %5E is URL-encoded '^'.
+_YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"
 
 # Number of most-recent Brent data points needed (2 for consecutive check).
 _BRENT_NUM_CLOSES: Final[int] = 2
@@ -116,6 +121,31 @@ _OUTPUT_NONE: Final[str] = ""
 # ---------------------------------------------------------------------------
 # Pure helpers — no I/O, no side effects, fully unit-testable
 # ---------------------------------------------------------------------------
+
+
+def _parse_yahoo_vix_payload(payload: dict) -> float | None:  # type: ignore[type-arg]
+    """Extract the VIX level from a Yahoo Finance chart API response.
+
+    Reads ``chart.result[0].meta.regularMarketPrice``.
+    Returns None if the key is absent or the payload is malformed.
+
+    Pure function — no I/O.
+    """
+    try:
+        chart = payload.get("chart") or {}
+        results_raw = chart.get("result")
+        if not results_raw:
+            return None
+        first = results_raw[0]
+        if not isinstance(first, dict):
+            return None
+        meta = first.get("meta") or {}
+        if not isinstance(meta, dict):
+            return None
+        price = meta.get("regularMarketPrice")
+        return float(price) if price is not None else None
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 def _determine_rule(
@@ -260,25 +290,39 @@ class RegimeModifierService:
         self,
         ticker: str,
         active_war: bool,
+        provided_base_score: int | None = None,
     ) -> RegimeModifierResponse:
         """Return the regime-adjusted score and cash guidance for ``ticker``.
 
-        Runs three concurrent tasks:
+        Runs two or three concurrent tasks:
           1. Fetch Brent crude daily closes from Alpha Vantage
           2. Fetch VIX latest value from Alpha Vantage
-          3. Compute Framework Score for the ticker
+          3. Compute Framework Score for the ticker — skipped when
+             ``provided_base_score`` is supplied by the caller (Frontend F1
+             cache) to avoid redundant computation and score skew.
         """
         async with httpx.AsyncClient() as client:
             brent_task = self._fetch_brent(client)
             vix_task = self._fetch_vix(client)
-            fw_task = self._fw_service.compute_framework_score(ticker)
 
-            brent_closes, vix_value_raw, fw_result = await asyncio.gather(
-                brent_task,
-                vix_task,
-                fw_task,
-                return_exceptions=True,
-            )
+            brent_closes: Any
+            vix_value_raw: Any
+            fw_result: Any
+
+            if provided_base_score is None:
+                # Caller has no cached score — fetch it concurrently.
+                brent_closes, vix_value_raw, fw_result = await asyncio.gather(
+                    brent_task,
+                    vix_task,
+                    self._fw_service.compute_framework_score(ticker),
+                    return_exceptions=True,
+                )
+            else:
+                # Use caller-supplied score; only fetch market data.
+                _market = await asyncio.gather(brent_task, vix_task, return_exceptions=True)
+                brent_closes = _market[0]
+                vix_value_raw = _market[1]
+                fw_result = provided_base_score
 
         # ── Extract Brent price and consecutive-close flag ─────────────────
         brent_price: float | None = None
@@ -304,7 +348,10 @@ class RegimeModifierService:
             )
 
         # ── Extract base Framework Score ──────────────────────────────────
-        if isinstance(fw_result, FrameworkScoreResponse):
+        if isinstance(fw_result, int):
+            # Caller-supplied score passed through directly.
+            base_score = fw_result
+        elif isinstance(fw_result, FrameworkScoreResponse):
             base_score = fw_result.final_score
         else:
             logger.error(
@@ -389,10 +436,13 @@ class RegimeModifierService:
             return []
 
     async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:
-        """Fetch the latest VIX index value from Alpha Vantage GLOBAL_QUOTE.
+        """Fetch the latest VIX level.
 
-        Returns the close price as a float, or None on failure.
+        Tries Alpha Vantage GLOBAL_QUOTE first; falls back to Yahoo Finance
+        chart API when Alpha Vantage returns an empty quote (plan limitation).
+        Returns None if both sources fail.
         """
+        # ── Alpha Vantage (primary) ───────────────────────────────────────
         try:
             response = await client.get(
                 _AV_GLOBAL_QUOTE_URL,
@@ -405,7 +455,24 @@ class RegimeModifierService:
             price_str: str = quote.get("05. price", "")
             if price_str:
                 return float(price_str)
-            return None
+            logger.warning("Alpha Vantage VIX returned empty quote; using Yahoo fallback")
         except Exception:
-            logger.exception("Alpha Vantage VIX fetch failed")
+            logger.warning("Alpha Vantage VIX fetch failed; using Yahoo fallback")
+
+        # ── Yahoo Finance chart API (fallback) ────────────────────────────
+        try:
+            yf_response = await client.get(
+                _YAHOO_VIX_URL,
+                params={"interval": "1d", "range": "5d"},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10.0,
+            )
+            yf_response.raise_for_status()
+            yf_payload: dict = yf_response.json()  # type: ignore[type-arg]
+            vix = _parse_yahoo_vix_payload(yf_payload)
+            if vix is None:
+                logger.warning("Yahoo Finance VIX payload had no price")
+            return vix
+        except Exception:
+            logger.exception("Yahoo Finance VIX fallback failed")
             return None

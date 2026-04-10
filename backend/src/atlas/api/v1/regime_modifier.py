@@ -29,6 +29,7 @@ router = APIRouter(prefix="/regime-modifier", tags=["regime-modifier"])
 async def get_regime_modifier(
     ticker: str,
     active_war: bool = False,
+    base_score: int | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> RegimeModifierResponse:
     """Apply market-regime rules to the Framework Score for a single ticker.
@@ -70,4 +71,8 @@ async def get_regime_modifier(
         sec_api_key=settings.sec_api_key or "",
         session=session,
     )
-    return await service.compute_regime_modifier(normalised, active_war)
+    return await service.compute_regime_modifier(
+        normalised,
+        active_war,
+        provided_base_score=base_score,
+    )

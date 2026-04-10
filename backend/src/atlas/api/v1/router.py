@@ -10,6 +10,7 @@ from atlas.api.v1 import (
     framework_score,
     fundamental,
     health,
+    market_conditions,
     momentum,
     options_flow,
     portfolio,
@@ -34,3 +35,4 @@ router.include_router(options_flow.router)
 router.include_router(fundamental.router)
 router.include_router(framework_score.router)
 router.include_router(regime_modifier.router)
+router.include_router(market_conditions.router)

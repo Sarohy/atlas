@@ -16,6 +16,7 @@ export const handlers = [
         ticker: 'AAPL',
         company_name: 'Apple Inc.',
         shares: '100',
+        position_value: 100000,
         created_at: '2026-04-07T00:00:00Z',
         updated_at: '2026-04-07T00:00:00Z',
       },
@@ -313,6 +314,15 @@ export const handlers = [
       },
       f3_score: 100,
       f3_grade: 'STRONG BUY',
+    });
+  }),
+
+  // ── Market Conditions ─────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/market/conditions`, () => {
+    return HttpResponse.json({
+      brent_price: 97.5,
+      brent_prev_price: 96.8,
+      vix_value: 27.3,
     });
   }),
 

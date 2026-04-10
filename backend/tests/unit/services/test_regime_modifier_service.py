@@ -18,6 +18,7 @@ import pytest
 from atlas.services.regime_modifier_service import (
     _compute_regime_output,
     _determine_rule,
+    _parse_yahoo_vix_payload,
 )
 
 # ---------------------------------------------------------------------------
@@ -321,3 +322,43 @@ class TestActiveWarNoMarketData:
         _, _, _, min_usd, max_usd, _ = _compute_regime_output(1, 57, position)
         assert min_usd == pytest.approx(3500.0)
         assert max_usd == pytest.approx(4000.0)
+
+
+# ---------------------------------------------------------------------------
+# _parse_yahoo_vix_payload — pure parser for Yahoo Finance chart API response
+# ---------------------------------------------------------------------------
+
+
+class TestParseYahooVixPayload:
+    """Verify VIX extraction from Yahoo Finance chart API payloads."""
+
+    def _make_payload(self, price: float | None) -> dict:
+        meta: dict = {"symbol": "^VIX"}
+        if price is not None:
+            meta["regularMarketPrice"] = price
+        return {"chart": {"result": [{"meta": meta}]}}
+
+    def test_returns_float_from_valid_payload(self) -> None:
+        payload = self._make_payload(19.99)
+        assert _parse_yahoo_vix_payload(payload) == pytest.approx(19.99)
+
+    def test_returns_none_when_result_list_is_empty(self) -> None:
+        payload: dict = {"chart": {"result": []}}
+        assert _parse_yahoo_vix_payload(payload) is None
+
+    def test_returns_none_when_result_is_null(self) -> None:
+        payload: dict = {"chart": {"result": None}}
+        assert _parse_yahoo_vix_payload(payload) is None
+
+    def test_returns_none_when_price_key_missing(self) -> None:
+        payload = self._make_payload(None)
+        assert _parse_yahoo_vix_payload(payload) is None
+
+    def test_returns_none_on_empty_dict(self) -> None:
+        assert _parse_yahoo_vix_payload({}) is None
+
+    def test_handles_integer_price(self) -> None:
+        payload = self._make_payload(20.0)
+        result = _parse_yahoo_vix_payload(payload)
+        assert isinstance(result, float)
+        assert result == pytest.approx(20.0)

@@ -97,6 +97,14 @@ describe('RegimeModifierPanel', () => {
     expect(screen.getByTestId('regime-cash-pct')).toHaveTextContent('35%');
   });
 
+  it('shows USD cash guidance when ticker position value is available', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('regime-content'));
+
+    expect(screen.getByTestId('regime-cash-usd')).toHaveTextContent('$25,000');
+    expect(screen.getByTestId('regime-cash-usd')).toHaveTextContent('$35,000');
+  });
+
   it('shows output text instruction', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('regime-content'));

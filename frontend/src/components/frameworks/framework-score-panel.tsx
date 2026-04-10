@@ -28,6 +28,8 @@ const ACTION_TONE_CLASS: Record<string, string> = {
 type FrameworkScorePanelProps = {
   /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
   ticker: string;
+  /** Opens the detail-card overlay for the current framework selection. */
+  onPreviewDetails: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -41,13 +43,39 @@ type FrameworkScorePanelProps = {
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
  */
-export function FrameworkScorePanel({ ticker }: FrameworkScorePanelProps) {
+export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScorePanelProps) {
   const { data, isLoading, isError, error } = useFrameworkScore(ticker);
 
   return (
-    <section className="atlas-frameworks-panel atlas-fws-panel" data-testid="framework-score-panel">
+    <section
+      className="atlas-frameworks-panel atlas-fws-panel atlas-fws-panel--half-width"
+      data-testid="framework-score-panel"
+    >
+      <div className="atlas-fws-hover-overlay" data-testid="framework-score-hover-overlay">
+        <button
+          aria-label="Preview framework score details"
+          className="atlas-fws-hover-eye"
+          type="button"
+          onClick={onPreviewDetails}
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.75}
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      </div>
+
       <header className="atlas-frameworks-panel-header atlas-fws-panel-header">
-        <h2 className="atlas-frameworks-panel-title">Framework Score</h2>
+        <h2 className="atlas-frameworks-panel-title">Framework 1</h2>
         <span className="atlas-fws-subtitle">F1 · F2 · F3 · F4 · F5 → Conviction</span>
       </header>
 

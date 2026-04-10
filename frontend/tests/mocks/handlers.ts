@@ -16,6 +16,7 @@ export const handlers = [
         ticker: 'AAPL',
         company_name: 'Apple Inc.',
         shares: '100',
+        position_value: 100000,
         created_at: '2026-04-07T00:00:00Z',
         updated_at: '2026-04-07T00:00:00Z',
       },
@@ -169,6 +170,247 @@ export const handlers = [
 
     return HttpResponse.json({
       message: 'Logout successful.',
+    });
+  }),
+
+  // ── Momentum ──────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/momentum/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      sector_etf: 'XLK',
+      rsi: { value: 62.5, raw_score: 70, score: 14, max_score: 20 },
+      macd: {
+        macd_line: 1.23,
+        signal_line: 0.98,
+        histogram: 0.25,
+        raw_score: 100,
+        score: 15,
+        max_score: 15,
+      },
+      ma_alignment: {
+        ma_20: 175.0,
+        ma_50: 170.0,
+        ma_200: 160.0,
+        label: 'ABOVE_ALL',
+        raw_score: 100,
+        score: 20,
+        max_score: 20,
+      },
+      week_52_position: {
+        high_52w: 200.0,
+        low_52w: 140.0,
+        position_pct: 75.0,
+        raw_score: 80,
+        score: 12,
+        max_score: 15,
+      },
+      performance: {
+        perf_1m: 7.5,
+        perf_6m: 22.0,
+        raw_score_1m: 85,
+        raw_score_6m: 70,
+        score_1m: 13,
+        score_6m: 7,
+        score: 20,
+        max_score: 25,
+      },
+      sector_momentum: {
+        sector_etf: 'XLK',
+        ticker_perf_6m: 12.0,
+        sector_perf_6m: 6.0,
+        relative_perf_6m: 6.0,
+        raw_score: 100,
+        score: 5,
+        max_score: 5,
+      },
+      f1_score: 86,
+      f1_grade: 'STRONG BUY',
+    });
+  }),
+
+  // ── Earnings ──────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/earnings/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      revenue_growth: {
+        yoy_pct: 65.0,
+        raw_score: 90,
+        score: 27,
+        max_score: 30,
+      },
+      eps_beats: {
+        beats_in_3: 3,
+        quarters_checked: 3,
+        raw_score: 100,
+        score: 20,
+        max_score: 20,
+      },
+      guidance: {
+        guidance_label: 'RAISE_FULL_YEAR',
+        transcript_quarter: '2024Q3',
+        raw_score: 100,
+        score: 20,
+        max_score: 20,
+      },
+      margin_trajectory: {
+        gross_margins: [43.0, 44.0, 45.0],
+        margin_change_pts: 2.0,
+        raw_score: 80,
+        score: 12,
+        max_score: 15,
+      },
+      backlog_btb: {
+        backlog_label: 'EXPLICIT_MULTI_QUARTER',
+        raw_score: 100,
+        score: 15,
+        max_score: 15,
+      },
+      f2_score: 94,
+      f2_grade: 'STRONG BUY',
+    });
+  }),
+
+  http.get(`${BASE}/api/v1/analyst/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      consensus_rating: {
+        buy_count: 28,
+        hold_count: 8,
+        sell_count: 2,
+        total_analysts: 38,
+        buy_pct: 73.7,
+        label: 'STRONG BUY',
+        score: 20,
+        max_score: 20,
+      },
+      pt_upside: {
+        current_price: 182.5,
+        consensus_pt: 230.0,
+        upside_pct: 26.0,
+        score: 20,
+        max_score: 20,
+      },
+      pt_direction: {
+        current_consensus_pt: 230.0,
+        prior_consensus_pt: 210.0,
+        direction_pct: 9.5,
+        score: 20,
+        max_score: 20,
+      },
+      analyst_coverage: {
+        num_analysts: 38,
+        score: 20,
+        max_score: 20,
+      },
+      recent_upgrades: {
+        upgrades: 5,
+        downgrades: 1,
+        net_upgrades: 4,
+        score: 20,
+        max_score: 20,
+      },
+      f3_score: 100,
+      f3_grade: 'STRONG BUY',
+    });
+  }),
+
+  // ── Market Conditions ─────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/market/conditions`, () => {
+    return HttpResponse.json({
+      brent_price: 97.5,
+      brent_prev_price: 96.8,
+      vix_value: 27.3,
+    });
+  }),
+
+  // ── Regime Modifier ──────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/regime-modifier/:ticker`, ({ params, request }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    const url = new URL(request.url);
+    const activeWar = url.searchParams.get('active_war') === 'true';
+    // Rule 1 triggers when war is active; otherwise Rule 2 (Brent $97.50 + VIX 27.30)
+    const ruleTriggered = activeWar ? 1 : 2;
+    const baseScore = 79;
+    const adjustedScore = activeWar ? baseScore - 10 : baseScore - 5;
+    return HttpResponse.json({
+      ticker,
+      active_war: activeWar,
+      brent_price: 97.5,
+      vix_value: 27.3,
+      base_score: baseScore,
+      adjusted_score: adjustedScore,
+      rule_triggered: ruleTriggered,
+      min_cash_pct: activeWar ? 0.35 : 0.25,
+      max_cash_pct: activeWar ? 0.4 : 0.35,
+      min_cash_usd: null,
+      max_cash_usd: null,
+      output_text: activeWar
+        ? 'must stay in cash\ncannot be touched\nfor any trade'
+        : 'must stay in cash',
+    });
+  }),
+
+  // ── Framework Score ───────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/framework-score/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      factors: [
+        {
+          key: 'f1',
+          name: 'Momentum',
+          score: 86,
+          weight: 0.2,
+          contribution: 17.2,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f2',
+          name: 'Earnings Quality',
+          score: 94,
+          weight: 0.25,
+          contribution: 23.5,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f3',
+          name: 'Analyst Sentiment',
+          score: 100,
+          weight: 0.15,
+          contribution: 15.0,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f4',
+          name: 'Options Flow',
+          score: 82,
+          weight: 0.15,
+          contribution: 12.3,
+          grade: 'STRONG BUY',
+          available: true,
+        },
+        {
+          key: 'f5',
+          name: 'Fundamental Quality',
+          score: 78,
+          weight: 0.2,
+          contribution: 15.6,
+          grade: 'BUY',
+          available: true,
+        },
+      ],
+      raw_total: 83.6,
+      final_score: 79,
+      action: 'HOLD',
+      action_tone: 'tone-yellow',
+      f5_blocked: false,
+      flags: [],
     });
   }),
 ];

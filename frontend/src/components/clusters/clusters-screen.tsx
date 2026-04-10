@@ -15,7 +15,6 @@ import {
   type ClusterCreate,
   type ClusterResponse,
 } from '@/lib/schemas/cluster';
-import type { ClustersScreenData } from '@/lib/api/clusters-shell';
 
 // ─── Pre-set palette swatches ─────────────────────────────────────────────────
 

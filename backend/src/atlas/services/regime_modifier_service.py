@@ -498,11 +498,28 @@ class RegimeModifierService:
     async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:
         """Fetch the latest VIX level.
 
-        Tries Alpha Vantage GLOBAL_QUOTE first; falls back to Yahoo Finance
-        chart API when Alpha Vantage returns an empty quote (plan limitation).
+        Tries Yahoo Finance first; falls back to Alpha Vantage GLOBAL_QUOTE
+        when Yahoo Finance fails or returns no price.
         Returns None if both sources fail.
         """
-        # ── Alpha Vantage (primary) ───────────────────────────────────────
+        # ── Yahoo Finance (primary) ───────────────────────────────────────
+        try:
+            yf_response = await client.get(
+                _YAHOO_VIX_URL,
+                params={"interval": "1d", "range": "5d"},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10.0,
+            )
+            yf_response.raise_for_status()
+            yf_payload: dict = yf_response.json()  # type: ignore[type-arg]
+            vix = _parse_yahoo_vix_payload(yf_payload)
+            if vix is not None:
+                return vix
+            logger.warning("Yahoo Finance VIX payload had no price; using Alpha Vantage fallback")
+        except Exception:
+            logger.warning("Yahoo Finance VIX fetch failed; using Alpha Vantage fallback")
+
+        # ── Alpha Vantage (fallback) ──────────────────────────────────────
         try:
             response = await client.get(
                 _AV_GLOBAL_QUOTE_URL,
@@ -515,24 +532,7 @@ class RegimeModifierService:
             price_str: str = quote.get("05. price", "")
             if price_str:
                 return float(price_str)
-            logger.warning("Alpha Vantage VIX returned empty quote; using Yahoo fallback")
+            logger.warning("Alpha Vantage VIX returned empty quote")
         except Exception:
-            logger.warning("Alpha Vantage VIX fetch failed; using Yahoo fallback")
-
-        # ── Yahoo Finance chart API (fallback) ────────────────────────────
-        try:
-            yf_response = await client.get(
-                _YAHOO_VIX_URL,
-                params={"interval": "1d", "range": "5d"},
-                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-                timeout=10.0,
-            )
-            yf_response.raise_for_status()
-            yf_payload: dict = yf_response.json()  # type: ignore[type-arg]
-            vix = _parse_yahoo_vix_payload(yf_payload)
-            if vix is None:
-                logger.warning("Yahoo Finance VIX payload had no price")
-            return vix
-        except Exception:
-            logger.exception("Yahoo Finance VIX fallback failed")
-            return None
+            logger.exception("Alpha Vantage VIX fallback failed")
+        return None

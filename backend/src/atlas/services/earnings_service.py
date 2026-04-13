@@ -112,15 +112,22 @@ _GUIDANCE_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
     (re.compile(r"increas\w*\s+(?:\S+\s+){0,4}guidance", re.I), "RAISE_FULL_YEAR"),
     (re.compile(r"rais\w*\s+(?:\S+\s+){0,4}outlook", re.I), "RAISE_FULL_YEAR"),
     (re.compile(r"upward.{0,15}guidance", re.I), "RAISE_FULL_YEAR"),
+    # RAISE_FULL_YEAR — first-time annual target issuance with explicit dollar figure
+    # e.g. "we expect to generate over $1,000,000,000 in revenue this year"
+    (re.compile(r"expect\w*\s+(?:\w+\s+){0,6}(?:over|more than|exceed|above)\s+\$[\d,]+", re.I), "RAISE_FULL_YEAR"),
+    (re.compile(r"(?:full.?year|annual|fiscal.?year)\s+(?:\w+\s+){0,4}(?:revenue|target|outlook).{0,40}\$[\d,]+", re.I), "RAISE_FULL_YEAR"),
+    (re.compile(r"expect\w*\s+(?:\w+\s+){0,6}(?:billion|million).{0,30}(?:this year|full.?year)", re.I), "RAISE_FULL_YEAR"),
     # LOWER — explicitly lowering guidance
     (re.compile(r"lower\w*\s+(?:\S+\s+){0,4}guidance", re.I), "LOWER"),
     (re.compile(r"reduc\w+\s+(?:\S+\s+){0,4}guidance", re.I), "LOWER"),
     (re.compile(r"cut\s+(?:\S+\s+){0,4}guidance", re.I), "LOWER"),
     (re.compile(r"lower\w*\s+(?:\S+\s+){0,4}outlook", re.I), "LOWER"),
     (re.compile(r"revis\w+\s+down\w*\s+(?:\S+\s+){0,4}guidance", re.I), "LOWER"),
-    # NARROW_RANGE — narrowing the guidance range
-    (re.compile(r"narrow\w*\s+(?:\S+\s+){0,4}guidance", re.I), "NARROW_RANGE"),
-    (re.compile(r"narrow\w*\s+(?:\S+\s+){0,4}range", re.I), "NARROW_RANGE"),
+    # NARROW_RANGE — narrowing the guidance range (verb forms only; excludes
+    # "narrower than our guidance range" which describes EPS performance, not
+    # a guidance action)
+    (re.compile(r"\bnarrow(?:ing|ed|s)\b\s+(?:\S+\s+){0,4}guidance", re.I), "NARROW_RANGE"),
+    (re.compile(r"\bnarrow(?:ing|ed|s)\b\s+(?:our\s+|the\s+)?(?:\w+\s+){0,2}range", re.I), "NARROW_RANGE"),
     (re.compile(r"tighten\w*\s+(?:\S+\s+){0,4}guidance", re.I), "NARROW_RANGE"),
     # MAINTAIN — reaffirming guidance
     (re.compile(r"reaffirm\w*\s+(?:\S+\s+){0,4}guidance", re.I), "MAINTAIN"),

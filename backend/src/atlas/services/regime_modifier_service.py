@@ -49,6 +49,11 @@ _AV_GLOBAL_QUOTE_URL: Final[str] = "https://www.alphavantage.co/query"
 # %5E is URL-encoded '^'.
 _YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"
 
+# Yahoo Finance chart API — primary source for Brent crude (BZ=F futures).
+# Returns current price via meta.regularMarketPrice and previous close via
+# meta.chartPreviousClose. More up-to-date than Alpha Vantage's EIA dataset.
+_YAHOO_BRENT_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/BZ%3DF"
+
 # Number of most-recent Brent data points needed (2 for consecutive check).
 _BRENT_NUM_CLOSES: Final[int] = 2
 
@@ -146,6 +151,38 @@ def _parse_yahoo_vix_payload(payload: dict) -> float | None:  # type: ignore[typ
         return float(price) if price is not None else None
     except (TypeError, ValueError, IndexError):
         return None
+
+
+def _parse_yahoo_brent_payload(payload: dict) -> list[float]:  # type: ignore[type-arg]
+    """Extract up to two Brent closes from a Yahoo Finance chart API response.
+
+    Returns [regularMarketPrice, chartPreviousClose] (most-recent first),
+    omitting any value that is None or unparseable.
+    Returns [] if the payload is malformed.
+
+    Pure function — no I/O.
+    """
+    try:
+        chart = payload.get("chart") or {}
+        results_raw = chart.get("result")
+        if not results_raw:
+            return []
+        first = results_raw[0]
+        if not isinstance(first, dict):
+            return []
+        meta = first.get("meta") or {}
+        if not isinstance(meta, dict):
+            return []
+        closes: list[float] = []
+        current = meta.get("regularMarketPrice")
+        if current is not None:
+            closes.append(float(current))
+        prev = meta.get("chartPreviousClose")
+        if prev is not None:
+            closes.append(float(prev))
+        return closes
+    except (TypeError, ValueError, IndexError):
+        return []
 
 
 def _determine_rule(
@@ -408,11 +445,34 @@ class RegimeModifierService:
         )
 
     async def _fetch_brent(self, client: httpx.AsyncClient) -> list[float]:
-        """Fetch the two most recent Brent crude daily closes from Alpha Vantage.
+        """Fetch the two most recent Brent crude closes.
 
-        Calls function=BRENT (daily). Returns a list of up to 2 floats
-        in descending date order (most recent first). Returns [] on failure.
+        Tries Yahoo Finance (BZ=F) first — returns live intraday price plus
+        the previous session close, so the data is always current.
+        Falls back to Alpha Vantage function=BRENT (daily EIA dataset) when
+        Yahoo Finance fails; that dataset can lag by ~1-2 weeks but is the
+        only alternative.
+
+        Returns a list of up to 2 floats in descending date order
+        (most recent first). Returns [] if both sources fail.
         """
+        # ── Yahoo Finance (primary) ───────────────────────────────────────
+        try:
+            yf_response = await client.get(
+                _YAHOO_BRENT_URL,
+                params={"interval": "1d", "range": "5d"},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10.0,
+            )
+            yf_response.raise_for_status()
+            closes = _parse_yahoo_brent_payload(yf_response.json())
+            if closes:
+                return closes
+            logger.warning("Yahoo Finance Brent payload had no price; using Alpha Vantage fallback")
+        except Exception:
+            logger.warning("Yahoo Finance Brent fetch failed; using Alpha Vantage fallback")
+
+        # ── Alpha Vantage (fallback) ──────────────────────────────────────
         try:
             response = await client.get(
                 _AV_BRENT_URL,
@@ -423,16 +483,16 @@ class RegimeModifierService:
             payload: dict = response.json()  # type: ignore[type-arg]
             data: list[dict] = payload.get("data", [])  # type: ignore[type-arg]
             # Alpha Vantage returns entries newest-first; skip "." values
-            closes: list[float] = []
+            closes_av: list[float] = []
             for entry in data:
                 raw = entry.get("value", ".")
                 if raw != ".":
-                    closes.append(float(raw))
-                if len(closes) >= _BRENT_NUM_CLOSES:
+                    closes_av.append(float(raw))
+                if len(closes_av) >= _BRENT_NUM_CLOSES:
                     break
-            return closes
+            return closes_av
         except Exception:
-            logger.exception("Alpha Vantage Brent fetch failed")
+            logger.exception("Alpha Vantage Brent fallback failed")
             return []
 
     async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:

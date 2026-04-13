@@ -5,7 +5,7 @@ This is a ticker-independent snapshot used by the frontend to compute
 the regime modifier locally, avoiding a per-ticker round-trip.
 
 Sources:
-  Brent crude — Alpha Vantage (function=BRENT, daily)
+  Brent crude — Yahoo Finance BZ=F (primary) / Alpha Vantage BRENT daily (fallback)
   VIX         — Alpha Vantage GLOBAL_QUOTE (primary) / Yahoo Finance (fallback)
 """
 
@@ -22,7 +22,9 @@ from atlas.services.regime_modifier_service import (
     _AV_BRENT_URL,
     _AV_GLOBAL_QUOTE_URL,
     _BRENT_NUM_CLOSES,
+    _YAHOO_BRENT_URL,
     _YAHOO_VIX_URL,
+    _parse_yahoo_brent_payload,
     _parse_yahoo_vix_payload,
 )
 
@@ -57,7 +59,27 @@ class MarketConditionsService:
         )
 
     async def _fetch_brent(self, client: httpx.AsyncClient) -> list[float]:
-        """Fetch the two most recent Brent crude daily closes from Alpha Vantage."""
+        """Fetch the two most recent Brent crude closes.
+
+        Tries Yahoo Finance (BZ=F) first; falls back to Alpha Vantage.
+        """
+        # ── Yahoo Finance (primary) ───────────────────────────────────────
+        try:
+            yf_response = await client.get(
+                _YAHOO_BRENT_URL,
+                params={"interval": "1d", "range": "5d"},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10.0,
+            )
+            yf_response.raise_for_status()
+            closes = _parse_yahoo_brent_payload(yf_response.json())
+            if closes:
+                return closes
+            logger.warning("Yahoo Finance Brent payload had no price; using Alpha Vantage fallback")
+        except Exception:
+            logger.warning("Yahoo Finance Brent fetch failed; using Alpha Vantage fallback")
+
+        # ── Alpha Vantage (fallback) ──────────────────────────────────────
         try:
             response = await client.get(
                 _AV_BRENT_URL,
@@ -67,16 +89,16 @@ class MarketConditionsService:
             response.raise_for_status()
             payload: dict = response.json()  # type: ignore[type-arg]
             data: list[dict] = payload.get("data", [])  # type: ignore[type-arg]
-            closes: list[float] = []
+            closes_av: list[float] = []
             for entry in data:
                 raw = entry.get("value", ".")
                 if raw != ".":
-                    closes.append(float(raw))
-                if len(closes) >= _BRENT_FETCH_COUNT:
+                    closes_av.append(float(raw))
+                if len(closes_av) >= _BRENT_FETCH_COUNT:
                     break
-            return closes
+            return closes_av
         except Exception:
-            logger.exception("Alpha Vantage Brent fetch failed")
+            logger.exception("Alpha Vantage Brent fallback failed")
             return []
 
     async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:

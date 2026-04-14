@@ -429,6 +429,13 @@ class RegimeModifierService:
             output_text,
         ) = _compute_regime_output(rule, base_score, position_value_usd)
 
+        _RULE_NAMES: dict[int | None, str] = {
+            1: "CRISIS",
+            2: "CAUTION",
+            3: "CLEAR",
+            None: "NORMAL",
+        }
+
         return RegimeModifierResponse(
             ticker=ticker,
             active_war=active_war,
@@ -437,6 +444,7 @@ class RegimeModifierService:
             base_score=base_score,
             adjusted_score=adjusted_score,
             rule_triggered=rule,
+            rule=_RULE_NAMES[rule],
             min_cash_pct=min_cash_pct,
             max_cash_pct=max_cash_pct,
             min_cash_usd=float(min_cash_usd) if min_cash_usd is not None else None,

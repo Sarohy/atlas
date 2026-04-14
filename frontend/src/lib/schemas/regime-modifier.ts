@@ -27,7 +27,10 @@ export const regimeModifierResponseSchema = z.object({
    * Which rule fired: 1 = Crisis, 2 = Caution, 3 = Clear.
    * null when normal market conditions — no rule triggered.
    */
-  rule_triggered: z.number().int().nullable(),
+  rule_triggered: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(),
+
+  /** Human-readable name of the triggered rule, e.g. CRISIS | CAUTION | CLEAR | NORMAL. */
+  rule: z.string(),
 
   /** Minimum required cash as a fraction of position value (0.35 = 35%) */
   min_cash_pct: z.number(),

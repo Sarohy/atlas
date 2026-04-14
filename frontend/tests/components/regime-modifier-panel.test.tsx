@@ -80,12 +80,13 @@ describe('RegimeModifierPanel', () => {
     expect(screen.getByTestId('regime-delta')).toHaveTextContent('−5 pts');
   });
 
-  it('displays base score and adjusted score', async () => {
+  it('displays only the human-readable regime value in the hero area', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('regime-content'));
 
-    expect(screen.getByTestId('regime-base-score')).toHaveTextContent('79');
-    expect(screen.getByTestId('regime-adjusted-score')).toHaveTextContent('74');
+    expect(screen.getByTestId('regime-rule-value')).toHaveTextContent('CAUTION');
+    expect(screen.queryByTestId('regime-base-score')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('regime-adjusted-score')).not.toBeInTheDocument();
   });
 
   it('shows cash guidance when a rule is triggered', async () => {

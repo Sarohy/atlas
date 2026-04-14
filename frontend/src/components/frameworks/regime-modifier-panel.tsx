@@ -2,12 +2,9 @@
 
 import { useState } from 'react';
 
-import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
-import { useMarketConditions } from '@/lib/hooks/use-market-conditions';
-import { useTickers } from '@/lib/hooks/use-tickers';
+import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 import { cn } from '@/lib/utils';
-import { computeRegimeOutput, determineRule } from '@/lib/utils/regime-rules';
-import type { RegimeOutput, RegimeRule } from '@/lib/utils/regime-rules';
+import type { RegimeRule } from '@/lib/utils/regime-rules';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,54 +65,20 @@ type RegimeModifierPanelProps = {
 // Public component
 // ---------------------------------------------------------------------------
 
-/**
- * Regime Modifier panel — computes the market-regime adjustment (Brent crude,
- * VIX, active-war flag) and applies it to the base Framework Score from the
- * existing cache. The panel does not call the per-ticker regime-modifier API.
- */
+/** Regime Modifier panel driven by the backend regime-modifier response. */
 export function RegimeModifierPanel({ ticker }: RegimeModifierPanelProps) {
   const [activeWar, setActiveWar] = useState(false);
 
   const activeTicker = ticker.trim().length > 0;
 
   const {
-    data: fw,
-    isLoading: isLoadingFw,
-    isError: isErrorFw,
-    error: fwError,
-  } = useFrameworkScore(ticker);
-
-  const { data: market, isLoading: isLoadingMarket, isError: isErrorMarket } =
-    useMarketConditions();
-  const { data: tickers } = useTickers();
-
-  // Avoid loading UI for an empty ticker: Framework score query is disabled in
-  // that state, while market conditions remain globally cached.
-  const isLoading = activeTicker && (isLoadingFw || isLoadingMarket);
-  const isError = (activeTicker && isErrorFw) || isErrorMarket;
-  const hasData = activeTicker && fw !== undefined && market !== undefined;
-
-  let brentConsecutiveBelow95 = false;
-  if (market?.brent_price != null && market?.brent_prev_price != null) {
-    brentConsecutiveBelow95 = market.brent_price < 95 && market.brent_prev_price < 95;
-  }
-
-  const rule = hasData
-    ? determineRule(
-        activeWar,
-        market.brent_price,
-        market.vix_value,
-        brentConsecutiveBelow95,
-      )
-    : null;
-
-  const output = hasData ? computeRegimeOutput(rule, fw.final_score) : null;
-  const activeTickerRow = (tickers ?? []).find((row) => row.ticker === ticker);
-  const positionValue = activeTickerRow?.position_value ?? null;
-  const minCashUsd = output !== null && positionValue !== null ? positionValue * output.minCashPct : null;
-  const maxCashUsd = output !== null && positionValue !== null ? positionValue * output.maxCashPct : null;
-
-  const errorMsg = fwError instanceof Error ? fwError.message : 'Failed to load regime data.';
+    data: regime,
+    isLoading,
+    isError,
+    error,
+  } = useRegimeModifier(ticker, activeWar);
+  const hasData = activeTicker && regime !== undefined;
+  const errorMsg = error instanceof Error ? error.message : 'Failed to load regime data.';
 
   return (
     <section
@@ -145,15 +108,19 @@ export function RegimeModifierPanel({ ticker }: RegimeModifierPanelProps) {
       <div className="atlas-fws-panel-body">
         {isLoading && <LoadingState />}
         {isError && <ErrorState message={errorMsg} />}
-        {!isLoading && !isError && hasData && output !== null && (
+        {!isLoading && !isError && hasData && (
           <RegimeContent
-            brentPrice={market.brent_price}
-            vixValue={market.vix_value}
+            brentPrice={regime.brent_price}
+            vixValue={regime.vix_value}
             activeWar={activeWar}
-            baseScore={fw.final_score}
-            output={output}
-            minCashUsd={minCashUsd}
-            maxCashUsd={maxCashUsd}
+            adjustedScore={regime.adjusted_score}
+            ruleTriggered={regime.rule_triggered}
+            ruleName={regime.rule}
+            minCashPct={regime.min_cash_pct}
+            maxCashPct={regime.max_cash_pct}
+            minCashUsd={regime.min_cash_usd}
+            maxCashUsd={regime.max_cash_usd}
+            outputText={regime.output_text}
           />
         )}
         {!isLoading && !isError && !hasData && activeTicker && <EmptyState ticker={ticker} />}
@@ -198,25 +165,32 @@ type RegimeContentProps = {
   brentPrice: number | null;
   vixValue: number | null;
   activeWar: boolean;
-  baseScore: number;
-  output: RegimeOutput;
+  adjustedScore: number;
+  ruleTriggered: RegimeRule | null;
+  ruleName: string;
+  minCashPct: number;
+  maxCashPct: number;
   minCashUsd: number | null;
   maxCashUsd: number | null;
+  outputText: string;
 };
 
 function RegimeContent({
   brentPrice,
   vixValue,
   activeWar,
-  baseScore,
-  output,
+  adjustedScore,
+  ruleTriggered,
+  ruleName,
+  minCashPct,
+  maxCashPct,
   minCashUsd,
   maxCashUsd,
+  outputText,
 }: RegimeContentProps) {
-  const adjTone = scoreToTone(output.adjustedScore);
-  const baseTone = scoreToTone(baseScore);
-  const filledSegs = Math.round(output.adjustedScore / SCORE_BAR_SEGMENTS);
-  const ruleTone = output.ruleTriggered !== null ? RULE_TONE[output.ruleTriggered] : '';
+  const adjTone = scoreToTone(adjustedScore);
+  const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
+  const ruleTone = ruleTriggered !== null ? RULE_TONE[ruleTriggered] : '';
 
   return (
     <div className="atlas-regime-content" data-testid="regime-content">
@@ -250,13 +224,13 @@ function RegimeContent({
       </div>
 
       <div className="atlas-regime-rule-row" data-testid="regime-rule-row">
-        {output.ruleTriggered !== null ? (
+        {ruleTriggered !== null ? (
           <>
             <span className={cn('atlas-regime-rule-badge', ruleTone)} data-testid="regime-rule-badge">
-              {RULE_LABEL[output.ruleTriggered]}
+              {RULE_LABEL[ruleTriggered]}
             </span>
             <span className={cn('atlas-regime-delta', ruleTone)} data-testid="regime-delta">
-              {RULE_DELTA_LABEL[output.ruleTriggered]}
+              {RULE_DELTA_LABEL[ruleTriggered]}
             </span>
           </>
         ) : (
@@ -268,30 +242,16 @@ function RegimeContent({
 
       <div className="atlas-regime-score-hero">
         <div className="atlas-regime-score-block">
-          <span className="atlas-regime-score-label">BASE</span>
-          <span
-            className={cn('atlas-regime-score-num atlas-regime-score-num--base', baseTone)}
-            data-testid="regime-base-score"
-          >
-            {baseScore}
-          </span>
-        </div>
-
-        <span className="atlas-regime-arrow" aria-hidden="true">
-          →
-        </span>
-
-        <div className="atlas-regime-score-block">
-          <span className="atlas-regime-score-label">ADJUSTED</span>
-          <span className={cn('atlas-regime-score-num', adjTone)} data-testid="regime-adjusted-score">
-            {output.adjustedScore}
+          <span className="atlas-regime-score-label">RULE</span>
+          <span className={cn('atlas-regime-score-num', adjTone)} data-testid="regime-rule-value">
+            {ruleName}
           </span>
         </div>
       </div>
 
       <div
         className="atlas-fws-score-bar"
-        aria-label={`Adjusted score: ${output.adjustedScore} out of 100`}
+        aria-label={`Adjusted score: ${adjustedScore} out of 100`}
       >
         {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
           <span
@@ -301,16 +261,16 @@ function RegimeContent({
         ))}
       </div>
 
-      {output.ruleTriggered !== null && (
+      {ruleTriggered !== null && (
         <div className="atlas-regime-cash-block" data-testid="regime-cash-block">
           <p className="atlas-regime-cash-title">CASH GUIDANCE</p>
 
           <div className="atlas-regime-cash-row">
             <span className="atlas-regime-cash-label">Required range</span>
             <span className="atlas-regime-cash-value" data-testid="regime-cash-pct">
-              {(output.minCashPct * 100).toFixed(0)}%
+              {(minCashPct * 100).toFixed(0)}%
               {' — '}
-              {(output.maxCashPct * 100).toFixed(0)}% of position
+              {(maxCashPct * 100).toFixed(0)}% of position
             </span>
           </div>
 
@@ -325,9 +285,9 @@ function RegimeContent({
         </div>
       )}
 
-      {output.outputText && (
+      {outputText && (
         <div className="atlas-regime-output" data-testid="regime-output-text">
-          {output.outputText.split('\n').map((line, i) => (
+          {outputText.split('\n').map((line, i) => (
             <p key={i} className="atlas-regime-output-line">
               {line}
             </p>

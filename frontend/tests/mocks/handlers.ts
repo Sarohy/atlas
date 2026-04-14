@@ -343,10 +343,11 @@ export const handlers = [
       base_score: baseScore,
       adjusted_score: adjustedScore,
       rule_triggered: ruleTriggered,
+      rule: activeWar ? 'CRISIS' : 'CAUTION',
       min_cash_pct: activeWar ? 0.35 : 0.25,
       max_cash_pct: activeWar ? 0.4 : 0.35,
-      min_cash_usd: null,
-      max_cash_usd: null,
+      min_cash_usd: activeWar ? 35000 : 25000,
+      max_cash_usd: activeWar ? 40000 : 35000,
       output_text: activeWar
         ? 'must stay in cash\ncannot be touched\nfor any trade'
         : 'must stay in cash',

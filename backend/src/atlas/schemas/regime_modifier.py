@@ -34,6 +34,10 @@ class RegimeModifierResponse(BaseModel):
         description="Which regime rule fired (1 = Crisis, 2 = Caution, 3 = Clear), "
         "or None when market conditions are normal.",
     )
+    rule: str = Field(
+        description="Human-readable name of the triggered rule: "
+        "CRISIS | CAUTION | CLEAR | NORMAL.",
+    )
 
     # ── Cash guidance — fractions (0.35 = 35 %) ──────────────────────────
     min_cash_pct: float = Field(

@@ -33,6 +33,8 @@ describe('Frameworks page', () => {
     expect(screen.getByTestId('frameworks-panels-section')).toBeInTheDocument();
     expect(screen.getByTestId('frameworks-ticker-bar')).toBeInTheDocument();
     expect(screen.getByTestId('framework-score-panel')).toHaveClass('atlas-fws-panel--half-width');
+    expect(screen.getByTestId('regime-guidance-panel')).toBeInTheDocument();
+    expect(screen.getByText('Framework 3')).toBeInTheDocument();
     expect(screen.getByTestId('framework-score-hover-overlay')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Preview framework score details' })).toBeInTheDocument();
     expect(screen.queryByText('F1 Momentum')).not.toBeInTheDocument();

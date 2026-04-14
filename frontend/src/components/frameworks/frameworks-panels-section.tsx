@@ -9,8 +9,10 @@ import { F2EarningsPanel } from './f2-earnings-panel';
 import { F3AnalystPanel } from './f3-analyst-panel';
 import { F4OptionsPanel } from './f4-options-panel';
 import { F5FundamentalPanel } from './f5-fundamental-panel';
+import { RegimeGuidancePanel } from './regime-guidance-panel';
 import { FrameworkScorePanel } from './framework-score-panel';
 import { RegimeModifierPanel } from './regime-modifier-panel';
+import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -41,6 +43,12 @@ export function FrameworksPanelsSection() {
   // ticker so panels are populated automatically on first load.
   const activeTicker =
     selectedTicker !== EMPTY_TICKER ? selectedTicker : (tickers[0] ?? EMPTY_TICKER);
+
+  // Hoist the Framework 1 score so Framework 3 can consume the same value
+  // instead of re-fetching independently (TanStack Query deduplicates the
+  // network request — the panel's own hook hits the cache).
+  const { data: frameworkScoreData } = useFrameworkScore(activeTicker);
+  const frameworkFinalScore = frameworkScoreData?.final_score;
 
   useEffect(() => {
     if (!detailsOverlayOpen) {
@@ -99,6 +107,10 @@ export function FrameworksPanelsSection() {
         />
 
         <RegimeModifierPanel ticker={activeTicker} />
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <RegimeGuidancePanel ticker={activeTicker} baseScore={frameworkFinalScore} />
       </div>
 
       {detailsOverlayOpen && (

@@ -354,6 +354,17 @@ export const handlers = [
     });
   }),
 
+  // ── Position Sizing ─────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/position-sizing/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      conviction_score: 79,
+      action: 'HOLD',
+      instruction: 'Hold position — no new adds.',
+    });
+  }),
+
   // ── Framework Score ───────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/framework-score/:ticker`, ({ params }) => {
     const ticker = String(params['ticker'] ?? 'AAPL');

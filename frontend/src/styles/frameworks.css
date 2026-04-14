@@ -2156,6 +2156,18 @@
   align-items: flex-start;
 }
 
+.atlas-frameworks-secondary-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+}
+
+.atlas-frameworks-secondary-row::after {
+  content: '';
+  flex: 1;
+}
+
 .atlas-fws-panel--half-width {
   flex: 1;
   width: auto;
@@ -2165,6 +2177,10 @@
 .atlas-regime-panel {
   flex: 1;
   min-width: 0;
+}
+
+.atlas-frameworks-secondary-row .atlas-regime-panel {
+  max-width: calc(50% - 7px);
 }
 
 /* ── War zone toggle button (lives in the panel header) ── */
@@ -2443,4 +2459,3 @@
   line-height: 1.6;
   color: #94a3b8;
 }
-

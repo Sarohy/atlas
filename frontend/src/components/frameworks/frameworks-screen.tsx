@@ -24,6 +24,29 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
 }
 
 function OverviewCard({ card }: { card: FrameworkOverviewCard }) {
+  if (card.options !== undefined && card.selectedValue !== undefined) {
+    return (
+      <article className={cn('atlas-frameworks-overview-card', `is-${card.tone}`)}>
+        <label className="atlas-frameworks-overview-label" htmlFor="framework-initial-catalyst-select">
+          {card.label}
+        </label>
+        <select
+          className={cn('atlas-frameworks-overview-value', 'atlas-frameworks-overview-select', `is-${card.tone}`)}
+          data-testid="framework-initial-catalyst-select"
+          defaultValue={card.selectedValue}
+          id="framework-initial-catalyst-select"
+        >
+          {card.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        {card.detail ? <p className="atlas-frameworks-overview-detail">{card.detail}</p> : null}
+      </article>
+    );
+  }
+
   return (
     <article className={cn('atlas-frameworks-overview-card', `is-${card.tone}`)}>
       <p className="atlas-frameworks-overview-label">{card.label}</p>

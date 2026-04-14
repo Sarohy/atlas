@@ -28,8 +28,10 @@ describe('Frameworks page', () => {
   it('renders the overview and analysis panels without the legacy rule cards', async () => {
     await renderPage();
 
-    expect(screen.getByText('VIX Regime')).toBeInTheDocument();
-    expect(screen.getByText('VIX 25.33 · declining from 30+')).toBeInTheDocument();
+    expect(screen.getByText('Initial Catalyst')).toBeInTheDocument();
+    expect(screen.getByTestId('framework-initial-catalyst-select')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Yes' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'No' })).toBeInTheDocument();
     expect(screen.getByTestId('frameworks-panels-section')).toBeInTheDocument();
     expect(screen.getByTestId('frameworks-ticker-bar')).toBeInTheDocument();
     expect(screen.getByTestId('framework-score-panel')).toHaveClass('atlas-fws-panel--half-width');

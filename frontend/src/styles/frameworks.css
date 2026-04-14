@@ -59,6 +59,17 @@
   font-weight: 700;
 }
 
+.atlas-frameworks-overview-select {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  padding: 0.55rem 0.7rem;
+  color: #e8edf5;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  line-height: 1.2;
+}
+
 .atlas-frameworks-overview-detail {
   margin: 0.4rem 0 0;
   color: var(--atlas-portfolio-muted);

@@ -1,8 +1,9 @@
 """F3 Analyst Conviction service.
 
 Data sources:
-  - Benzinga  → consensus ratings, analyst count, consensus PT, PT revision direction
-  - Polygon.io → current stock price
+  - Benzinga        → consensus ratings, analyst count, consensus PT, PT revision direction
+  - Alpha Vantage   → fallback consensus when Benzinga has no coverage (OVERVIEW endpoint)
+  - Polygon.io      → current stock price
 
 F3 sub-indicators and weights (Factor_Mapping_Guide):
   1. Consensus Rating     (35%) — (Strong Buy + Buy) % of total analysts
@@ -53,6 +54,11 @@ _GRADE_STRONG_BUY: Final[int] = 80
 _GRADE_BUY: Final[int] = 60
 _GRADE_NEUTRAL: Final[int] = 40
 _GRADE_WEAK: Final[int] = 20
+
+# PT Ratio cap — when current_price / consensus_PT > 1.40, the stock is
+# trading more than 40% above analyst targets; F3 is capped at 55 (NEUTRAL).
+_PT_RATIO_CAP_THRESHOLD: Final[float] = 1.40
+_PT_RATIO_F3_CAP: Final[int] = 55
 
 # ---------------------------------------------------------------------------
 # API constants
@@ -209,8 +215,10 @@ def _build_analyst_response(
 
     # PT upside
     upside_pct: float | None = None
+    pt_ratio: float | None = None
     if current_price and consensus_pt and current_price > 0:
         upside_pct = (consensus_pt - current_price) / current_price * 100.0
+        pt_ratio = current_price / consensus_pt  # >1.0 means stock exceeds PT
 
     # Individual scores (0-100)
     consensus_score = _score_consensus(buy_pct)
@@ -226,6 +234,11 @@ def _build_analyst_response(
         + revision_score * _W_PT_REVISION
     )
     f3_score = round(f3_raw)
+
+    # PT Ratio cap — when stock price exceeds consensus PT by >40%, F3 is
+    # capped at 55 (NEUTRAL) regardless of the weighted composite.
+    if pt_ratio is not None and pt_ratio > _PT_RATIO_CAP_THRESHOLD:
+        f3_score = min(f3_score, _PT_RATIO_F3_CAP)
 
     return AnalystResponse(
         ticker=ticker.upper(),
@@ -250,6 +263,7 @@ def _build_analyst_response(
             current_price=current_price,
             consensus_pt=consensus_pt,
             upside_pct=upside_pct,
+            pt_ratio=round(pt_ratio, 4) if pt_ratio is not None else None,
             score=upside_score,
             weight=_W_PT_UPSIDE,
         ),
@@ -273,21 +287,32 @@ def _build_analyst_response(
 class AnalystService:
     """Fetches F3 data from Benzinga + Polygon and computes the F3 score."""
 
-    def __init__(self, benzinga_api_key: str, polygon_api_key: str = "") -> None:
+    def __init__(
+        self,
+        benzinga_api_key: str,
+        polygon_api_key: str = "",
+        alphavantage_api_key: str = "",
+    ) -> None:
         self._benzinga_key = benzinga_api_key
         self._polygon_key = polygon_api_key
+        self._av_key = alphavantage_api_key
 
     @classmethod
     def from_env(cls) -> AnalystService:
         return cls(
             benzinga_api_key=os.environ.get("BENZINGA_API_KEY", ""),
             polygon_api_key=os.environ.get("POLYGON_API_KEY", ""),
+            alphavantage_api_key=os.environ.get("ALPHAVANTAGE_API_KEY", ""),
         )
 
     async def compute_analyst(self, ticker: str) -> AnalystResponse:
         """Fetch data from Benzinga + Polygon and return an AnalystResponse."""
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             consensus_data = await self._fetch_consensus(client, ticker)
+            # Benzinga returns null aggregate_ratings for tickers it doesn't index
+            # (typically smaller-cap stocks). Fall back to Alpha Vantage OVERVIEW.
+            if not consensus_data:
+                consensus_data = await self._fetch_consensus_av(client, ticker)
             ratings_data = await self._fetch_recent_ratings(client, ticker)
             current_price = await self._fetch_current_price(client, ticker)
 
@@ -340,22 +365,18 @@ class AnalystService:
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()
 
-            # Benzinga returns a list under "consensus_ratings" or "ratings"
-            records: list[Any] = (
-                payload.get("consensus_ratings")
-                or payload.get("ratings")
-                or []
-            )
-            if not records:
+            # Benzinga returns a flat object:
+            #   aggregate_ratings: {strong_buy, buy, hold, sell} | null
+            #   consensus_price_target: float
+            #   unique_analyst_count: int
+            # aggregate_ratings is null when Benzinga has no coverage for the ticker.
+            agg: dict[str, Any] | None = payload.get("aggregate_ratings")
+            if not agg:
                 return {}
 
-            record: dict[str, Any] = records[0]
-            consensus: dict[str, Any] = record.get("consensus") or record
-
-            # Rating counts — Benzinga may use different key styles
             def _get_count(keys: list[str]) -> int:
                 for k in keys:
-                    v = consensus.get(k)
+                    v = agg.get(k)
                     if v is not None:
                         try:
                             return int(v)
@@ -363,30 +384,20 @@ class AnalystService:
                             pass
                 return 0
 
-            strong_buy = _get_count(["strongBuy", "strong_buy", "ratingCountStrongBuy"])
-            buy = _get_count(["buy", "ratingCountBuy"])
-            hold = _get_count(["hold", "neutral", "ratingCountHold"])
-            sell = _get_count(["sell", "ratingCountSell"])
-            strong_sell = _get_count(["strongSell", "strong_sell", "ratingCountStrongSell"])
+            strong_buy = _get_count(["strong_buy", "strongBuy"])
+            buy = _get_count(["buy"])
+            hold = _get_count(["hold", "neutral"])
+            sell = _get_count(["sell"])
+            strong_sell = _get_count(["strong_sell", "strongSell"])
 
-            # Analyst count
-            raw_count = (
-                consensus.get("analystCount")
-                or consensus.get("analyst_count")
-                or consensus.get("numOfRatings")
-                or consensus.get("ratingCount")
-            )
-            num_analysts: int | None = int(raw_count) if raw_count is not None else None
+            # unique_analyst_count is more accurate than total_analyst_count
+            raw_count = payload.get("unique_analyst_count") or payload.get("total_analyst_count")
+            num_analysts: int | None = int(raw_count) if raw_count else None
 
-            # Consensus price target
-            raw_pt = (
-                consensus.get("targetPrice")
-                or consensus.get("target_price")
-                or consensus.get("priceTarget")
-                or consensus.get("price_target")
-            )
+            # Consensus price target lives at the top level of the payload
+            raw_pt = payload.get("consensus_price_target")
             consensus_pt: float | None = None
-            if raw_pt is not None:
+            if raw_pt:
                 try:
                     consensus_pt = float(raw_pt)
                 except (TypeError, ValueError):
@@ -399,6 +410,68 @@ class AnalystService:
                 "sell": sell,
                 "strong_sell": strong_sell,
                 "num_analysts": num_analysts,
+                "consensus_pt": consensus_pt,
+            }
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
+    # Alpha Vantage — consensus fallback (OVERVIEW endpoint)
+    # ------------------------------------------------------------------
+
+    async def _fetch_consensus_av(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> dict[str, Any]:
+        """Fallback consensus from Alpha Vantage OVERVIEW when Benzinga has no coverage.
+
+        Relevant fields returned by AV:
+          AnalystRatingStrongBuy, AnalystRatingBuy, AnalystRatingHold,
+          AnalystRatingSell, AnalystRatingStrongSell, AnalystTargetPrice
+        Analyst count is derived by summing the rating counts.
+
+        Note: AV does not provide PT revision direction — that sub-factor
+        stays at its default (NO CHANGE / 60) when this fallback is used.
+        """
+        if not self._av_key:
+            return {}
+        try:
+            resp = await client.get(
+                "https://www.alphavantage.co/query",
+                params={"function": "OVERVIEW", "symbol": ticker.upper(), "apikey": self._av_key},
+            )
+            resp.raise_for_status()
+            payload: dict[str, Any] = resp.json()
+
+            def _int(key: str) -> int:
+                try:
+                    return int(payload.get(key) or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            strong_buy = _int("AnalystRatingStrongBuy")
+            buy = _int("AnalystRatingBuy")
+            hold = _int("AnalystRatingHold")
+            sell = _int("AnalystRatingSell")
+            strong_sell = _int("AnalystRatingStrongSell")
+            total = strong_buy + buy + hold + sell + strong_sell
+            if total == 0:
+                return {}
+
+            consensus_pt: float | None = None
+            raw_pt = payload.get("AnalystTargetPrice")
+            if raw_pt:
+                try:
+                    consensus_pt = float(raw_pt)
+                except (TypeError, ValueError):
+                    pass
+
+            return {
+                "strong_buy": strong_buy,
+                "buy": buy,
+                "hold": hold,
+                "sell": sell,
+                "strong_sell": strong_sell,
+                "num_analysts": total,
                 "consensus_pt": consensus_pt,
             }
         except Exception:
@@ -438,6 +511,10 @@ class AnalystService:
             raises = 0
             lowers = 0
             for r in ratings:
+                # Benzinga may ignore the tickers param and return unrelated tickers;
+                # always guard by checking the ticker field explicitly.
+                if r.get("ticker", "").upper() != ticker.upper():
+                    continue
                 action_pt: str = (r.get("action_pt") or "").strip().lower()
                 if action_pt in ("raises", "announces"):
                     raises += 1

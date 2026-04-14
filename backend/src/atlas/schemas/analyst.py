@@ -104,6 +104,13 @@ class PtUpsideIndicator(BaseModel):
             "Negative indicates downside. Null when price data is missing."
         ),
     )
+    pt_ratio: float | None = Field(
+        None,
+        description=(
+            "current_price / consensus_PT. >1.40 triggers the F3 cap at 55. "
+            "Null when price or PT data is missing."
+        ),
+    )
     score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
     weight: float = Field(default=0.30, description="Weight in F3 formula.")
 

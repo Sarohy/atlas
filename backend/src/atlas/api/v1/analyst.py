@@ -35,5 +35,6 @@ async def get_analyst(ticker: str) -> AnalystResponse:
     service = AnalystService(
         benzinga_api_key=settings.benzinga_api_key,
         polygon_api_key=settings.polygon_api_key,
+        alphavantage_api_key=settings.alphavantage_api_key,
     )
     return await service.compute_analyst(normalised)

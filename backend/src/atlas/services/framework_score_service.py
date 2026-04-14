@@ -266,6 +266,7 @@ class FrameworkScoreService:
         service = AnalystService(
             benzinga_api_key=self._benzinga_key,
             polygon_api_key=self._polygon_key,
+            alphavantage_api_key=self._alphavantage_key,
         )
         return await service.compute_analyst(ticker)
 

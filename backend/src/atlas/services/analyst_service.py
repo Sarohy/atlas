@@ -532,7 +532,14 @@ class AnalystService:
     async def _fetch_current_price(
         self, client: httpx.AsyncClient, ticker: str
     ) -> float | None:
-        """Return the most recent closing price from Polygon snapshot."""
+        """Return the most recent closing price from Polygon snapshot.
+
+        Prefers ``day.c`` (today's close).  Falls back to ``prevDay.c`` when
+        ``day.c`` is absent or zero — Polygon sets it to 0 before any trade
+        executes on the current session (pre-market / closed market).  Using 0
+        as the current price would make the ``if current_price`` truthiness
+        guard fail and silently skip the PT-ratio cap.
+        """
         if not self._polygon_key:
             return None
         try:
@@ -542,8 +549,14 @@ class AnalystService:
             )
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()
-            day: dict[str, Any] = payload.get("ticker", {}).get("day", {})
+            ticker_data: dict[str, Any] = payload.get("ticker", {})
+            day: dict[str, Any] = ticker_data.get("day", {})
             raw = day.get("c")
-            return float(raw) if raw is not None else None
+            if raw is not None and float(raw) > 0:
+                return float(raw)
+            # day.c is 0 or absent — fall back to the previous session's close
+            prev_day: dict[str, Any] = ticker_data.get("prevDay", {})
+            raw_prev = prev_day.get("c")
+            return float(raw_prev) if raw_prev is not None and float(raw_prev) > 0 else None
         except Exception:
             return None

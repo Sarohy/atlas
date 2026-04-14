@@ -26,10 +26,13 @@ raw data has been fetched.
 from __future__ import annotations
 
 import contextlib
+import logging
 import re
 from typing import Final
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from atlas.schemas.earnings import (
     BacklogBtbIndicator,
@@ -376,6 +379,24 @@ class EarningsService:
             year, quarter = year_quarter
             transcript_quarter_str = f"{year}Q{quarter}"
             transcript_text = await self._fetch_transcript_text(ticker, year, quarter)
+            logger.debug(
+                "[F2] %s transcript fetched (quarter=%s, chars=%d)",
+                ticker.upper(),
+                transcript_quarter_str,
+                len(transcript_text),
+            )
+            if transcript_text:
+                logger.debug(
+                    "[F2] %s transcript snippet (first 500 chars): %r",
+                    ticker.upper(),
+                    transcript_text[:500],
+                )
+            else:
+                logger.debug(
+                    "[F2] %s transcript is empty — FMP returned no content for %s",
+                    ticker.upper(),
+                    transcript_quarter_str,
+                )
 
         # ---- Revenue Growth YoY ----
         # Use most recent quarter vs same quarter one year prior (index 4).
@@ -404,6 +425,13 @@ class EarningsService:
         backlog_label = _classify_backlog_from_transcript(transcript_text)
         backlog_raw = _score_backlog_visibility(backlog_label)
         backlog_score = round(backlog_raw * _W_BACKLOG)
+        logger.debug(
+            "[F2] %s backlog classification: label=%s raw_score=%d contribution=%d/15",
+            ticker.upper(),
+            backlog_label,
+            backlog_raw,
+            backlog_score,
+        )
 
         # ---- F2 composite ----
         f2_total = _compute_f2_total(rev_raw, eps_raw, guidance_raw, margin_raw, backlog_raw)

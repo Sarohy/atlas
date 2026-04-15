@@ -1734,6 +1734,8 @@
   border: 1px solid #1e2d40;
   border-radius: 5px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .atlas-fws-panel--half-width {
@@ -1761,6 +1763,9 @@
 
 .atlas-fws-panel-body {
   padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .atlas-fws-hover-overlay {
@@ -2233,6 +2238,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
 }
 
 /* ── Market conditions row: Brent · VIX · (War badge) ── */
@@ -2341,6 +2347,8 @@
 .atlas-regime-score-hero {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex: 1;
   gap: 16px;
 }
 
@@ -2348,12 +2356,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
 }
 
 .atlas-regime-score-label {
   font-family: 'Courier New', Courier, monospace;
-  font-size: 0.44rem;
+  font-size: 0.52rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2362,7 +2372,7 @@
 
 .atlas-regime-score-num {
   font-family: 'Courier New', Courier, monospace;
-  font-size: 2.6rem;
+  font-size: clamp(2.1rem, 5.6vw, 4.2rem);
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.02em;

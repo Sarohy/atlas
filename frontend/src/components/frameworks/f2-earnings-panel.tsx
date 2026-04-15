@@ -167,9 +167,6 @@ function EarningsContent({ data }: { data: EarningsResponse }) {
         </div>
       </div>
 
-      {/* Score bar */}
-      <ScoreBar score={data.f2_score} gradeTone={gradeTone} />
-
       {/* Indicator grid */}
       <div className="atlas-f2-indicators">
         <RevenueGrowthCard rev={data.revenue_growth} />

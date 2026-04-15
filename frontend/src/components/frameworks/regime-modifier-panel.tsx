@@ -10,9 +10,6 @@ import type { RegimeRule } from '@/lib/utils/regime-rules';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Number of score-bar segments spanning the 0-100 scale. */
-const SCORE_BAR_SEGMENTS = 10;
-
 /** CSS tone class for each rule. */
 const RULE_TONE: Record<RegimeRule, string> = {
   1: 'is-red',
@@ -207,7 +204,6 @@ function RegimeContent({
   outputText,
 }: RegimeContentProps) {
   const adjTone = scoreToTone(adjustedScore);
-  const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
   const ruleTone = ruleTriggered !== null ? RULE_TONE[ruleTriggered] : '';
 
   return (
@@ -265,18 +261,6 @@ function RegimeContent({
             {ruleName}
           </span>
         </div>
-      </div>
-
-      <div
-        className="atlas-fws-score-bar"
-        aria-label={`Adjusted score: ${adjustedScore} out of 100`}
-      >
-        {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
-          <span
-            key={i}
-            className={cn('atlas-fws-score-seg', i < filledSegs ? adjTone : 'is-empty')}
-          />
-        ))}
       </div>
 
       {ruleTriggered !== null && (

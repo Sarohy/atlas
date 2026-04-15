@@ -10,7 +10,6 @@ round-trips to the regime-modifier endpoint.
 
 from fastapi import APIRouter
 
-from atlas.config import get_settings
 from atlas.schemas.market_conditions import MarketConditionsResponse
 from atlas.services.market_conditions_service import MarketConditionsService
 
@@ -25,8 +24,5 @@ async def get_market_conditions() -> MarketConditionsResponse:
     The ``brent_prev_price`` field carries the previous daily close so the
     caller can evaluate the two-consecutive-closes condition for Rule 3.
     """
-    settings = get_settings()
-    service = MarketConditionsService(
-        alphavantage_api_key=settings.alphavantage_api_key or "",
-    )
+    service = MarketConditionsService()
     return await service.get_conditions()

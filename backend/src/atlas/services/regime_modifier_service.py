@@ -6,7 +6,7 @@ produce an adjusted conviction score with cash-management guidance.
 
 Rule priority (highest to lowest):
   Rule 1 — Crisis   : active war OR Brent > $110 OR VIX > 35     → -10 pts
-  Rule 2 — Caution  : Brent in [$95, $110] AND VIX in [24, 35]   → -5 pts
+  Rule 2 — Caution  : Brent in [$95, $110] (any VIX ≤ 35)        → -5 pts
   Rule 3 — Clear    : Brent < $95 for 2 consecutive closes AND VIX < 24 → +5 pts
   None   — Normal   : no modifier; cash guidance set to zero
 
@@ -32,29 +32,23 @@ from atlas.services.ticker_service import TickerService
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Alpha Vantage endpoints
+# Market data endpoints
 # ---------------------------------------------------------------------------
 
-# Brent crude oil daily prices (USD per barrel).
-# Returns JSON: {"data": [{"date": "YYYY-MM-DD", "value": "65.10"}, ...]}
-# Data is returned in descending date order.
-_AV_BRENT_URL: Final[str] = "https://www.alphavantage.co/query"
-
-# CBOE VIX index — fetched via GLOBAL_QUOTE for the most recent value.
-# Returns JSON: {"Global Quote": {"05. price": "22.50", ...}}
-_AV_GLOBAL_QUOTE_URL: Final[str] = "https://www.alphavantage.co/query"
-
-# Yahoo Finance chart API — fallback for VIX when Alpha Vantage returns empty.
+# Yahoo Finance chart API — VIX (^VIX). %5E is URL-encoded '^'.
 # Returns JSON: {"chart": {"result": [{"meta": {"regularMarketPrice": 19.99, ...}}]}}
-# %5E is URL-encoded '^'.
 _YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"
 
-# Yahoo Finance chart API — primary source for Brent crude (BZ=F futures).
+# Yahoo Finance chart API — Brent crude (BZ=F futures).
 # Returns current price via meta.regularMarketPrice and previous close via
-# meta.chartPreviousClose. More up-to-date than Alpha Vantage's EIA dataset.
+# meta.chartPreviousClose.
 _YAHOO_BRENT_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/BZ%3DF"
 
-# Number of most-recent Brent data points needed (2 for consecutive check).
+# Alpha Vantage — Brent crude (primary when Yahoo Finance is unreachable).
+# Returns: {"data": [{"date": "...", "value": "..."}]}
+_AV_BASE_URL: Final[str] = "https://www.alphavantage.co/query"
+
+# Number of Brent daily closes to fetch (current + previous for consecutive check).
 _BRENT_NUM_CLOSES: Final[int] = 2
 
 # ---------------------------------------------------------------------------
@@ -79,12 +73,11 @@ _RULE1_MAX_CASH_PCT: Final[float] = 0.40
 # ---------------------------------------------------------------------------
 
 # Brent must be within this inclusive range for a Rule 2 trigger.
+# VIX level below 35 is already guaranteed by Rule 1 priority; no VIX
+# range check is needed here — any VIX ≤ 35 triggers Caution when Brent
+# is in this band.
 _RULE2_BRENT_LOW: Final[float] = 95.0  # USD per barrel (inclusive)
 _RULE2_BRENT_HIGH: Final[float] = 110.0  # USD per barrel (inclusive)
-
-# VIX must be within this inclusive range for a Rule 2 trigger.
-_RULE2_VIX_LOW: Final[float] = 24.0  # (inclusive)
-_RULE2_VIX_HIGH: Final[float] = 35.0  # (inclusive)
 
 # Score modifier for Rule 2.
 _RULE2_SCORE_DELTA: Final[int] = -5
@@ -200,9 +193,8 @@ def _determine_rule(
       • Brent crude above $110
       • VIX above 35
 
-    Rule 2 (Caution) — BOTH of:
-      • Brent in [$95, $110]
-      • VIX in [24, 35]
+    Rule 2 (Caution) — Brent in [$95, $110]
+      (VIX ≤ 35 is guaranteed by Rule 1 priority; no additional VIX check)
 
     Rule 3 (Clear) — BOTH of:
       • Brent below $95 for two consecutive daily closes
@@ -215,9 +207,9 @@ def _determine_rule(
         return 1
 
     # ── Rule 2 ──────────────────────────────────────────────────────────────
+    # VIX > 35 already triggered Rule 1 above; reaching here means VIX ≤ 35.
     brent_in_caution = _RULE2_BRENT_LOW <= brent_price <= _RULE2_BRENT_HIGH
-    vix_in_caution = _RULE2_VIX_LOW <= vix_value <= _RULE2_VIX_HIGH
-    if brent_in_caution and vix_in_caution:
+    if brent_in_caution:
         return 2
 
     # ── Rule 3 ──────────────────────────────────────────────────────────────
@@ -453,18 +445,11 @@ class RegimeModifierService:
         )
 
     async def _fetch_brent(self, client: httpx.AsyncClient) -> list[float]:
-        """Fetch the two most recent Brent crude closes.
+        """Fetch the two most recent Brent crude closes from Yahoo Finance (BZ=F).
 
-        Tries Yahoo Finance (BZ=F) first — returns live intraday price plus
-        the previous session close, so the data is always current.
-        Falls back to Alpha Vantage function=BRENT (daily EIA dataset) when
-        Yahoo Finance fails; that dataset can lag by ~1-2 weeks but is the
-        only alternative.
-
-        Returns a list of up to 2 floats in descending date order
-        (most recent first). Returns [] if both sources fail.
+        Returns a list of up to 2 floats in descending date order (most recent
+        first). Returns [] if Yahoo Finance is unreachable or returns no price.
         """
-        # ── Yahoo Finance (primary) ───────────────────────────────────────
         try:
             yf_response = await client.get(
                 _YAHOO_BRENT_URL,
@@ -476,41 +461,16 @@ class RegimeModifierService:
             closes = _parse_yahoo_brent_payload(yf_response.json())
             if closes:
                 return closes
-            logger.warning("Yahoo Finance Brent payload had no price; using Alpha Vantage fallback")
+            logger.warning("Brent crude: Yahoo Finance returned no price")
         except Exception:
-            logger.warning("Yahoo Finance Brent fetch failed; using Alpha Vantage fallback")
-
-        # ── Alpha Vantage (fallback) ──────────────────────────────────────
-        try:
-            response = await client.get(
-                _AV_BRENT_URL,
-                params={"function": "BRENT", "interval": "daily", "apikey": self._av_key},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            payload: dict = response.json()  # type: ignore[type-arg]
-            data: list[dict] = payload.get("data", [])  # type: ignore[type-arg]
-            # Alpha Vantage returns entries newest-first; skip "." values
-            closes_av: list[float] = []
-            for entry in data:
-                raw = entry.get("value", ".")
-                if raw != ".":
-                    closes_av.append(float(raw))
-                if len(closes_av) >= _BRENT_NUM_CLOSES:
-                    break
-            return closes_av
-        except Exception:
-            logger.exception("Alpha Vantage Brent fallback failed")
-            return []
+            logger.warning("Brent crude: Yahoo Finance fetch failed")
+        return []
 
     async def _fetch_vix(self, client: httpx.AsyncClient) -> float | None:
-        """Fetch the latest VIX level.
+        """Fetch the latest VIX from Yahoo Finance (^VIX).
 
-        Tries Yahoo Finance first; falls back to Alpha Vantage GLOBAL_QUOTE
-        when Yahoo Finance fails or returns no price.
-        Returns None if both sources fail.
+        Returns None if Yahoo Finance is unreachable or returns no price.
         """
-        # ── Yahoo Finance (primary) ───────────────────────────────────────
         try:
             yf_response = await client.get(
                 _YAHOO_VIX_URL,
@@ -519,28 +479,10 @@ class RegimeModifierService:
                 timeout=10.0,
             )
             yf_response.raise_for_status()
-            yf_payload: dict = yf_response.json()  # type: ignore[type-arg]
-            vix = _parse_yahoo_vix_payload(yf_payload)
+            vix = _parse_yahoo_vix_payload(yf_response.json())
             if vix is not None:
                 return vix
-            logger.warning("Yahoo Finance VIX payload had no price; using Alpha Vantage fallback")
+            logger.warning("VIX: Yahoo Finance returned no price")
         except Exception:
-            logger.warning("Yahoo Finance VIX fetch failed; using Alpha Vantage fallback")
-
-        # ── Alpha Vantage (fallback) ──────────────────────────────────────
-        try:
-            response = await client.get(
-                _AV_GLOBAL_QUOTE_URL,
-                params={"function": "GLOBAL_QUOTE", "symbol": "^VIX", "apikey": self._av_key},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            payload: dict = response.json()  # type: ignore[type-arg]
-            quote: dict = payload.get("Global Quote", {})  # type: ignore[type-arg]
-            price_str: str = quote.get("05. price", "")
-            if price_str:
-                return float(price_str)
-            logger.warning("Alpha Vantage VIX returned empty quote")
-        except Exception:
-            logger.exception("Alpha Vantage VIX fallback failed")
+            logger.warning("VIX: Yahoo Finance fetch failed")
         return None

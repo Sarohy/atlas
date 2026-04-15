@@ -55,8 +55,10 @@ _MACD_SIGNAL: Final[int] = 9
 _LOOKBACK_1M_BARS: Final[int] = 21
 _LOOKBACK_6M_BARS: Final[int] = 126
 
-# One calendar year of daily bars for 52-week range and indicators.
-_LOOKBACK_DAYS: Final[int] = 365
+# Calendar days to request from Polygon for 52-week range and indicators.
+# 380 days ≈ 265 trading sessions — guarantees ≥ 252 bars even accounting
+# for US market holidays, leap years, and same-day settlement gaps.
+_LOOKBACK_DAYS: Final[int] = 380
 
 # Max concurrent Polygon requests within the service.
 _MAX_CONCURRENCY: Final[int] = 5

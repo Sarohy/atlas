@@ -2164,19 +2164,14 @@
 .atlas-regime-panels-row {
   display: flex;
   gap: 14px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .atlas-frameworks-secondary-row {
   display: flex;
   gap: 14px;
-  align-items: flex-start;
+  align-items: stretch;
   margin-top: 14px;
-}
-
-.atlas-frameworks-secondary-row::after {
-  content: '';
-  flex: 1;
 }
 
 .atlas-fws-panel--half-width {
@@ -2190,9 +2185,8 @@
   min-width: 0;
 }
 
-.atlas-frameworks-secondary-row .atlas-regime-panel {
-  max-width: calc(50% - 7px);
-}
+/* Removed: max-width cap was only needed when secondary row held one panel.
+   With F3 and F4 both present each panel naturally takes 50% via flex: 1. */
 
 /* ── War zone toggle button (lives in the panel header) ── */
 
@@ -2469,4 +2463,117 @@
   letter-spacing: 0.03em;
   line-height: 1.6;
   color: #94a3b8;
+}
+
+/* ==========================================================================
+   Framework 4 — Tranche Sizing Panel  (.atlas-tranche-*)
+   Reuses .atlas-regime-* structural classes; adds value colour modifiers
+   and the content wrapper.
+   ========================================================================== */
+
+.atlas-tranche-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Active tranche value — orange (entry-phase signal). */
+.atlas-regime-cash-value.is-active {
+  color: #fb923c;
+}
+
+/* Blocked tranche value — very dim so it recedes visually. */
+.atlas-regime-cash-value.is-blocked {
+  color: #334155;
+}
+
+/* ==========================================================================
+   Degraded data banners — shown when a factor score is a fallback/partial
+   value due to rate-limits, missing coverage, or no price history.
+   Shared structure; each panel uses its own prefix (f1/f2/f3/f5/fws).
+   ========================================================================== */
+
+.atlas-f1-degraded-banner,
+.atlas-f2-degraded-banner,
+.atlas-f3-degraded-banner,
+.atlas-f5-degraded-banner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.30);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.atlas-f1-degraded-icon,
+.atlas-f2-degraded-icon,
+.atlas-f3-degraded-icon,
+.atlas-f5-degraded-icon {
+  color: #fbbf24;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.atlas-f1-degraded-msg,
+.atlas-f2-degraded-msg,
+.atlas-f3-degraded-msg,
+.atlas-f5-degraded-msg {
+  color: #fde68a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Framework Score panel degraded banner — more prominent, extra sub-lines. */
+.atlas-fws-degraded-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.atlas-fws-degraded-icon {
+  color: #fb923c;
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.atlas-fws-degraded-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-fws-degraded-title {
+  color: #fdba74;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.atlas-fws-degraded-msg {
+  color: #fed7aa;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.atlas-fws-degraded-affected {
+  color: #fb923c;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.atlas-fws-degraded-flag {
+  color: #fca5a5;
+  font-size: 11px;
+  margin: 0;
 }

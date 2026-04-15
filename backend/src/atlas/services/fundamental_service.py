@@ -29,10 +29,13 @@ independently.  FundamentalService owns all network I/O.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date, timedelta
 from typing import Any, Final
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from atlas.schemas.fundamental import (
     AltmanZScoreIndicator,
@@ -318,7 +321,13 @@ class FundamentalService:
         self._sec_key = sec_api_key
         self._av_key = alphavantage_key
 
-    async def compute_fundamental(self, ticker: str) -> FundamentalResponse:
+    async def compute_fundamental(
+        self,
+        ticker: str,
+        *,
+        income_task: asyncio.Task[dict[str, Any]] | None = None,
+        overview_task: asyncio.Task[dict[str, Any]] | None = None,
+    ) -> FundamentalResponse:
         """Fetch all data sources and return a FundamentalResponse for ticker."""
         ticker = ticker.upper()
 
@@ -326,10 +335,17 @@ class FundamentalService:
             insider_raw, bs_raw, inc_raw, cf_raw, ov_raw = await asyncio.gather(
                 self._fetch_insider_trades(client, ticker),
                 self._fetch_balance_sheet(client, ticker),
-                self._fetch_income_statement(client, ticker),
+                # Use pre-fetched shared task when provided to avoid a
+                # duplicate INCOME_STATEMENT call (F2 uses the same data).
+                income_task if income_task is not None else self._fetch_income_statement(client, ticker),
                 self._fetch_cash_flow(client, ticker),
-                self._fetch_overview(client, ticker),
+                # Use pre-fetched shared task when provided to avoid a
+                # duplicate OVERVIEW call (F3 AV fallback uses the same data).
+                overview_task if overview_task is not None else self._fetch_overview(client, ticker),
             )
+
+        # All AV dicts empty → rate-limited; scores will be fallback-only.
+        av_data_available = bool(bs_raw or inc_raw or cf_raw or ov_raw)
 
         # ---- Insider Activity ------------------------------------------------
         insider_ind = self._build_insider_indicator(insider_raw)
@@ -403,6 +419,7 @@ class FundamentalService:
             active_cap=active_cap,
             f5_score=f5_score,
             f5_grade=_grade_from_score(f5_score),
+            data_available=av_data_available,
         )
 
     # ------------------------------------------------------------------
@@ -456,7 +473,11 @@ class FundamentalService:
                 params={"function": "BALANCE_SHEET", "symbol": ticker, "apikey": self._av_key},
             )
             resp.raise_for_status()
-            return resp.json()
+            data: dict[str, Any] = resp.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV BALANCE_SHEET rate-limited for %s", ticker)
+                return {}
+            return data
         except Exception:
             return {}
 
@@ -477,7 +498,11 @@ class FundamentalService:
                 },
             )
             resp.raise_for_status()
-            return resp.json()
+            data: dict[str, Any] = resp.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV INCOME_STATEMENT rate-limited for %s", ticker)
+                return {}
+            return data
         except Exception:
             return {}
 
@@ -494,7 +519,11 @@ class FundamentalService:
                 params={"function": "CASH_FLOW", "symbol": ticker, "apikey": self._av_key},
             )
             resp.raise_for_status()
-            return resp.json()
+            data: dict[str, Any] = resp.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV CASH_FLOW rate-limited for %s", ticker)
+                return {}
+            return data
         except Exception:
             return {}
 
@@ -511,7 +540,11 @@ class FundamentalService:
                 params={"function": "OVERVIEW", "symbol": ticker, "apikey": self._av_key},
             )
             resp.raise_for_status()
-            return resp.json()
+            data: dict[str, Any] = resp.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV OVERVIEW rate-limited for %s", ticker)
+                return {}
+            return data
         except Exception:
             return {}
 

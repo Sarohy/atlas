@@ -88,6 +88,12 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             }
           />
         )}
+        {!isLoading && !isError && data && data.degraded && (
+          <DegradedBanner
+            flags={data.flags}
+            factors={data.factors.filter((f) => !f.available)}
+          />
+        )}
         {!isLoading && !isError && data && <FrameworkScoreContent data={data} />}
         {!isLoading && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -120,6 +126,36 @@ function EmptyState({ ticker }: { ticker: string }) {
     <p className="atlas-fws-state-msg" data-testid="fws-empty">
       No framework score available for {ticker}.
     </p>
+  );
+}
+
+function DegradedBanner({
+  flags,
+  factors,
+}: {
+  flags: string[];
+  factors: FactorBreakdown[];
+}) {
+  const affectedNames = factors.map((f) => `${f.key.toUpperCase()} ${f.name}`).join(', ');
+  return (
+    <div className="atlas-fws-degraded-banner" data-testid="fws-degraded">
+      <span className="atlas-fws-degraded-icon">⚠</span>
+      <div className="atlas-fws-degraded-body">
+        <p className="atlas-fws-degraded-title">Score degraded — partial data</p>
+        <p className="atlas-fws-degraded-msg">
+          One or more factors could not be computed from live data. The conviction
+          score shown is unreliable and will not be cached.
+        </p>
+        {affectedNames && (
+          <p className="atlas-fws-degraded-affected">Affected: {affectedNames}</p>
+        )}
+        {flags.map((flag, i) => (
+          <p key={i} className="atlas-fws-degraded-flag">
+            {flag}
+          </p>
+        ))}
+      </div>
+    </div>
   );
 }
 

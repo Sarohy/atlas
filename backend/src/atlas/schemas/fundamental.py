@@ -290,3 +290,7 @@ class FundamentalResponse(BaseModel):
     f5_grade: str = Field(
         description="F5 grade: STRONG | GOOD | NEUTRAL | WEAK | DISTRESSED"
     )
+    data_available: bool = Field(
+        default=True,
+        description="False when Alpha Vantage returned no data (rate-limited); scores are fallback-only.",
+    )

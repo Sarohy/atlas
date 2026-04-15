@@ -49,6 +49,8 @@ export const frameworkScoreResponseSchema = z.object({
   f5_blocked: z.boolean().default(false),
   /** Human-readable flag messages */
   flags: z.array(z.string()).default([]),
+  /** True when F2 or F5 used AV rate-limit fallback scores — do not cache */
+  degraded: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------

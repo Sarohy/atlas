@@ -59,6 +59,13 @@ function formatUsd(value: number): string {
 type RegimeModifierPanelProps = {
   /** Active ticker symbol driven by the shared selector above the panels. */
   ticker: string;
+  /**
+   * When provided the component acts as a controlled input — the parent owns
+   * the war-zone state and the panel's toggle calls ``onToggleWar`` instead
+   * of managing its own internal state.
+   */
+  activeWar?: boolean;
+  onToggleWar?: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -66,8 +73,19 @@ type RegimeModifierPanelProps = {
 // ---------------------------------------------------------------------------
 
 /** Regime Modifier panel driven by the backend regime-modifier response. */
-export function RegimeModifierPanel({ ticker }: RegimeModifierPanelProps) {
-  const [activeWar, setActiveWar] = useState(false);
+export function RegimeModifierPanel({
+  ticker,
+  activeWar: activeWarProp,
+  onToggleWar,
+}: RegimeModifierPanelProps) {
+  const [internalWar, setInternalWar] = useState(false);
+
+  // Support both controlled (activeWar/onToggleWar from parent) and
+  // uncontrolled (internal state) usage so existing usages without props
+  // continue to work.
+  const isControlled = activeWarProp !== undefined && onToggleWar !== undefined;
+  const activeWar = isControlled ? activeWarProp : internalWar;
+  const handleToggleWar = isControlled ? onToggleWar : () => setInternalWar((v) => !v);
 
   const activeTicker = ticker.trim().length > 0;
 
@@ -94,7 +112,7 @@ export function RegimeModifierPanel({ ticker }: RegimeModifierPanelProps) {
           className={cn('atlas-regime-war-btn', activeWar && 'is-active')}
           data-testid="regime-war-toggle"
           type="button"
-          onClick={() => setActiveWar((v) => !v)}
+          onClick={handleToggleWar}
         >
           <span className="atlas-regime-war-icon" aria-hidden="true">
             ⚑

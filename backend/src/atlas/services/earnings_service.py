@@ -25,10 +25,11 @@ raw data has been fetched.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import re
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
@@ -76,11 +77,14 @@ _GRADE_WEAK_MIN: Final[int] = 20
 # ---------------------------------------------------------------------------
 
 # Categorical guidance scores mapped from transcript analysis.
+# UNDETECTED is excluded — it means no pattern fired in the transcript;
+# the sub-factor is dropped and remaining weights are rescaled to 100%.
 _GUIDANCE_SCORES: Final[dict[str, int]] = {
     "RAISE_FULL_YEAR": 100,  # management raised full-year guidance
     "MAINTAIN": 70,  # guidance maintained / reaffirmed
     "NARROW_RANGE": 55,  # guidance range narrowed
     "LOWER": 20,  # guidance cut / lowered
+    "UNDETECTED": -1,  # sentinel — no pattern matched; excluded from scoring
 }
 
 # Categorical backlog/visibility scores mapped from transcript analysis.
@@ -137,6 +141,13 @@ _GUIDANCE_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
     (re.compile(r"maintain\w*\s+(?:\S+\s+){0,4}guidance", re.I), "MAINTAIN"),
     (re.compile(r"reiterat\w*\s+(?:\S+\s+){0,4}guidance", re.I), "MAINTAIN"),
     (re.compile(r"on\s+track\s+(?:\S+\s+){0,6}guidance", re.I), "MAINTAIN"),
+    # MAINTAIN — issuing next-quarter / forward guidance (e.g. "forecasting Q2 revenue of $2B"
+    # or "guiding for continued growth in the second quarter")
+    (re.compile(r"forecast\w*\s+(?:\w+\s+){0,6}revenue\s+of\s+\$[\d,.]", re.I), "MAINTAIN"),
+    (re.compile(r"forecast\w*\s+(?:second|third|fourth|first|next|Q[1-4]).{0,20}(?:quarter|fiscal).{0,30}revenue", re.I), "MAINTAIN"),
+    (re.compile(r"\bguiding\s+for\s+(?:\w+\s+){0,6}(?:growth|revenue|results)", re.I), "MAINTAIN"),
+    (re.compile(r"midpoint\s+of\s+(?:our\s+)?(?:guidance|forecast)", re.I), "MAINTAIN"),
+    (re.compile(r"provid\w+\s+(?:\w+\s+){0,4}guidance\s+of", re.I), "MAINTAIN"),
 ]
 
 _BACKLOG_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
@@ -167,7 +178,7 @@ _BACKLOG_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
 # ---------------------------------------------------------------------------
 
 
-def _score_revenue_growth_yoy(yoy_pct: float | None) -> int:
+def _score_revenue_growth_yoy(yoy_pct: float | None) -> int | None:
     """Map YoY revenue growth (%) to a 0-100 raw score.
 
     Factor_Mapping_Guide §F2 Revenue Growth bands:
@@ -177,10 +188,10 @@ def _score_revenue_growth_yoy(yoy_pct: float | None) -> int:
       ≥  10 % →  60
       ≥   0 % →  45    (low single-digit)
       <   0 % →  20    (negative — declining)
-      None    →   0    (data unavailable)
+      None    →  None  (AV rate-limited / no data — excluded from F2 with weight rescaling)
     """
     if yoy_pct is None:
-        return 0
+        return None
     if yoy_pct > 100.0:
         return 100
     if yoy_pct >= 50.0:
@@ -206,16 +217,18 @@ def _score_eps_beat_history(beats_in_3: int) -> int:
     return _EPS_BEAT_SCORE.get(max(0, min(3, beats_in_3)), 20)
 
 
-def _score_guidance_direction(guidance_label: str) -> int:
-    """Map guidance category label to a 0-100 raw score.
+def _score_guidance_direction(guidance_label: str) -> int | None:
+    """Map guidance category label to a 0-100 raw score, or None when undetected.
 
     Factor_Mapping_Guide §F2 Guidance Direction bands:
       RAISE_FULL_YEAR → 100  (raised full-year guidance; LITE → 100)
       MAINTAIN        →  70  (maintained / reaffirmed)
       NARROW_RANGE    →  55  (narrowed range)
       LOWER           →  20  (guidance cut)
-      Unknown         →  55  (default neutral)
+      UNDETECTED      → None (no pattern matched transcript — excluded from F2)
     """
+    if guidance_label == "UNDETECTED":
+        return None
     return _GUIDANCE_SCORES.get(guidance_label, 55)
 
 
@@ -263,13 +276,13 @@ def _classify_guidance_from_transcript(transcript_text: str) -> str:
     This is a pure function: no I/O, no randomness.
     """
     if not transcript_text.strip():
-        return "MAINTAIN"
+        return "UNDETECTED"
 
     for pattern, label in _GUIDANCE_PATTERNS:
         if pattern.search(transcript_text):
             return label
 
-    return "MAINTAIN"  # default: guidance is assumed maintained
+    return "UNDETECTED"  # no pattern matched — caller must handle None score
 
 
 def _classify_backlog_from_transcript(transcript_text: str) -> str:
@@ -289,27 +302,31 @@ def _classify_backlog_from_transcript(transcript_text: str) -> str:
 
 
 def _compute_f2_total(
-    rev_raw: int,
+    rev_raw: int | None,
     eps_raw: int,
-    guidance_raw: int,
+    guidance_raw: int | None,
     margin_raw: int,
     backlog_raw: int,
 ) -> int:
     """Compute the weighted F2 composite score (0-100).
 
-    Applies Factor_Mapping_Guide §F2 weights:
-      Revenue   * 0.30
-      EPS Beat  * 0.20
-      Guidance  * 0.20
-      Margin    * 0.15
-      Backlog   * 0.15
+    Any sub-factor whose raw score is None (AV rate-limited / no data) is
+    excluded and the remaining weights are rescaled proportionally so they
+    still sum to 1.0.  Both revenue and guidance can independently be None.
     """
+    # Determine which weights are active.
+    missing_weight = (
+        (_W_REVENUE if rev_raw is None else 0.0)
+        + (_W_GUIDANCE if guidance_raw is None else 0.0)
+    )
+    scale = 1.0 / (1.0 - missing_weight) if missing_weight < 1.0 else 1.0
+
     weighted = (
-        rev_raw * _W_REVENUE
-        + eps_raw * _W_EPS_BEAT
-        + guidance_raw * _W_GUIDANCE
-        + margin_raw * _W_MARGIN
-        + backlog_raw * _W_BACKLOG
+        (rev_raw * _W_REVENUE * scale if rev_raw is not None else 0.0)
+        + eps_raw * _W_EPS_BEAT * scale
+        + (guidance_raw * _W_GUIDANCE * scale if guidance_raw is not None else 0.0)
+        + margin_raw * _W_MARGIN * scale
+        + backlog_raw * _W_BACKLOG * scale
     )
     return min(100, round(weighted))
 
@@ -356,7 +373,12 @@ class EarningsService:
         self._transcript_api_key = transcript_api_key
         self._client = client
 
-    async def compute_earnings(self, ticker: str) -> EarningsResponse:
+    async def compute_earnings(
+        self,
+        ticker: str,
+        *,
+        income_task: asyncio.Task[dict[str, Any]] | None = None,
+    ) -> EarningsResponse:
         """Compute all earnings-quality indicators and the F2 score for ``ticker``.
 
         Steps:
@@ -368,8 +390,17 @@ class EarningsService:
         Falls back to neutral scores when data is insufficient or unavailable.
         """
         # ---- Fetch raw data ----
-        income_data = await self._fetch_income_statement(ticker)
+        # Use the pre-fetched shared task when provided (avoids duplicate
+        # INCOME_STATEMENT call that FundamentalService also makes).
+        income_data = (
+            await income_task
+            if income_task is not None
+            else await self._fetch_income_statement(ticker)
+        )
         earnings_data = await self._fetch_earnings(ticker)
+
+        # Both empty → AV was rate-limited; scores will be fallback-only.
+        av_data_available = bool(income_data or earnings_data)
 
         # Determine latest quarter for transcript fetch (FMP requires separate year + quarter).
         year_quarter = self._latest_year_quarter_from_earnings(earnings_data)
@@ -403,7 +434,7 @@ class EarningsService:
         quarterly_revenues = self._extract_quarterly_revenues(income_data)
         yoy_pct = self._compute_yoy_revenue_growth(quarterly_revenues)
         rev_raw = _score_revenue_growth_yoy(yoy_pct)
-        rev_score = round(rev_raw * _W_REVENUE)
+        rev_score = round(rev_raw * _W_REVENUE) if rev_raw is not None else None
 
         # ---- EPS Beat History (rolling 3 quarters) ----
         beats_in_3, quarters_checked = self._count_eps_beats(earnings_data)
@@ -412,8 +443,8 @@ class EarningsService:
 
         # ---- Guidance Direction (from transcript) ----
         guidance_label = _classify_guidance_from_transcript(transcript_text)
-        guidance_raw = _score_guidance_direction(guidance_label)
-        guidance_score = round(guidance_raw * _W_GUIDANCE)
+        guidance_raw = _score_guidance_direction(guidance_label)  # None when UNDETECTED
+        guidance_score = round(guidance_raw * _W_GUIDANCE) if guidance_raw is not None else None
 
         # ---- Gross Margin Trend ----
         gross_margins = self._extract_gross_margins(income_data)
@@ -476,6 +507,7 @@ class EarningsService:
             ),
             f2_score=f2_total,
             f2_grade=f2_grade,
+            data_available=av_data_available,
         )
 
     # ------------------------------------------------------------------
@@ -496,6 +528,9 @@ class EarningsService:
             )
             response.raise_for_status()
             data: dict[str, object] = response.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV INCOME_STATEMENT rate-limited for %s", ticker)
+                return {}
             return data
         except (httpx.HTTPStatusError, httpx.RequestError):
             return {}
@@ -514,6 +549,9 @@ class EarningsService:
             )
             response.raise_for_status()
             data: dict[str, object] = response.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV EARNINGS rate-limited for %s", ticker)
+                return {}
             return data
         except (httpx.HTTPStatusError, httpx.RequestError):
             return {}
@@ -541,7 +579,11 @@ class EarningsService:
                 timeout=20.0,
             )
             response.raise_for_status()
-            records: list[dict[str, object]] = response.json()
+            raw = response.json()
+            if not isinstance(raw, list):
+                logger.debug("FMP transcript non-list response for %s: %s", ticker, raw)
+                return ""
+            records: list[dict[str, object]] = raw
             if not records:
                 return ""
             content = records[0].get("content", "")

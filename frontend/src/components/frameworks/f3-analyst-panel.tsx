@@ -62,6 +62,9 @@ export function F3AnalystPanel({ ticker }: F3AnalystPanelProps) {
             message={error instanceof Error ? error.message : 'Failed to load analyst data.'}
           />
         )}
+        {!isFetching && !isError && data && data.f3_score === null && (
+          <DegradedBanner reason="No analyst coverage found on Benzinga or Alpha Vantage for this ticker — consensus rating, price target, and revision data are unavailable." />
+        )}
         {!isFetching && !isError && data && <AnalystContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -72,6 +75,15 @@ export function F3AnalystPanel({ ticker }: F3AnalystPanelProps) {
 // ---------------------------------------------------------------------------
 // State components
 // ---------------------------------------------------------------------------
+
+function DegradedBanner({ reason }: { reason: string }) {
+  return (
+    <div className="atlas-f3-degraded-banner" data-testid="f3-degraded">
+      <span className="atlas-f3-degraded-icon">⚠</span>
+      <span className="atlas-f3-degraded-msg">{reason}</span>
+    </div>
+  );
+}
 
 function LoadingState() {
   return (
@@ -109,9 +121,13 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
       {/* F3 Score hero */}
       <div className="atlas-f3-score-hero">
         <div className="atlas-f3-score-ring">
-          <span className={cn('atlas-f3-score-number', gradeTone)} data-testid="f3-score">
-            {data.f3_score}
-          </span>
+          {data.f3_score !== null ? (
+            <span className={cn('atlas-f3-score-number', gradeTone)} data-testid="f3-score">
+              {data.f3_score}
+            </span>
+          ) : (
+            <span className="atlas-f3-score-number is-muted" data-testid="f3-score">N/A</span>
+          )}
           <span className="atlas-f3-score-denom">/100</span>
         </div>
         <div className="atlas-f3-score-meta">
@@ -143,8 +159,8 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
 // Score bar
 // ---------------------------------------------------------------------------
 
-function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
-  const filled = Math.round((score / 100) * SCORE_BAR_SEGMENTS);
+function ScoreBar({ score, gradeTone }: { score: number | null; gradeTone: string }) {
+  const filled = score !== null ? Math.round((score / 100) * SCORE_BAR_SEGMENTS) : 0;
 
   return (
     <div
@@ -170,7 +186,7 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 
 type IndicatorCardProps = {
   label: string;
-  score: number;
+  score: number | null;
   maxScore: number;
   children: React.ReactNode;
 };
@@ -184,8 +200,11 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
       <header className="atlas-f3-indicator-header">
         <span className="atlas-f3-indicator-label">{label}</span>
         <span className="atlas-f3-indicator-score">
-          {score}
-          <span className="atlas-f3-indicator-max">/{maxScore}</span>
+          {score !== null ? (
+            <>{score}<span className="atlas-f3-indicator-max">/{maxScore}</span></>
+          ) : (
+            <span className="atlas-f3-indicator-na">N/A</span>
+          )}
         </span>
       </header>
       <div className="atlas-f3-indicator-body">{children}</div>
@@ -198,17 +217,18 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
 // ---------------------------------------------------------------------------
 
 function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicator }) {
+  const weightedScore = consensus.score !== null ? Math.round(consensus.score * consensus.weight) : null;
   return (
     <IndicatorCard
       label="Consensus Rating"
-      score={Math.round(consensus.score * consensus.weight)}
+      score={weightedScore}
       maxScore={Math.round(consensus.weight * 100)}
     >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Consensus</dt>
           <dd className={consensusTone(consensus.label)} data-testid="f3-consensus-label">
-            {consensus.label}
+            {consensus.label === 'NO DATA' ? 'No data found' : consensus.label}
           </dd>
         </div>
         {consensus.buy_pct !== null && (
@@ -256,40 +276,44 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
 }
 
 function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator }) {
+  const weightedScore = coverage.score !== null ? Math.round(coverage.score * coverage.weight) : null;
   return (
     <IndicatorCard
       label="Analyst Count"
-      score={Math.round(coverage.score * coverage.weight)}
+      score={weightedScore}
       maxScore={Math.round(coverage.weight * 100)}
     >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Analysts</dt>
           <dd className={coverageTone(coverage.num_analysts)}>
-            {coverage.num_analysts > 0 ? coverage.num_analysts : '—'}
+            {coverage.score !== null && coverage.num_analysts > 0 ? coverage.num_analysts : 'No data found'}
           </dd>
         </div>
-        <div className="atlas-f3-dl-row">
-          <dt>Reliability</dt>
-          <dd>{coverageLabel(coverage.num_analysts)}</dd>
-        </div>
+        {coverage.score !== null && (
+          <div className="atlas-f3-dl-row">
+            <dt>Reliability</dt>
+            <dd>{coverageLabel(coverage.num_analysts)}</dd>
+          </div>
+        )}
       </dl>
     </IndicatorCard>
   );
 }
 
 function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
+  const weightedScore = pt.score !== null ? Math.round(pt.score * pt.weight) : null;
   return (
     <IndicatorCard
       label="PT vs Current Price"
-      score={Math.round(pt.score * pt.weight)}
+      score={weightedScore}
       maxScore={Math.round(pt.weight * 100)}
     >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Upside</dt>
           <dd className={upsideTone(pt.upside_pct)}>
-            {pt.upside_pct !== null ? formatPct(pt.upside_pct) : '—'}
+            {pt.upside_pct !== null ? formatPct(pt.upside_pct) : 'No data found'}
           </dd>
         </div>
         {pt.current_price !== null && (
@@ -310,33 +334,39 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
 }
 
 function PtRevisionCard({ revision }: { revision: PtRevisionIndicator }) {
+  const isNoData = revision.revision_label === 'NO DATA';
+  const weightedScore = revision.score !== null ? Math.round(revision.score * revision.weight) : null;
   return (
     <IndicatorCard
       label="PT Revision Direction"
-      score={Math.round(revision.score * revision.weight)}
+      score={weightedScore}
       maxScore={Math.round(revision.weight * 100)}
     >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Signal</dt>
-          <dd className={revisionTone(revision.revision_label)} data-testid="f3-revision-label">
-            {revision.revision_label}
+          <dd className={isNoData ? 'is-muted' : revisionTone(revision.revision_label)} data-testid="f3-revision-label">
+            {isNoData ? 'No data found' : revision.revision_label}
           </dd>
         </div>
-        <div className="atlas-f3-dl-row">
-          <dt>Raises (30d)</dt>
-          <dd
-            className={
-              revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''
-            }
-          >
-            {revision.raises_30d}
-          </dd>
-        </div>
-        <div className="atlas-f3-dl-row">
-          <dt>Lowers (30d)</dt>
-          <dd className={revision.lowers_30d > 0 ? 'is-red' : ''}>{revision.lowers_30d}</dd>
-        </div>
+        {!isNoData && (
+          <>
+            <div className="atlas-f3-dl-row">
+              <dt>Raises (30d)</dt>
+              <dd
+                className={
+                  revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''
+                }
+              >
+                {revision.raises_30d}
+              </dd>
+            </div>
+            <div className="atlas-f3-dl-row">
+              <dt>Lowers (30d)</dt>
+              <dd className={revision.lowers_30d > 0 ? 'is-red' : ''}>{revision.lowers_30d}</dd>
+            </div>
+          </>
+        )}
       </dl>
     </IndicatorCard>
   );

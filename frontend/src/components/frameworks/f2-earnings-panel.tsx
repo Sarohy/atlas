@@ -33,6 +33,7 @@ const GUIDANCE_LABEL: Record<string, string> = {
   MAINTAIN: 'Maintained',
   NARROW_RANGE: 'Narrowed Range',
   LOWER: 'Lowered',
+  UNDETECTED: 'Unable to detect from transcript',
 };
 
 /** CSS tone classes for the guidance_label categorical string. */
@@ -41,6 +42,7 @@ const GUIDANCE_TONE: Record<string, string> = {
   MAINTAIN: 'is-cyan',
   NARROW_RANGE: 'is-yellow',
   LOWER: 'is-red',
+  UNDETECTED: 'is-muted',
 };
 
 /** Human-readable labels for the backlog_label categorical string. */
@@ -90,6 +92,9 @@ export function F2EarningsPanel({ ticker }: F2EarningsPanelProps) {
             message={error instanceof Error ? error.message : 'Failed to load earnings data.'}
           />
         )}
+        {!isFetching && !isError && data && data.data_available === false && (
+          <DegradedBanner reason="Alpha Vantage rate limit reached — income statement and EPS data unavailable. Earnings score is a neutral fallback (not computed from real data). Try again in ~1 minute." />
+        )}
         {!isFetching && !isError && data && <EarningsContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -122,6 +127,15 @@ function EmptyState({ ticker }: { ticker: string }) {
     <p className="atlas-f2-state-msg" data-testid="f2-empty">
       No earnings data available for {ticker}.
     </p>
+  );
+}
+
+function DegradedBanner({ reason }: { reason: string }) {
+  return (
+    <div className="atlas-f2-degraded-banner" data-testid="f2-degraded">
+      <span className="atlas-f2-degraded-icon">⚠</span>
+      <span className="atlas-f2-degraded-msg">{reason}</span>
+    </div>
   );
 }
 
@@ -199,7 +213,7 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 
 type IndicatorCardProps = {
   label: string;
-  score: number;
+  score: number | null;
   maxScore: number;
   children: React.ReactNode;
 };
@@ -213,8 +227,11 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
       <header className="atlas-f2-indicator-header">
         <span className="atlas-f2-indicator-label">{label}</span>
         <span className="atlas-f2-indicator-score">
-          {score}
-          <span className="atlas-f2-indicator-max">/{maxScore}</span>
+          {score !== null ? (
+            <>{score}<span className="atlas-f2-indicator-max">/{maxScore}</span></>
+          ) : (
+            <span className="atlas-f2-indicator-na">N/A</span>
+          )}
         </span>
       </header>
       <div className="atlas-f2-indicator-body">{children}</div>
@@ -223,6 +240,15 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
 }
 
 function RevenueGrowthCard({ rev }: { rev: RevenueGrowthIndicator }) {
+  if (rev.score === null) {
+    return (
+      <IndicatorCard label="Revenue Growth" score={null} maxScore={rev.max_score}>
+        <p className="atlas-f2-undetected-note">No revenue data available</p>
+        <p className="atlas-f2-undetected-sub">Excluded from F2 score</p>
+      </IndicatorCard>
+    );
+  }
+
   return (
     <IndicatorCard label="Revenue Growth" score={rev.score} maxScore={rev.max_score}>
       <dl className="atlas-f2-dl">
@@ -264,6 +290,7 @@ function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
 }
 
 function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
+  const isUndetected = guidance.guidance_label === 'UNDETECTED';
   const label = GUIDANCE_LABEL[guidance.guidance_label] ?? guidance.guidance_label;
   const tone = GUIDANCE_TONE[guidance.guidance_label] ?? 'is-yellow';
 
@@ -274,10 +301,16 @@ function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
           <dt>Direction</dt>
           <dd className={tone}>{label}</dd>
         </div>
-        {guidance.transcript_quarter !== null && (
+        {!isUndetected && guidance.transcript_quarter !== null && (
           <div className="atlas-f2-dl-row">
             <dt>Source Quarter</dt>
             <dd>{guidance.transcript_quarter}</dd>
+          </div>
+        )}
+        {isUndetected && (
+          <div className="atlas-f2-dl-row">
+            <dt>Impact</dt>
+            <dd className="is-muted">Excluded from F2 score</dd>
           </div>
         )}
       </dl>

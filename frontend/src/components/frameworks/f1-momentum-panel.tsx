@@ -58,6 +58,9 @@ export function F1MomentumPanel({ ticker }: F1MomentumPanelProps) {
             message={error instanceof Error ? error.message : 'Failed to load momentum data.'}
           />
         )}
+        {!isFetching && !isError && data && data.rsi.value === null && (
+          <DegradedBanner reason="No price history found for this ticker on Polygon.io — all momentum indicators are using neutral fallback values. Score cannot be accurately calculated." />
+        )}
         {!isFetching && !isError && data && <MomentumContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -90,6 +93,15 @@ function EmptyState({ ticker }: { ticker: string }) {
     <p className="atlas-f1-state-msg" data-testid="f1-empty">
       No momentum data available for {ticker}.
     </p>
+  );
+}
+
+function DegradedBanner({ reason }: { reason: string }) {
+  return (
+    <div className="atlas-f1-degraded-banner" data-testid="f1-degraded">
+      <span className="atlas-f1-degraded-icon">⚠</span>
+      <span className="atlas-f1-degraded-msg">{reason}</span>
+    </div>
   );
 }
 

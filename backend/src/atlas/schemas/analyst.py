@@ -60,7 +60,7 @@ class ConsensusRatingIndicator(BaseModel):
     label: str = Field(
         description="Consensus label: STRONG BUY | BUY | HOLD | SELL | NO DATA"
     )
-    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when no coverage data available.")
     weight: float = Field(default=0.35, description="Weight in F3 formula.")
 
 
@@ -76,7 +76,7 @@ class AnalystCoverageIndicator(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     num_analysts: int = Field(ge=0, description="Total number of analysts covering the stock.")
-    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when no coverage data available.")
     weight: float = Field(default=0.10, description="Weight in F3 formula.")
 
 
@@ -111,7 +111,7 @@ class PtUpsideIndicator(BaseModel):
             "Null when price or PT data is missing."
         ),
     )
-    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when price or PT data is unavailable.")
     weight: float = Field(default=0.30, description="Weight in F3 formula.")
 
 
@@ -133,7 +133,7 @@ class PtRevisionIndicator(BaseModel):
     revision_label: str = Field(
         description="Summary label: MULTIPLE RAISES | 1 RAISE | NO CHANGE | LOWERED"
     )
-    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when Benzinga ratings fetch failed.")
     weight: float = Field(default=0.25, description="Weight in F3 formula.")
 
 
@@ -158,7 +158,7 @@ class AnalystResponse(BaseModel):
     analyst_coverage: AnalystCoverageIndicator
     pt_upside: PtUpsideIndicator
     pt_revision: PtRevisionIndicator
-    f3_score: int = Field(
-        ge=0, le=100, description="Composite F3 Analyst Conviction score (0-100)."
+    f3_score: int | None = Field(
+        default=None, ge=0, le=100, description="Composite F3 Analyst Conviction score (0-100). Null when all sub-factors have no data."
     )
     f3_grade: str = Field(description="F3 grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID")

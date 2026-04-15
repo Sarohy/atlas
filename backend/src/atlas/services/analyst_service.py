@@ -23,6 +23,7 @@ LITE worked example (from guide):
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date, timedelta
 from typing import Any, Final
@@ -76,15 +77,10 @@ _REVISION_DAYS: Final[int] = 30
 # ---------------------------------------------------------------------------
 
 
-def _score_consensus(buy_pct: float | None) -> int:
-    """Consensus Rating score (0-100).
-
-    Guide: Strong Buy (>80% Buy) → 100 | Buy (60-80%) → 80
-           Hold (40-60%) → 55 | Sell → 20
-    Null / no data → 55 (neutral).
-    """
+def _score_consensus(buy_pct: float | None) -> int | None:
+    """Consensus Rating score (0-100). Returns None when no data available."""
     if buy_pct is None:
-        return 55
+        return None
     if buy_pct > 80:
         return 100
     if buy_pct >= 60:
@@ -94,13 +90,10 @@ def _score_consensus(buy_pct: float | None) -> int:
     return 20
 
 
-def _score_analyst_coverage(count: int | None) -> int:
-    """Analyst Count score (0-100).
-
-    Guide: >20 → 100 | 10-20 → 85 | 5-10 → 65 | <5 → 40 (max 40 per guide rule).
-    """
-    if count is None:
-        return 40
+def _score_analyst_coverage(count: int | None) -> int | None:
+    """Analyst Count score (0-100). Returns None when no coverage data available."""
+    if count is None or count == 0:
+        return None
     if count > 20:
         return 100
     if count >= 10:
@@ -110,15 +103,10 @@ def _score_analyst_coverage(count: int | None) -> int:
     return 40  # <5 analysts: hard cap at 40
 
 
-def _score_pt_upside(upside_pct: float | None) -> int:
-    """PT vs Current Price score (0-100).
-
-    Guide: PT >30% above current → 100 | 15-30% → 85 | 5-15% → 70
-           0-5% → 55 | PT below current → 20
-    Null / no data → 55 (neutral).
-    """
+def _score_pt_upside(upside_pct: float | None) -> int | None:
+    """PT vs Current Price score (0-100). Returns None when price/PT data unavailable."""
     if upside_pct is None:
-        return 55
+        return None
     if upside_pct > 30:
         return 100
     if upside_pct >= 15:
@@ -191,6 +179,32 @@ def _consensus_label(buy_pct: float | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _compute_f3_total(
+    consensus_raw: int | None,
+    coverage_raw: int | None,
+    upside_raw: int | None,
+    revision_raw: int | None,
+) -> int | None:
+    """Compute weighted F3 total, rescaling when sub-factors have no data.
+
+    Sub-factors with None scores are excluded and the remaining weights are
+    rescaled proportionally so they sum to 1.0.  Returns None only when ALL
+    four sub-factors have no data.
+    """
+    pairs = [
+        (consensus_raw, _W_CONSENSUS),
+        (coverage_raw, _W_COVERAGE),
+        (upside_raw, _W_PT_UPSIDE),
+        (revision_raw, _W_PT_REVISION),
+    ]
+    available = [(score, w) for score, w in pairs if score is not None]
+    if not available:
+        return None
+    total_weight = sum(w for _, w in available)
+    weighted = sum(score * (w / total_weight) for score, w in available)
+    return round(weighted)
+
+
 def _build_analyst_response(
     ticker: str,
     strong_buy: int,
@@ -201,16 +215,16 @@ def _build_analyst_response(
     num_analysts: int | None,
     consensus_pt: float | None,
     current_price: float | None,
-    pt_raises: int,
-    pt_lowers: int,
+    has_coverage: bool,
+    ratings_data: dict[str, int] | None,
 ) -> AnalystResponse:
     """Assemble an AnalystResponse from raw fetched values."""
     total_analysts = strong_buy + buy + hold + sell + strong_sell
-    effective_count = num_analysts if num_analysts is not None else total_analysts
+    effective_count: int | None = (num_analysts if num_analysts is not None else total_analysts) if has_coverage else None
 
     # Buy percentage = (Strong Buy + Buy) / total * 100
     buy_pct: float | None = None
-    if total_analysts > 0:
+    if has_coverage and total_analysts > 0:
         buy_pct = (strong_buy + buy) / total_analysts * 100.0
 
     # PT upside
@@ -220,25 +234,27 @@ def _build_analyst_response(
         upside_pct = (consensus_pt - current_price) / current_price * 100.0
         pt_ratio = current_price / consensus_pt  # >1.0 means stock exceeds PT
 
-    # Individual scores (0-100)
+    # Individual scores — None when data unavailable (no fallback points)
     consensus_score = _score_consensus(buy_pct)
     coverage_score = _score_analyst_coverage(effective_count)
     upside_score = _score_pt_upside(upside_pct)
-    revision_score = _score_pt_revision(pt_raises, pt_lowers)
+    revision_score: int | None
+    if ratings_data is None:
+        revision_score = None
+    else:
+        revision_score = _score_pt_revision(ratings_data["raises"], ratings_data["lowers"])
 
-    # Weighted F3
-    f3_raw = (
-        consensus_score * _W_CONSENSUS
-        + coverage_score * _W_COVERAGE
-        + upside_score * _W_PT_UPSIDE
-        + revision_score * _W_PT_REVISION
-    )
-    f3_score = round(f3_raw)
+    # Weighted F3 — excludes None sub-factors and rescales remaining weights
+    f3_score = _compute_f3_total(consensus_score, coverage_score, upside_score, revision_score)
 
     # PT Ratio cap — when stock price exceeds consensus PT by >40%, F3 is
     # capped at 55 (NEUTRAL) regardless of the weighted composite.
-    if pt_ratio is not None and pt_ratio > _PT_RATIO_CAP_THRESHOLD:
+    if f3_score is not None and pt_ratio is not None and pt_ratio > _PT_RATIO_CAP_THRESHOLD:
         f3_score = min(f3_score, _PT_RATIO_F3_CAP)
+
+    pt_raises = ratings_data["raises"] if ratings_data is not None else 0
+    pt_lowers = ratings_data["lowers"] if ratings_data is not None else 0
+    revision_label = _revision_label(pt_raises, pt_lowers) if ratings_data is not None else "NO DATA"
 
     return AnalystResponse(
         ticker=ticker.upper(),
@@ -255,7 +271,7 @@ def _build_analyst_response(
             weight=_W_CONSENSUS,
         ),
         analyst_coverage=AnalystCoverageIndicator(
-            num_analysts=effective_count,
+            num_analysts=effective_count if effective_count is not None else 0,
             score=coverage_score,
             weight=_W_COVERAGE,
         ),
@@ -270,12 +286,12 @@ def _build_analyst_response(
         pt_revision=PtRevisionIndicator(
             raises_30d=pt_raises,
             lowers_30d=pt_lowers,
-            revision_label=_revision_label(pt_raises, pt_lowers),
+            revision_label=revision_label,
             score=revision_score,
             weight=_W_PT_REVISION,
         ),
         f3_score=f3_score,
-        f3_grade=_grade_from_total(f3_score),
+        f3_grade=_grade_from_total(f3_score) if f3_score is not None else "NO DATA",
     )
 
 
@@ -305,17 +321,25 @@ class AnalystService:
             alphavantage_api_key=os.environ.get("ALPHAVANTAGE_API_KEY", ""),
         )
 
-    async def compute_analyst(self, ticker: str) -> AnalystResponse:
+    async def compute_analyst(
+        self,
+        ticker: str,
+        *,
+        overview_task: asyncio.Task[dict[str, Any]] | None = None,
+    ) -> AnalystResponse:
         """Fetch data from Benzinga + Polygon and return an AnalystResponse."""
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             consensus_data = await self._fetch_consensus(client, ticker)
             # Benzinga returns null aggregate_ratings for tickers it doesn't index
             # (typically smaller-cap stocks). Fall back to Alpha Vantage OVERVIEW.
             if not consensus_data:
-                consensus_data = await self._fetch_consensus_av(client, ticker)
+                consensus_data = await self._fetch_consensus_av(
+                    client, ticker, overview_task=overview_task
+                )
             ratings_data = await self._fetch_recent_ratings(client, ticker)
             current_price = await self._fetch_current_price(client, ticker)
 
+        has_coverage = bool(consensus_data)
         strong_buy = consensus_data.get("strong_buy", 0)
         buy = consensus_data.get("buy", 0)
         hold = consensus_data.get("hold", 0)
@@ -323,9 +347,6 @@ class AnalystService:
         strong_sell = consensus_data.get("strong_sell", 0)
         num_analysts: int | None = consensus_data.get("num_analysts")
         consensus_pt: float | None = consensus_data.get("consensus_pt")
-
-        pt_raises: int = ratings_data.get("raises", 0)
-        pt_lowers: int = ratings_data.get("lowers", 0)
 
         return _build_analyst_response(
             ticker=ticker,
@@ -337,8 +358,8 @@ class AnalystService:
             num_analysts=num_analysts,
             consensus_pt=consensus_pt,
             current_price=current_price,
-            pt_raises=pt_raises,
-            pt_lowers=pt_lowers,
+            has_coverage=has_coverage,
+            ratings_data=ratings_data,
         )
 
     # ------------------------------------------------------------------
@@ -363,13 +384,17 @@ class AnalystService:
                 },
             )
             resp.raise_for_status()
-            payload: dict[str, Any] = resp.json()
+            raw = resp.json()
 
-            # Benzinga returns a flat object:
+            # Benzinga returns a flat dict for covered tickers:
             #   aggregate_ratings: {strong_buy, buy, hold, sell} | null
             #   consensus_price_target: float
             #   unique_analyst_count: int
-            # aggregate_ratings is null when Benzinga has no coverage for the ticker.
+            # For tickers with no coverage it returns [] (an empty list).
+            if not isinstance(raw, dict):
+                return {}
+            payload: dict[str, Any] = raw
+
             agg: dict[str, Any] | None = payload.get("aggregate_ratings")
             if not agg:
                 return {}
@@ -420,7 +445,11 @@ class AnalystService:
     # ------------------------------------------------------------------
 
     async def _fetch_consensus_av(
-        self, client: httpx.AsyncClient, ticker: str
+        self,
+        client: httpx.AsyncClient,
+        ticker: str,
+        *,
+        overview_task: asyncio.Task[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Fallback consensus from Alpha Vantage OVERVIEW when Benzinga has no coverage.
 
@@ -435,12 +464,20 @@ class AnalystService:
         if not self._av_key:
             return {}
         try:
-            resp = await client.get(
-                "https://www.alphavantage.co/query",
-                params={"function": "OVERVIEW", "symbol": ticker.upper(), "apikey": self._av_key},
-            )
-            resp.raise_for_status()
-            payload: dict[str, Any] = resp.json()
+            # Use the pre-fetched shared task when available (avoids a
+            # duplicate OVERVIEW call that FundamentalService also makes).
+            if overview_task is not None:
+                payload: dict[str, Any] = await overview_task
+            else:
+                resp = await client.get(
+                    "https://www.alphavantage.co/query",
+                    params={"function": "OVERVIEW", "symbol": ticker.upper(), "apikey": self._av_key},
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+
+            if not payload or "Note" in payload or "Information" in payload:
+                return {}
 
             def _int(key: str) -> int:
                 try:
@@ -483,12 +520,15 @@ class AnalystService:
 
     async def _fetch_recent_ratings(
         self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, int] | None:
         """Count PT raises and lowers from Benzinga calendar/ratings (last 30 days).
 
         action_pt values that count as raises: 'Raises', 'Announces'
         action_pt values that count as lowers: 'Lowers'
         'Maintains' → no change (ignored in counts)
+
+        Returns None on any fetch/parse failure so the caller can distinguish
+        between "no revisions in 30 days" and "data unavailable".
         """
         try:
             date_from = (date.today() - timedelta(days=_REVISION_DAYS)).isoformat()
@@ -523,7 +563,7 @@ class AnalystService:
 
             return {"raises": raises, "lowers": lowers}
         except Exception:
-            return {"raises": 0, "lowers": 0}
+            return None
 
     # ------------------------------------------------------------------
     # Polygon.io — current price

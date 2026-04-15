@@ -365,6 +365,22 @@ export const handlers = [
     });
   }),
 
+  // ── Tranche Sizing ───────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/tranche-sizing/:ticker`, ({ params, request }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    const url = new URL(request.url);
+    const initialCatalyst = url.searchParams.get('initial_catalyst') ?? 'no';
+    const regimeRule = (url.searchParams.get('regime_rule') ?? 'NORMAL').toUpperCase();
+    const iranResolution = url.searchParams.get('iran_resolution');
+    return HttpResponse.json({
+      ticker: ticker.toUpperCase(),
+      t1: initialCatalyst === 'yes' ? '10-15% of available cash' : 'Blocked',
+      t2: regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
+      t3: regimeRule === 'CLEAR' ? '30-40% of available cash' : 'Blocked',
+      t4: iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
+    });
+  }),
+
   // ── Framework Score ───────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/framework-score/:ticker`, ({ params }) => {
     const ticker = String(params['ticker'] ?? 'AAPL');

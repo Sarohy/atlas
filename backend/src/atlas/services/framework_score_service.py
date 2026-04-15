@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
@@ -157,21 +157,31 @@ class FrameworkScoreService:
     async def compute_framework_score(self, ticker: str) -> FrameworkScoreResponse:
         """Compute the Framework Score for ``ticker`` asynchronously.
 
-        All six concurrent tasks (F1-F5 + Brent price) are launched via
-        ``asyncio.gather(return_exceptions=True)`` to ensure one failure
-        does not cancel the others.
+        INCOME_STATEMENT and OVERVIEW are each used by two factor services
+        (F2+F5 and F3+F5 respectively).  We create shared asyncio Tasks for
+        them before the gather so both tasks start immediately; F2, F3, and F5
+        await the same Task objects instead of making duplicate HTTP calls.
+        Each Task executes the fetch exactly once regardless of how many
+        services await it.
         """
         async with httpx.AsyncClient() as client:
-            results = await asyncio.gather(
-                self._fetch_f1(ticker, client),
-                self._fetch_f2(ticker, client),
-                self._fetch_f3(ticker),
-                self._fetch_f4(ticker),
-                self._fetch_f5(ticker),
-                return_exceptions=True,
+            # Shared AV pre-fetches — started before the gather so they are
+            # already in-flight when F2 / F3 / F5 coroutines begin.
+            income_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+                self._fetch_av_raw(client, ticker, "INCOME_STATEMENT")
+            )
+            overview_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+                self._fetch_av_raw(client, ticker, "OVERVIEW")
             )
 
-        f1_result, f2_result, f3_result, f4_result, f5_result = results
+            f1_result, f2_result, f3_result, f4_result, f5_result = await asyncio.gather(
+                self._fetch_f1(ticker, client),
+                self._fetch_f2(ticker, client, income_task),
+                self._fetch_f3(ticker, overview_task),
+                self._fetch_f4(ticker),
+                self._fetch_f5(ticker, income_task, overview_task),
+                return_exceptions=True,
+            )
 
         flags: list[str] = []
 
@@ -233,6 +243,10 @@ class FrameworkScoreService:
             action_tone=action_tone,
             f5_blocked=f5_blocked,
             flags=flags,
+            degraded=(
+                (isinstance(f2_result, EarningsResponse) and not f2_result.data_available)
+                or (isinstance(f5_result, FundamentalResponse) and not f5_result.data_available)
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -248,40 +262,81 @@ class FrameworkScoreService:
         service = MomentumService(api_key=self._polygon_key, client=client)
         return await service.compute_momentum(ticker)
 
+    async def _fetch_av_raw(
+        self,
+        client: httpx.AsyncClient,
+        ticker: str,
+        function: str,
+    ) -> dict[str, Any]:
+        """Fetch one Alpha Vantage endpoint; returns {} on rate-limit or error.
+
+        Used to create shared Tasks so the same endpoint is never fetched more
+        than once per framework-score request regardless of how many factor
+        services need it.
+        """
+        try:
+            resp = await client.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": function,
+                    "symbol": ticker.upper(),
+                    "apikey": self._alphavantage_key,
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+            if "Note" in data or "Information" in data:
+                logger.debug("AV %s rate-limited for %s (shared prefetch)", function, ticker)
+                return {}
+            return data
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return {}
+
     async def _fetch_f2(
         self,
         ticker: str,
         client: httpx.AsyncClient,
+        income_task: asyncio.Task[dict[str, Any]],
     ) -> EarningsResponse:
-        """Fetch F2 Earnings Quality score."""
+        """Fetch F2 Earnings Quality score (shares pre-fetched INCOME_STATEMENT)."""
         service = EarningsService(
             api_key=self._alphavantage_key,
             transcript_api_key=self._transcript_key,
             client=client,
         )
-        return await service.compute_earnings(ticker)
+        return await service.compute_earnings(ticker, income_task=income_task)
 
-    async def _fetch_f3(self, ticker: str) -> AnalystResponse:
-        """Fetch F3 Analyst Sentiment score."""
+    async def _fetch_f3(
+        self,
+        ticker: str,
+        overview_task: asyncio.Task[dict[str, Any]],
+    ) -> AnalystResponse:
+        """Fetch F3 Analyst Sentiment score (shares pre-fetched OVERVIEW)."""
         service = AnalystService(
             benzinga_api_key=self._benzinga_key,
             polygon_api_key=self._polygon_key,
             alphavantage_api_key=self._alphavantage_key,
         )
-        return await service.compute_analyst(ticker)
+        return await service.compute_analyst(ticker, overview_task=overview_task)
 
     async def _fetch_f4(self, ticker: str) -> OptionsFlowResponse:
         """Fetch F4 Options Flow score."""
         service = OptionsFlowService(api_key=self._unusual_whales_key)
         return await service.compute_options_flow(ticker)
 
-    async def _fetch_f5(self, ticker: str) -> FundamentalResponse:
-        """Fetch F5 Fundamental Quality score."""
+    async def _fetch_f5(
+        self,
+        ticker: str,
+        income_task: asyncio.Task[dict[str, Any]],
+        overview_task: asyncio.Task[dict[str, Any]],
+    ) -> FundamentalResponse:
+        """Fetch F5 Fundamental Quality score (shares pre-fetched INCOME_STATEMENT + OVERVIEW)."""
         service = FundamentalService(
             sec_api_key=self._sec_key,
             alphavantage_key=self._alphavantage_key,
         )
-        return await service.compute_fundamental(ticker)
+        return await service.compute_fundamental(ticker, income_task=income_task, overview_task=overview_task)
 
     # ------------------------------------------------------------------
     # Private — score extraction with fallback

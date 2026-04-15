@@ -94,6 +94,9 @@ export function F5FundamentalPanel({ ticker }: F5FundamentalPanelProps) {
             message={error instanceof Error ? error.message : 'Failed to load fundamental data.'}
           />
         )}
+        {!isFetching && !isError && data && data.data_available === false && (
+          <DegradedBanner reason="Alpha Vantage rate limit reached — balance sheet, income statement, cash flow, and overview data unavailable. Fundamental score is a neutral fallback (not computed from real data). Try again in ~1 minute." />
+        )}
         {!isFetching && !isError && data && <FundamentalContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -126,6 +129,15 @@ function EmptyState({ ticker }: { ticker: string }) {
     <p className="atlas-f5-state-msg" data-testid="f5-empty">
       No fundamental data available for {ticker}.
     </p>
+  );
+}
+
+function DegradedBanner({ reason }: { reason: string }) {
+  return (
+    <div className="atlas-f5-degraded-banner" data-testid="f5-degraded">
+      <span className="atlas-f5-degraded-icon">⚠</span>
+      <span className="atlas-f5-degraded-msg">{reason}</span>
+    </div>
   );
 }
 

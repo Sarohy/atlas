@@ -30,6 +30,8 @@ type FrameworkScorePanelProps = {
   ticker: string;
   /** Opens the detail-card overlay for the current framework selection. */
   onPreviewDetails: () => void;
+  /** Score delta from Framework 2 regime modifier (-10, -5, 0, +5). */
+  regimeModifier: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ type FrameworkScorePanelProps = {
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
  */
-export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScorePanelProps) {
+export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }: FrameworkScorePanelProps) {
   const { data, isLoading, isError, error } = useFrameworkScore(ticker);
 
   return (
@@ -94,7 +96,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             factors={data.factors.filter((f) => !f.available)}
           />
         )}
-        {!isLoading && !isError && data && <FrameworkScoreContent data={data} />}
+        {!isLoading && !isError && data && <FrameworkScoreContent data={data} regimeModifier={regimeModifier} />}
         {!isLoading && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
@@ -163,9 +165,10 @@ function DegradedBanner({
 // Main content
 // ---------------------------------------------------------------------------
 
-function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
+function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreResponse; regimeModifier: number }) {
+  const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
-  const filledSegs = Math.round(data.final_score / SCORE_BAR_SEGMENTS);
+  const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
@@ -173,7 +176,7 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
           <span className={cn('atlas-fws-score-number', toneCss)} data-testid="fws-score">
-            {data.final_score}
+            {adjustedScore}
           </span>
           <span className="atlas-fws-score-denom">/100</span>
         </div>
@@ -198,7 +201,7 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
       </div>
 
       {/* ── Score bar ── */}
-      <div className="atlas-fws-score-bar" aria-label={`Score: ${data.final_score} out of 100`}>
+      <div className="atlas-fws-score-bar" aria-label={`Score: ${adjustedScore} out of 100`}>
         {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
           <span
             key={i}

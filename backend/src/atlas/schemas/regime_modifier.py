@@ -38,6 +38,10 @@ class RegimeModifierResponse(BaseModel):
         description="Human-readable name of the triggered rule: "
         "CRISIS | CAUTION | CLEAR | NORMAL.",
     )
+    modifier: int = Field(
+        description="Score delta applied by the triggered rule: "
+        "-10 (Crisis), -5 (Caution), +5 (Clear), 0 (Normal).",
+    )
 
     # ── Cash guidance — fractions (0.35 = 35 %) ──────────────────────────
     min_cash_pct: float = Field(

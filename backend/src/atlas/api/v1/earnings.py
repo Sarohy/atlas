@@ -40,6 +40,7 @@ async def get_earnings(ticker: str) -> EarningsResponse:
         service = EarningsService(
             api_key=settings.alphavantage_api_key,
             transcript_api_key=settings.earnings_transcript_api_key,
+            polygon_api_key=settings.polygon_api_key,
             client=client,
         )
         return await service.compute_earnings(normalised)

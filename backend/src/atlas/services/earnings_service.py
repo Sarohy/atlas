@@ -106,6 +106,14 @@ _AV_BASE_URL: Final[str] = "https://www.alphavantage.co/query"
 # Pattern: GET /stable/earning-call-transcript?symbol={S}&year={Y}&quarter={Q}&apikey={K}
 _FMP_TRANSCRIPT_URL: Final[str] = "https://financialmodelingprep.com/stable/earning-call-transcript"
 
+# Polygon financials endpoint — fallback for AV INCOME_STATEMENT.
+# GET /vX/reference/financials?ticker={T}&timeframe=quarterly&limit={N}&apiKey={K}
+_POLYGON_FINANCIALS_URL: Final[str] = "https://api.polygon.io/vX/reference/financials"
+
+# FMP stable earnings endpoint — fallback for AV EARNINGS (EPS beat history).
+# GET /stable/earnings?symbol={S}&limit={N}&apikey={K}
+_FMP_EARNINGS_URL: Final[str] = "https://financialmodelingprep.com/stable/earnings"
+
 # ---------------------------------------------------------------------------
 # Named constants — transcript regex patterns (compiled once at import time)
 # ---------------------------------------------------------------------------
@@ -365,12 +373,15 @@ class EarningsService:
         self,
         api_key: str,
         transcript_api_key: str,
+        polygon_api_key: str,
         client: httpx.AsyncClient,
     ) -> None:
         # Used for INCOME_STATEMENT and EARNINGS endpoints.
         self._api_key = api_key
-        # Used exclusively for EARNINGS_CALL_TRANSCRIPT endpoint.
+        # Used exclusively for EARNINGS_CALL_TRANSCRIPT endpoint and FMP EARNINGS fallback.
         self._transcript_api_key = transcript_api_key
+        # Used for INCOME_STATEMENT fallback via Polygon /vX/reference/financials.
+        self._polygon_key = polygon_api_key
         self._client = client
 
     async def compute_earnings(
@@ -515,7 +526,7 @@ class EarningsService:
     # ------------------------------------------------------------------
 
     async def _fetch_income_statement(self, ticker: str) -> dict[str, object]:
-        """Fetch quarterly income statement from Alpha Vantage INCOME_STATEMENT."""
+        """Fetch quarterly income statement from AV; falls back to Polygon on failure."""
         try:
             response = await self._client.get(
                 _AV_BASE_URL,
@@ -529,14 +540,15 @@ class EarningsService:
             response.raise_for_status()
             data: dict[str, object] = response.json()
             if "Note" in data or "Information" in data:
-                logger.debug("AV INCOME_STATEMENT rate-limited for %s", ticker)
-                return {}
+                logger.debug("AV INCOME_STATEMENT unavailable for %s — trying Polygon", ticker)
+                return await self._fetch_income_statement_polygon(ticker)
             return data
         except (httpx.HTTPStatusError, httpx.RequestError):
-            return {}
+            logger.debug("AV INCOME_STATEMENT request failed for %s — trying Polygon", ticker)
+            return await self._fetch_income_statement_polygon(ticker)
 
     async def _fetch_earnings(self, ticker: str) -> dict[str, object]:
-        """Fetch quarterly EPS history from Alpha Vantage EARNINGS."""
+        """Fetch quarterly EPS history from AV; falls back to FMP on failure."""
         try:
             response = await self._client.get(
                 _AV_BASE_URL,
@@ -550,9 +562,118 @@ class EarningsService:
             response.raise_for_status()
             data: dict[str, object] = response.json()
             if "Note" in data or "Information" in data:
-                logger.debug("AV EARNINGS rate-limited for %s", ticker)
-                return {}
+                logger.debug("AV EARNINGS unavailable for %s — trying FMP", ticker)
+                return await self._fetch_earnings_fmp(ticker)
             return data
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            logger.debug("AV EARNINGS request failed for %s — trying FMP", ticker)
+            return await self._fetch_earnings_fmp(ticker)
+
+    async def _fetch_income_statement_polygon(
+        self, ticker: str
+    ) -> dict[str, object]:
+        """Fetch quarterly income statement from Polygon and normalise to AV shape.
+
+        Returns ``{"quarterlyReports": [{"totalRevenue": ..., "grossProfit": ...}, ...]}``,
+        most-recent first — matching AV's INCOME_STATEMENT layout so downstream
+        extraction helpers need no changes.
+        """
+        if not self._polygon_key:
+            return {}
+        try:
+            response = await self._client.get(
+                _POLYGON_FINANCIALS_URL,
+                params={
+                    "ticker": ticker,
+                    "timeframe": "quarterly",
+                    # Fetch one extra so _compute_yoy_revenue_growth has 5 quarters.
+                    "limit": _INCOME_STMT_QUARTERS + 1,
+                    "apiKey": self._polygon_key,
+                },
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            raw: dict[str, object] = response.json()
+            results: list[dict[str, object]] = raw.get("results", [])  # type: ignore[assignment]
+            quarterly_reports: list[dict[str, object]] = []
+            for r in results:
+                financials = r.get("financials", {})
+                income = (
+                    financials.get("income_statement", {})
+                    if isinstance(financials, dict)
+                    else {}
+                )
+                rev_entry = income.get("revenues", {}) if isinstance(income, dict) else {}
+                gp_entry = income.get("gross_profit", {}) if isinstance(income, dict) else {}
+                rev_val = rev_entry.get("value") if isinstance(rev_entry, dict) else None
+                gp_val = gp_entry.get("value") if isinstance(gp_entry, dict) else None
+                quarterly_reports.append(
+                    {
+                        "totalRevenue": (
+                            str(int(rev_val)) if rev_val is not None else "None"
+                        ),
+                        "grossProfit": (
+                            str(int(gp_val)) if gp_val is not None else "None"
+                        ),
+                    }
+                )
+            logger.debug(
+                "Polygon INCOME_STATEMENT fallback: %d quarters for %s",
+                len(quarterly_reports),
+                ticker,
+            )
+            return {"quarterlyReports": quarterly_reports}
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return {}
+
+    async def _fetch_earnings_fmp(self, ticker: str) -> dict[str, object]:
+        """Fetch quarterly EPS history from FMP and normalise to AV shape.
+
+        Returns ``{"quarterlyEarnings": [{"fiscalDateEnding": ..., "reportedEPS": ...,
+        "estimatedEPS": ...}, ...]}``, most-recent first — matching AV's EARNINGS layout
+        so ``_count_eps_beats`` and ``_latest_year_quarter_from_earnings`` work unchanged.
+        """
+        if not self._transcript_api_key:
+            return {}
+        try:
+            response = await self._client.get(
+                _FMP_EARNINGS_URL,
+                params={
+                    "symbol": ticker,
+                    # Fetch a few extra in case some entries are missing EPS fields.
+                    "limit": _EPS_BEAT_QUARTERS + 3,
+                    "apikey": self._transcript_api_key,
+                },
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            raw = response.json()
+            if not isinstance(raw, list):
+                return {}
+            quarterly_earnings: list[dict[str, object]] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                eps_actual = item.get("epsActual")
+                eps_estimated = item.get("epsEstimated")
+                date = item.get("date", "")
+                quarterly_earnings.append(
+                    {
+                        "fiscalDateEnding": str(date),
+                        "reportedEPS": (
+                            str(eps_actual) if eps_actual is not None else "None"
+                        ),
+                        "estimatedEPS": (
+                            str(eps_estimated) if eps_estimated is not None else "None"
+                        ),
+                    }
+                )
+            logger.debug(
+                "FMP EARNINGS fallback: %d quarters for %s",
+                len(quarterly_earnings),
+                ticker,
+            )
+            return {"quarterlyEarnings": quarterly_earnings}
         except (httpx.HTTPStatusError, httpx.RequestError):
             return {}
 

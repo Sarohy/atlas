@@ -303,6 +303,7 @@ class FrameworkScoreService:
         service = EarningsService(
             api_key=self._alphavantage_key,
             transcript_api_key=self._transcript_key,
+            polygon_api_key=self._polygon_key,
             client=client,
         )
         return await service.compute_earnings(ticker, income_task=income_task)

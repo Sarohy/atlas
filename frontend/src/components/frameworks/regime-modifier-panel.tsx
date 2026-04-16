@@ -40,15 +40,6 @@ function scoreToTone(score: number): string {
   return 'is-red';
 }
 
-function formatUsd(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -131,11 +122,6 @@ export function RegimeModifierPanel({
             adjustedScore={regime.adjusted_score}
             ruleTriggered={regime.rule_triggered}
             ruleName={regime.rule}
-            minCashPct={regime.min_cash_pct}
-            maxCashPct={regime.max_cash_pct}
-            minCashUsd={regime.min_cash_usd}
-            maxCashUsd={regime.max_cash_usd}
-            outputText={regime.output_text}
           />
         )}
         {!isLoading && !isError && !hasData && activeTicker && <EmptyState ticker={ticker} />}
@@ -183,11 +169,6 @@ type RegimeContentProps = {
   adjustedScore: number;
   ruleTriggered: RegimeRule | null;
   ruleName: string;
-  minCashPct: number;
-  maxCashPct: number;
-  minCashUsd: number | null;
-  maxCashUsd: number | null;
-  outputText: string;
 };
 
 function RegimeContent({
@@ -197,11 +178,6 @@ function RegimeContent({
   adjustedScore,
   ruleTriggered,
   ruleName,
-  minCashPct,
-  maxCashPct,
-  minCashUsd,
-  maxCashUsd,
-  outputText,
 }: RegimeContentProps) {
   const adjTone = scoreToTone(adjustedScore);
   const ruleTone = ruleTriggered !== null ? RULE_TONE[ruleTriggered] : '';
@@ -243,9 +219,6 @@ function RegimeContent({
             <span className={cn('atlas-regime-rule-badge', ruleTone)} data-testid="regime-rule-badge">
               {RULE_LABEL[ruleTriggered]}
             </span>
-            <span className={cn('atlas-regime-delta', ruleTone)} data-testid="regime-delta">
-              {RULE_DELTA_LABEL[ruleTriggered]}
-            </span>
           </>
         ) : (
           <span className="atlas-regime-rule-badge is-muted" data-testid="regime-rule-badge">
@@ -263,39 +236,6 @@ function RegimeContent({
         </div>
       </div>
 
-      {ruleTriggered !== null && (
-        <div className="atlas-regime-cash-block" data-testid="regime-cash-block">
-          <p className="atlas-regime-cash-title">CASH GUIDANCE</p>
-
-          <div className="atlas-regime-cash-row">
-            <span className="atlas-regime-cash-label">Required range</span>
-            <span className="atlas-regime-cash-value" data-testid="regime-cash-pct">
-              {(minCashPct * 100).toFixed(0)}%
-              {' — '}
-              {(maxCashPct * 100).toFixed(0)}% of position
-            </span>
-          </div>
-
-          {minCashUsd !== null && maxCashUsd !== null && (
-            <div className="atlas-regime-cash-row">
-              <span className="atlas-regime-cash-label">USD amount</span>
-              <span className="atlas-regime-cash-value" data-testid="regime-cash-usd">
-                {formatUsd(minCashUsd)} — {formatUsd(maxCashUsd)}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {outputText && (
-        <div className="atlas-regime-output" data-testid="regime-output-text">
-          {outputText.split('\n').map((line, i) => (
-            <p key={i} className="atlas-regime-output-line">
-              {line}
-            </p>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

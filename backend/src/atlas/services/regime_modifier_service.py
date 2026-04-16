@@ -193,8 +193,9 @@ def _determine_rule(
       • Brent crude above $110
       • VIX above 35
 
-    Rule 2 (Caution) — Brent in [$95, $110]
-      (VIX ≤ 35 is guaranteed by Rule 1 priority; no additional VIX check)
+    Rule 2 (Caution) — EITHER of:
+      • Brent in [$95, $110]  (any VIX ≤ 35)
+      • Brent below $95 AND VIX below 24
 
     Rule 3 (Clear) — BOTH of:
       • Brent below $95 for two consecutive daily closes
@@ -209,7 +210,8 @@ def _determine_rule(
     # ── Rule 2 ──────────────────────────────────────────────────────────────
     # VIX > 35 already triggered Rule 1 above; reaching here means VIX ≤ 35.
     brent_in_caution = _RULE2_BRENT_LOW <= brent_price <= _RULE2_BRENT_HIGH
-    if brent_in_caution:
+    brent_low_vix_low = brent_price < _RULE3_BRENT_CLEAR and vix_value < _RULE3_VIX_CLEAR
+    if brent_in_caution or brent_low_vix_low:
         return 2
 
     # ── Rule 3 ──────────────────────────────────────────────────────────────
@@ -428,6 +430,13 @@ class RegimeModifierService:
             None: "NORMAL",
         }
 
+        _RULE_MODIFIERS: dict[int | None, int] = {
+            1: _RULE1_SCORE_DELTA,
+            2: _RULE2_SCORE_DELTA,
+            3: _RULE3_SCORE_DELTA,
+            None: 0,
+        }
+
         return RegimeModifierResponse(
             ticker=ticker,
             active_war=active_war,
@@ -437,6 +446,7 @@ class RegimeModifierService:
             adjusted_score=adjusted_score,
             rule_triggered=rule,
             rule=_RULE_NAMES[rule],
+            modifier=_RULE_MODIFIERS[rule],
             min_cash_pct=min_cash_pct,
             max_cash_pct=max_cash_pct,
             min_cash_usd=float(min_cash_usd) if min_cash_usd is not None else None,

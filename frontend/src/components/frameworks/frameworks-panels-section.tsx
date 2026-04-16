@@ -113,6 +113,7 @@ export function FrameworksPanelsSection() {
         <FrameworkScorePanel
           ticker={activeTicker}
           onPreviewDetails={() => setDetailsOverlayOpen(true)}
+          regimeModifier={regimeData?.modifier ?? 0}
         />
 
         <RegimeModifierPanel

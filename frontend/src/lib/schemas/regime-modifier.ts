@@ -32,6 +32,9 @@ export const regimeModifierResponseSchema = z.object({
   /** Human-readable name of the triggered rule, e.g. CRISIS | CAUTION | CLEAR | NORMAL. */
   rule: z.string(),
 
+  /** Score delta applied by the triggered rule: -10, -5, +5, or 0. */
+  modifier: z.number().int(),
+
   /** Minimum required cash as a fraction of position value (0.35 = 35%) */
   min_cash_pct: z.number(),
 

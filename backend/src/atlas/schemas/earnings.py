@@ -49,7 +49,7 @@ class RevenueGrowthIndicator(BaseModel):
     raw_score: int | None = Field(
         None, ge=0, le=100, description="Raw 0-100 score before weighting. Null when AV data is unavailable."
     )
-    score: int | None = Field(None, ge=0, le=30, description="Weighted F2 contribution (0-30). Null when excluded via weight rescaling.")
+    score: int | None = Field(None, ge=0, description="Weighted F2 contribution. Null when excluded via weight rescaling.")
     max_score: int = Field(default=30)
 
 
@@ -72,7 +72,7 @@ class EpsBeatsIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=20, description="Weighted F2 contribution (0-20).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=20)
 
 
@@ -99,7 +99,7 @@ class GuidanceIndicator(BaseModel):
     raw_score: int | None = Field(
         default=None, ge=0, le=100, description="Raw 0-100 score before weighting. None when UNDETECTED."
     )
-    score: int | None = Field(default=None, ge=0, le=20, description="Weighted F2 contribution (0-20). None when UNDETECTED.")
+    score: int | None = Field(default=None, ge=0, description="Weighted F2 contribution. None when UNDETECTED.")
     max_score: int = Field(default=20)
 
 
@@ -119,7 +119,7 @@ class BacklogBtbIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=15)
 
 
@@ -145,7 +145,7 @@ class MarginTrajectoryIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=15)
 
 
@@ -172,4 +172,13 @@ class EarningsResponse(BaseModel):
     data_available: bool = Field(
         default=True,
         description="False when Alpha Vantage returned no data (rate-limited); scores are fallback-only.",
+    )
+    is_pre_profitability: bool = Field(
+        default=False,
+        description=(
+            "True when the ticker is classified as a pre-profitability growth name "
+            "(negative EPS + revenue growth >20% YoY). When True, growth-trajectory "
+            "sub-factors (revenue + guidance) are weighted at 60% and profitability "
+            "sub-factors (EPS beat + margin + backlog) at 40%."
+        ),
     )

@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { FrameworkOverviewCard, FrameworksScreenData } from '@/types/frameworks';
+import { FrameworkRegimeOverviewCard } from './framework-regime-overview-card';
 import { FrameworksPanelsSection } from './frameworks-panels-section';
 
 type FrameworksScreenProps = {
@@ -13,9 +14,13 @@ export function FrameworksScreen({ data }: FrameworksScreenProps) {
       data-testid="atlas-frameworks-page"
     >
       <section className="atlas-frameworks-overview">
-        {data.overviewCards.map((card) => (
-          <OverviewCard card={card} key={card.label} />
-        ))}
+        {data.overviewCards.map((card) =>
+          card.label === 'Initial Catalyst' ? (
+            <FrameworkRegimeOverviewCard key={card.label} />
+          ) : (
+            <OverviewCard card={card} key={card.label} />
+          ),
+        )}
       </section>
 
       <FrameworksPanelsSection />

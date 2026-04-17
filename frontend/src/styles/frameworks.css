@@ -21,6 +21,13 @@
   border-top-width: 2px;
 }
 
+.atlas-frameworks-overview-card--centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
 .atlas-frameworks-overview-card.is-yellow {
   border-top-color: var(--atlas-portfolio-yellow);
 }

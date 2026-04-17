@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useTickers } from '@/lib/hooks/use-tickers';
+import { useFrameworkStore } from '@/lib/stores/framework-store';
 
 import { F1MomentumPanel } from './f1-momentum-panel';
 import { F2EarningsPanel } from './f2-earnings-panel';
@@ -34,6 +35,7 @@ const EMPTY_TICKER = '';
  */
 export function FrameworksPanelsSection() {
   const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
+  const setActiveTicker = useFrameworkStore((s) => s.setActiveTicker);
 
   // Derive a sorted, deduplicated list of portfolio ticker symbols.
   const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
@@ -58,6 +60,10 @@ export function FrameworksPanelsSection() {
   // (TanStack Query deduplicates: identical key, same cached response).
   const { data: regimeData } = useRegimeModifier(activeTicker, activeWar);
   const regimeRule = regimeData?.rule ?? 'NORMAL';
+
+  useEffect(() => {
+    setActiveTicker(activeTicker);
+  }, [activeTicker, setActiveTicker]);
 
   useEffect(() => {
     if (!detailsOverlayOpen) {

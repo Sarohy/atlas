@@ -1,7 +1,12 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useAnalyst } from '@/lib/hooks/use-analyst';
+import { useEarnings } from '@/lib/hooks/use-earnings';
+import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
+import { useMomentum } from '@/lib/hooks/use-momentum';
+import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 
 // ---------------------------------------------------------------------------
@@ -10,6 +15,13 @@ import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/fram
 
 /** Number of score-bar segments for the full 100-pt scale. */
 const SCORE_BAR_SEGMENTS = 10;
+
+/** Inclusive lower bounds for Framework 1 action buckets. */
+const ACTION_MAXIMUM_POSITION_MIN = 90;
+const ACTION_HOLD_ADD_MIN = 80;
+const ACTION_HOLD_MIN = 70;
+const ACTION_REDUCE_MIN = 60;
+const ACTION_REDUCE_FURTHER_MIN = 55;
 
 /** CSS tone class for each action string from the Factor_Mapping_Guide. */
 const ACTION_TONE_CLASS: Record<string, string> = {
@@ -47,6 +59,21 @@ type FrameworkScorePanelProps = {
  */
 export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }: FrameworkScorePanelProps) {
   const { data, isLoading, isError, error } = useFrameworkScore(ticker);
+  const { data: momentumData } = useMomentum(ticker);
+  const { data: earningsData } = useEarnings(ticker);
+  const { data: analystData } = useAnalyst(ticker);
+  const { data: optionsFlowData } = useOptionsFlow(ticker);
+  const { data: fundamentalData } = useFundamental(ticker);
+
+  const displayData = data
+    ? buildDisplayFrameworkScore(data, {
+        f1: momentumData?.f1_score,
+        f2: earningsData?.f2_score,
+        f3: analystData?.f3_score,
+        f4: optionsFlowData?.f4_score,
+        f5: fundamentalData?.f5_score,
+      })
+    : undefined;
 
   return (
     <section
@@ -96,7 +123,9 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
             factors={data.factors.filter((f) => !f.available)}
           />
         )}
-        {!isLoading && !isError && data && <FrameworkScoreContent data={data} regimeModifier={regimeModifier} />}
+        {!isLoading && !isError && displayData && (
+          <FrameworkScoreContent data={displayData} regimeModifier={regimeModifier} />
+        )}
         {!isLoading && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
@@ -248,6 +277,67 @@ function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreR
       )}
     </div>
   );
+}
+
+function buildDisplayFrameworkScore(
+  data: FrameworkScoreResponse,
+  scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
+): FrameworkScoreResponse {
+  const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
+  const rawTotal = calculateRawTotal(factors);
+  const finalScore = calculateFinalScore(rawTotal);
+  const [action, actionTone] = mapAction(finalScore);
+
+  return {
+    ...data,
+    factors,
+    raw_total: rawTotal,
+    final_score: finalScore,
+    action,
+    action_tone: actionTone,
+  };
+}
+
+function buildDisplayFactor(
+  factor: FactorBreakdown,
+  overrideScore: number | null | undefined,
+): FactorBreakdown {
+  if (overrideScore === undefined || overrideScore === null || !factor.available) {
+    return factor;
+  }
+
+  return {
+    ...factor,
+    score: overrideScore,
+    contribution: overrideScore * factor.weight,
+  };
+}
+
+function calculateRawTotal(factors: FactorBreakdown[]): number {
+  return factors.reduce((sum, factor) => sum + factor.contribution, 0);
+}
+
+function calculateFinalScore(rawTotal: number): number {
+  return Math.max(0, Math.min(100, Math.round(rawTotal)));
+}
+
+function mapAction(finalScore: number): [string, string] {
+  if (finalScore >= ACTION_MAXIMUM_POSITION_MIN) {
+    return ['MAXIMUM POSITION', 'tone-green'];
+  }
+  if (finalScore >= ACTION_HOLD_ADD_MIN) {
+    return ['HOLD / ADD', 'tone-cyan'];
+  }
+  if (finalScore >= ACTION_HOLD_MIN) {
+    return ['HOLD', 'tone-yellow'];
+  }
+  if (finalScore >= ACTION_REDUCE_MIN) {
+    return ['REDUCE', 'tone-orange'];
+  }
+  if (finalScore >= ACTION_REDUCE_FURTHER_MIN) {
+    return ['REDUCE FURTHER', 'tone-red'];
+  }
+  return ['EXIT', 'tone-dark-red'];
 }
 
 // ---------------------------------------------------------------------------

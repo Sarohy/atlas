@@ -28,10 +28,9 @@ describe('Frameworks page', () => {
   it('renders the overview and analysis panels without the legacy rule cards', async () => {
     await renderPage();
 
-    expect(screen.getByText('Initial Catalyst')).toBeInTheDocument();
-    expect(screen.getByTestId('framework-initial-catalyst-select')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Yes' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'No' })).toBeInTheDocument();
+    expect(screen.getByTestId('framework-regime-overview-value')).toBeInTheDocument();
+    expect(screen.queryByText('Framework 2 Regime')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('framework-initial-catalyst-select')).not.toBeInTheDocument();
     expect(screen.getByTestId('frameworks-panels-section')).toBeInTheDocument();
     expect(screen.getByTestId('frameworks-ticker-bar')).toBeInTheDocument();
     expect(screen.getByTestId('framework-score-panel')).toHaveClass('atlas-fws-panel--half-width');
@@ -39,11 +38,7 @@ describe('Frameworks page', () => {
     expect(screen.getByText('Framework 3')).toBeInTheDocument();
     expect(screen.getByTestId('framework-score-hover-overlay')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Preview framework score details' })).toBeInTheDocument();
-    expect(screen.queryByText('F1 Momentum')).not.toBeInTheDocument();
-    expect(screen.queryByText('F2 Earnings Quality')).not.toBeInTheDocument();
-    expect(screen.queryByText('F3 Analyst Conviction')).not.toBeInTheDocument();
-    expect(screen.queryByText('F4 Options Flow')).not.toBeInTheDocument();
-    expect(screen.queryByText('F5 Fundamental Quality')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Framework detail cards' })).not.toBeInTheDocument();
     expect(screen.queryByText('#1 VIX Regime Gate')).not.toBeInTheDocument();
     expect(screen.queryByText('#17 Geopolitical Monitor')).not.toBeInTheDocument();
     expect(screen.queryByText('#31 Data Oracle')).not.toBeInTheDocument();

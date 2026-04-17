@@ -3,6 +3,7 @@
 Data sources:
   - Benzinga        → consensus ratings, analyst count, consensus PT, PT revision direction
   - Alpha Vantage   → fallback consensus when Benzinga has no coverage (OVERVIEW endpoint)
+  - FMP             → second fallback consensus when both Benzinga and AV have no data
   - Polygon.io      → current stock price
 
 F3 sub-indicators and weights (Factor_Mapping_Guide):
@@ -67,6 +68,7 @@ _PT_RATIO_F3_CAP: Final[int] = 55
 
 _BENZINGA_BASE_URL: Final[str] = "https://api.benzinga.com"
 _POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
+_FMP_BASE_URL: Final[str] = "https://financialmodelingprep.com"
 _TIMEOUT: Final[float] = 10.0
 
 # PT revision look-back window in days
@@ -308,10 +310,12 @@ class AnalystService:
         benzinga_api_key: str,
         polygon_api_key: str = "",
         alphavantage_api_key: str = "",
+        fmp_api_key: str = "",
     ) -> None:
         self._benzinga_key = benzinga_api_key
         self._polygon_key = polygon_api_key
         self._av_key = alphavantage_api_key
+        self._fmp_key = fmp_api_key
 
     @classmethod
     def from_env(cls) -> AnalystService:
@@ -319,6 +323,7 @@ class AnalystService:
             benzinga_api_key=os.environ.get("BENZINGA_API_KEY", ""),
             polygon_api_key=os.environ.get("POLYGON_API_KEY", ""),
             alphavantage_api_key=os.environ.get("ALPHAVANTAGE_API_KEY", ""),
+            fmp_api_key=os.environ.get("EARNINGS_TRANSCRIPT_API_KEY", ""),
         )
 
     async def compute_analyst(
@@ -336,6 +341,9 @@ class AnalystService:
                 consensus_data = await self._fetch_consensus_av(
                     client, ticker, overview_task=overview_task
                 )
+            # If AV also has no data, try FMP grades-consensus as a second fallback.
+            if not consensus_data:
+                consensus_data = await self._fetch_consensus_fmp(client, ticker)
             ratings_data = await self._fetch_recent_ratings(client, ticker)
             current_price = await self._fetch_current_price(client, ticker)
 
@@ -501,6 +509,78 @@ class AnalystService:
                     consensus_pt = float(raw_pt)
                 except (TypeError, ValueError):
                     pass
+
+            return {
+                "strong_buy": strong_buy,
+                "buy": buy,
+                "hold": hold,
+                "sell": sell,
+                "strong_sell": strong_sell,
+                "num_analysts": total,
+                "consensus_pt": consensus_pt,
+            }
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
+    # FMP — consensus grades fallback
+    # ------------------------------------------------------------------
+
+    async def _fetch_consensus_fmp(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> dict[str, Any]:
+        """Fallback consensus from FMP when both Benzinga and AV have no data.
+
+        Endpoints used:
+          GET /stable/grades-consensus  → strongBuy, buy, hold, sell, strongSell
+          GET /stable/price-target-consensus → targetConsensus
+        """
+        if not self._fmp_key:
+            return {}
+        try:
+            grades_resp, pt_resp = await asyncio.gather(
+                client.get(
+                    f"{_FMP_BASE_URL}/stable/grades-consensus",
+                    params={"symbol": ticker.upper(), "apikey": self._fmp_key},
+                ),
+                client.get(
+                    f"{_FMP_BASE_URL}/stable/price-target-consensus",
+                    params={"symbol": ticker.upper(), "apikey": self._fmp_key},
+                ),
+            )
+            grades_resp.raise_for_status()
+            pt_resp.raise_for_status()
+
+            grades_list: list[Any] = grades_resp.json()
+            pt_list: list[Any] = pt_resp.json()
+
+            if not grades_list or not isinstance(grades_list, list):
+                return {}
+            g: dict[str, Any] = grades_list[0]
+
+            def _gi(key: str) -> int:
+                try:
+                    return int(g.get(key) or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            strong_buy = _gi("strongBuy")
+            buy = _gi("buy")
+            hold = _gi("hold")
+            sell = _gi("sell")
+            strong_sell = _gi("strongSell")
+            total = strong_buy + buy + hold + sell + strong_sell
+            if total == 0:
+                return {}
+
+            consensus_pt: float | None = None
+            if pt_list and isinstance(pt_list, list):
+                raw_pt = pt_list[0].get("targetConsensus")
+                if raw_pt:
+                    try:
+                        consensus_pt = float(raw_pt)
+                    except (TypeError, ValueError):
+                        pass
 
             return {
                 "strong_buy": strong_buy,

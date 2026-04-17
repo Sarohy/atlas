@@ -166,7 +166,7 @@ function ScoreBar({ score, gradeTone }: { score: number | null; gradeTone: strin
     <div
       className="atlas-f3-score-bar"
       role="progressbar"
-      aria-valuenow={score}
+      aria-valuenow={score ?? undefined}
       aria-valuemin={0}
       aria-valuemax={100}
     >

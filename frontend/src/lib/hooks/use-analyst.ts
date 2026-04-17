@@ -21,8 +21,7 @@ export function useAnalyst(ticker: string) {
     queryKey: analystKey(ticker),
     queryFn: () => fetchAnalyst(ticker),
     enabled: ticker.trim().length >= MIN_TICKER_LENGTH,
-    // Analyst consensus changes slowly — stale after 60 minutes.
-    staleTime: 60 * 60 * 1_000,
+    staleTime: 0,
     retry: 1,
   });
 }

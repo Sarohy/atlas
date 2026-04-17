@@ -1,7 +1,12 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useAnalyst } from '@/lib/hooks/use-analyst';
+import { useEarnings } from '@/lib/hooks/use-earnings';
+import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
+import { useMomentum } from '@/lib/hooks/use-momentum';
+import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 
 // ---------------------------------------------------------------------------
@@ -10,6 +15,13 @@ import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/fram
 
 /** Number of score-bar segments for the full 100-pt scale. */
 const SCORE_BAR_SEGMENTS = 10;
+
+/** Inclusive lower bounds for Framework 1 action buckets. */
+const ACTION_MAXIMUM_POSITION_MIN = 90;
+const ACTION_HOLD_ADD_MIN = 80;
+const ACTION_HOLD_MIN = 70;
+const ACTION_REDUCE_MIN = 60;
+const ACTION_REDUCE_FURTHER_MIN = 55;
 
 /** CSS tone class for each action string from the Factor_Mapping_Guide. */
 const ACTION_TONE_CLASS: Record<string, string> = {
@@ -30,6 +42,8 @@ type FrameworkScorePanelProps = {
   ticker: string;
   /** Opens the detail-card overlay for the current framework selection. */
   onPreviewDetails: () => void;
+  /** Score delta from Framework 2 regime modifier (-10, -5, 0, +5). */
+  regimeModifier: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -43,8 +57,23 @@ type FrameworkScorePanelProps = {
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
  */
-export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScorePanelProps) {
+export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }: FrameworkScorePanelProps) {
   const { data, isLoading, isError, error } = useFrameworkScore(ticker);
+  const { data: momentumData } = useMomentum(ticker);
+  const { data: earningsData } = useEarnings(ticker);
+  const { data: analystData } = useAnalyst(ticker);
+  const { data: optionsFlowData } = useOptionsFlow(ticker);
+  const { data: fundamentalData } = useFundamental(ticker);
+
+  const displayData = data
+    ? buildDisplayFrameworkScore(data, {
+        f1: momentumData?.f1_score,
+        f2: earningsData?.f2_score,
+        f3: analystData?.f3_score,
+        f4: optionsFlowData?.f4_score,
+        f5: fundamentalData?.f5_score,
+      })
+    : undefined;
 
   return (
     <section
@@ -88,7 +117,15 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             }
           />
         )}
-        {!isLoading && !isError && data && <FrameworkScoreContent data={data} />}
+        {!isLoading && !isError && data && data.degraded && (
+          <DegradedBanner
+            flags={data.flags}
+            factors={data.factors.filter((f) => !f.available)}
+          />
+        )}
+        {!isLoading && !isError && displayData && (
+          <FrameworkScoreContent data={displayData} regimeModifier={regimeModifier} />
+        )}
         {!isLoading && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
@@ -123,13 +160,44 @@ function EmptyState({ ticker }: { ticker: string }) {
   );
 }
 
+function DegradedBanner({
+  flags,
+  factors,
+}: {
+  flags: string[];
+  factors: FactorBreakdown[];
+}) {
+  const affectedNames = factors.map((f) => `${f.key.toUpperCase()} ${f.name}`).join(', ');
+  return (
+    <div className="atlas-fws-degraded-banner" data-testid="fws-degraded">
+      <span className="atlas-fws-degraded-icon">⚠</span>
+      <div className="atlas-fws-degraded-body">
+        <p className="atlas-fws-degraded-title">Score degraded — partial data</p>
+        <p className="atlas-fws-degraded-msg">
+          One or more factors could not be computed from live data. The conviction
+          score shown is unreliable and will not be cached.
+        </p>
+        {affectedNames && (
+          <p className="atlas-fws-degraded-affected">Affected: {affectedNames}</p>
+        )}
+        {flags.map((flag, i) => (
+          <p key={i} className="atlas-fws-degraded-flag">
+            {flag}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main content
 // ---------------------------------------------------------------------------
 
-function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
+function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreResponse; regimeModifier: number }) {
+  const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
-  const filledSegs = Math.round(data.final_score / SCORE_BAR_SEGMENTS);
+  const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
@@ -137,7 +205,7 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
           <span className={cn('atlas-fws-score-number', toneCss)} data-testid="fws-score">
-            {data.final_score}
+            {adjustedScore}
           </span>
           <span className="atlas-fws-score-denom">/100</span>
         </div>
@@ -162,7 +230,7 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
       </div>
 
       {/* ── Score bar ── */}
-      <div className="atlas-fws-score-bar" aria-label={`Score: ${data.final_score} out of 100`}>
+      <div className="atlas-fws-score-bar" aria-label={`Score: ${adjustedScore} out of 100`}>
         {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
           <span
             key={i}
@@ -209,6 +277,67 @@ function FrameworkScoreContent({ data }: { data: FrameworkScoreResponse }) {
       )}
     </div>
   );
+}
+
+function buildDisplayFrameworkScore(
+  data: FrameworkScoreResponse,
+  scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
+): FrameworkScoreResponse {
+  const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
+  const rawTotal = calculateRawTotal(factors);
+  const finalScore = calculateFinalScore(rawTotal);
+  const [action, actionTone] = mapAction(finalScore);
+
+  return {
+    ...data,
+    factors,
+    raw_total: rawTotal,
+    final_score: finalScore,
+    action,
+    action_tone: actionTone,
+  };
+}
+
+function buildDisplayFactor(
+  factor: FactorBreakdown,
+  overrideScore: number | null | undefined,
+): FactorBreakdown {
+  if (overrideScore === undefined || overrideScore === null || !factor.available) {
+    return factor;
+  }
+
+  return {
+    ...factor,
+    score: overrideScore,
+    contribution: overrideScore * factor.weight,
+  };
+}
+
+function calculateRawTotal(factors: FactorBreakdown[]): number {
+  return factors.reduce((sum, factor) => sum + factor.contribution, 0);
+}
+
+function calculateFinalScore(rawTotal: number): number {
+  return Math.max(0, Math.min(100, Math.round(rawTotal)));
+}
+
+function mapAction(finalScore: number): [string, string] {
+  if (finalScore >= ACTION_MAXIMUM_POSITION_MIN) {
+    return ['MAXIMUM POSITION', 'tone-green'];
+  }
+  if (finalScore >= ACTION_HOLD_ADD_MIN) {
+    return ['HOLD / ADD', 'tone-cyan'];
+  }
+  if (finalScore >= ACTION_HOLD_MIN) {
+    return ['HOLD', 'tone-yellow'];
+  }
+  if (finalScore >= ACTION_REDUCE_MIN) {
+    return ['REDUCE', 'tone-orange'];
+  }
+  if (finalScore >= ACTION_REDUCE_FURTHER_MIN) {
+    return ['REDUCE FURTHER', 'tone-red'];
+  }
+  return ['EXIT', 'tone-dark-red'];
 }
 
 // ---------------------------------------------------------------------------

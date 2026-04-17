@@ -10,6 +10,8 @@ export type FrameworkTone = 'default' | 'green' | 'yellow' | 'red' | 'cyan' | 'o
 export type FrameworkOverviewCard = {
   detail: string;
   label: string;
+  options?: readonly string[];
+  selectedValue?: string;
   tone: Exclude<FrameworkTone, 'default'>;
   value: string;
 };

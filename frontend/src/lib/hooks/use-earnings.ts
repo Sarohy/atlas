@@ -19,8 +19,7 @@ export function useEarnings(ticker: string) {
     queryKey: earningsKey(ticker),
     queryFn: () => fetchEarnings(ticker),
     enabled: ticker.trim().length >= MIN_TICKER_LENGTH,
-    // Earnings data is based on quarterly filings — stale after 30 minutes.
-    staleTime: 30 * 60 * 1_000,
+    staleTime: 0,
     retry: 1,
   });
 }

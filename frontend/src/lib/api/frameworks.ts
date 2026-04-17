@@ -20,10 +20,12 @@ const SIGNALS_TITLE = 'Live Diplomatic Signals';
 
 const OVERVIEW_CARDS: readonly FrameworkOverviewCard[] = [
   {
-    detail: 'VIX 25.33 · declining from 30+',
-    label: 'VIX Regime',
+    detail: '',
+    label: 'Initial Catalyst',
+    options: ['Yes', 'No'],
+    selectedValue: 'No',
     tone: 'yellow',
-    value: 'CAUTION',
+    value: 'No',
   },
   {
     detail: 'Brent $97 · spiking today +5%',

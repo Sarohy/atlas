@@ -27,4 +27,15 @@ async def search_tickers(
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         service = TickerSearchService(api_key=settings.polygon_api_key, client=client)
-        return await service.search(q)
+        try:
+            return await service.search(q)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Ticker search upstream error: {exc.response.status_code}",
+            ) from exc
+        except httpx.RequestError:
+            raise HTTPException(
+                status_code=503,
+                detail="Ticker search unavailable: could not reach Polygon.io",
+            )

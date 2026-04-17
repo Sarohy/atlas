@@ -7,10 +7,10 @@ import { z } from 'zod';
 export const revenueGrowthIndicatorSchema = z.object({
   /** YoY quarterly revenue growth (%). Null when data is unavailable. */
   yoy_pct: z.number().nullable(),
-  /** Raw 0-100 score before weighting. */
-  raw_score: z.number().int().min(0).max(100),
-  /** Weighted F2 contribution (0-30). Weight: 30%. */
-  score: z.number().int().min(0).max(30),
+  /** Raw 0-100 score before weighting. Null when AV data is unavailable. */
+  raw_score: z.number().int().min(0).max(100).nullable(),
+  /** Weighted F2 contribution. Null when excluded via weight rescaling. */
+  score: z.number().int().min(0).nullable(),
   max_score: z.number().int().default(30),
 });
 
@@ -21,20 +21,20 @@ export const epsBeatsIndicatorSchema = z.object({
   quarters_checked: z.number().int().nullable(),
   /** Raw 0-100 score before weighting. */
   raw_score: z.number().int().min(0).max(100),
-  /** Weighted F2 contribution (0-20). Weight: 20%. */
-  score: z.number().int().min(0).max(20),
+  /** Weighted F2 contribution. Weight: 20%. */
+  score: z.number().int().min(0),
   max_score: z.number().int().default(20),
 });
 
 export const guidanceIndicatorSchema = z.object({
-  /** Guidance classification from transcript NLP. */
+  /** Guidance classification from transcript NLP. UNDETECTED when no pattern matched. */
   guidance_label: z.string(),
   /** Fiscal quarter of the transcript used (e.g. '2024Q3'). */
   transcript_quarter: z.string().nullable(),
-  /** Raw 0-100 score before weighting. */
-  raw_score: z.number().int().min(0).max(100),
-  /** Weighted F2 contribution (0-20). Weight: 20%. */
-  score: z.number().int().min(0).max(20),
+  /** Raw 0-100 score before weighting. Null when UNDETECTED. */
+  raw_score: z.number().int().min(0).max(100).nullable(),
+  /** Weighted F2 contribution. Null when UNDETECTED (sub-factor excluded from F2). */
+  score: z.number().int().min(0).nullable(),
   max_score: z.number().int().default(20),
 });
 
@@ -45,8 +45,8 @@ export const marginTrajectoryIndicatorSchema = z.object({
   margin_change_pts: z.number().nullable(),
   /** Raw 0-100 score before weighting. */
   raw_score: z.number().int().min(0).max(100),
-  /** Weighted F2 contribution (0-15). Weight: 15%. */
-  score: z.number().int().min(0).max(15),
+  /** Weighted F2 contribution. Weight: 15%. */
+  score: z.number().int().min(0),
   max_score: z.number().int().default(15),
 });
 
@@ -55,8 +55,8 @@ export const backlogBtbIndicatorSchema = z.object({
   backlog_label: z.string(),
   /** Raw 0-100 score before weighting. */
   raw_score: z.number().int().min(0).max(100),
-  /** Weighted F2 contribution (0-15). Weight: 15%. */
-  score: z.number().int().min(0).max(15),
+  /** Weighted F2 contribution. Weight: 15%. */
+  score: z.number().int().min(0),
   max_score: z.number().int().default(15),
 });
 
@@ -73,6 +73,15 @@ export const earningsResponseSchema = z.object({
   backlog_btb: backlogBtbIndicatorSchema,
   f2_score: z.number().int().min(0).max(100),
   f2_grade: z.string(),
+  /** False when Alpha Vantage was rate-limited — scores are fallback values. */
+  data_available: z.boolean().default(true),
+  /**
+   * True when the ticker is a pre-profitability growth name (negative EPS +
+   * revenue growth >20% YoY). When True, growth-trajectory sub-factors
+   * (revenue + guidance) are weighted at 60% and profitability sub-factors
+   * (EPS beat + margin + backlog) at 40%.
+   */
+  is_pre_profitability: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------

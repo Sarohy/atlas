@@ -4,8 +4,7 @@ import { fetchRegimeModifier } from '@/lib/api/regime-modifier';
 import type { FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { RegimeModifierResponse } from '@/lib/schemas/regime-modifier';
 
-/** React Query stale time: 2 minutes (market regime can shift intraday). */
-const STALE_TIME_MS = 2 * 60 * 1_000;
+
 
 /**
  * Fetch and cache the regime-adjusted conviction score for a given ticker.
@@ -39,7 +38,7 @@ export function useRegimeModifier(
       return fetchRegimeModifier(ticker, activeWar, cached?.final_score);
     },
     enabled: ticker.trim().length >= 1,
-    staleTime: STALE_TIME_MS,
+    staleTime: 0,
     retry: 1,
   });
 }

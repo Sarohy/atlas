@@ -317,6 +317,108 @@ export const handlers = [
     });
   }),
 
+  // ── Options Flow ───────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/options-flow/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      whale_block: {
+        largest_premium: 1500000,
+        score: 80,
+        weight: 0.35,
+      },
+      call_put_ratio: {
+        call_premium: 2400000,
+        put_premium: 800000,
+        ratio: 3,
+        score: 75,
+        weight: 0.2,
+      },
+      volume_oi: {
+        call_volume: 120000,
+        call_open_interest: 60000,
+        vol_oi_ratio: 2,
+        score: 70,
+        weight: 0.2,
+      },
+      dark_pool: {
+        total_dark_pool_premium: 950000,
+        largest_print: 300000,
+        print_count: 4,
+        score: 72,
+        weight: 0.15,
+      },
+      sweep_type: {
+        has_golden_sweep: false,
+        has_single_sweep: true,
+        has_repeated_hits: true,
+        sweep_premium: 250000,
+        score: 68,
+        weight: 0.1,
+      },
+      signal_tier: 'BLUE',
+      collar_flag: false,
+      f4_score: 74,
+      f4_grade: 'BUY',
+    });
+  }),
+
+  // ── Fundamental ────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/fundamental/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      insider_activity: {
+        net_buy_value: 500000,
+        net_sell_value: 0,
+        transaction_count: 2,
+        c_suite_sell_value: 0,
+        ceo_cfo_sell_value: 0,
+        activity_label: 'NET_BUYING',
+        score: 85,
+        weight: 0.3,
+      },
+      altman_z: {
+        z_score: 3.1,
+        x1_working_capital_ratio: 0.2,
+        x2_retained_earnings_ratio: 0.3,
+        x3_ebit_ratio: 0.18,
+        x4_market_cap_to_liabilities: 2.6,
+        x5_revenue_to_assets: 1.1,
+        zone: 'SAFE',
+        score: 80,
+        weight: 0.25,
+      },
+      free_cash_flow: {
+        fcf_current: 2200000000,
+        fcf_prior: 1800000000,
+        fcf_trend: 'POSITIVE_GROWING',
+        score: 78,
+        weight: 0.2,
+      },
+      debt_equity: {
+        total_debt: 1000000000,
+        total_equity: 5000000000,
+        ratio: 0.2,
+        score: 75,
+        weight: 0.15,
+      },
+      institutional_ownership: {
+        ownership_pct: 0.72,
+        change_label: 'NET_BUYING',
+        score: 70,
+        weight: 0.1,
+      },
+      insider_cap: null,
+      altman_cap: null,
+      f5_blocked: false,
+      active_cap: null,
+      f5_score: 77,
+      f5_grade: 'GOOD',
+      data_available: true,
+    });
+  }),
+
   // ── Market Conditions ─────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/market/conditions`, () => {
     return HttpResponse.json({
@@ -343,13 +445,41 @@ export const handlers = [
       base_score: baseScore,
       adjusted_score: adjustedScore,
       rule_triggered: ruleTriggered,
+      rule: activeWar ? 'CRISIS' : 'CAUTION',
       min_cash_pct: activeWar ? 0.35 : 0.25,
       max_cash_pct: activeWar ? 0.4 : 0.35,
-      min_cash_usd: null,
-      max_cash_usd: null,
+      min_cash_usd: activeWar ? 35000 : 25000,
+      max_cash_usd: activeWar ? 40000 : 35000,
       output_text: activeWar
         ? 'must stay in cash\ncannot be touched\nfor any trade'
         : 'must stay in cash',
+    });
+  }),
+
+  // ── Position Sizing ─────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/position-sizing/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    return HttpResponse.json({
+      ticker,
+      conviction_score: 79,
+      action: 'HOLD',
+      instruction: 'Hold position — no new adds.',
+    });
+  }),
+
+  // ── Tranche Sizing ───────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/tranche-sizing/:ticker`, ({ params, request }) => {
+    const ticker = String(params['ticker'] ?? 'AAPL');
+    const url = new URL(request.url);
+    const initialCatalyst = url.searchParams.get('initial_catalyst') ?? 'no';
+    const regimeRule = (url.searchParams.get('regime_rule') ?? 'NORMAL').toUpperCase();
+    const iranResolution = url.searchParams.get('iran_resolution');
+    return HttpResponse.json({
+      ticker: ticker.toUpperCase(),
+      t1: initialCatalyst === 'yes' ? '10-15% of available cash' : 'Blocked',
+      t2: regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
+      t3: regimeRule === 'CLEAR' ? '30-40% of available cash' : 'Blocked',
+      t4: iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
     });
   }),
 

@@ -118,15 +118,15 @@ class TestDetermineRule:
         )
         assert rule == 2
 
-    def test_rule2_does_not_trigger_with_only_brent_in_range(self) -> None:
-        """Only Brent in caution range — Rule 2 requires BOTH conditions."""
+    def test_rule2_triggers_when_brent_in_range_and_vix_below_24(self) -> None:
+        """Brent in [95,110] AND VIX < 24 → Rule 2 (Caution)."""
         rule = _determine_rule(
             active_war=False,
             brent_price=100.0,
-            vix_value=23.0,  # below VIX caution threshold
+            vix_value=23.0,  # below VIX caution threshold — still triggers Rule 2
             brent_consecutive_below_95=False,
         )
-        assert rule is None
+        assert rule == 2
 
     def test_rule2_does_not_trigger_with_only_vix_in_range(self) -> None:
         """Only VIX in caution range — Rule 2 requires BOTH conditions."""

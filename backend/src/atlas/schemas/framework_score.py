@@ -113,3 +113,7 @@ class FrameworkScoreResponse(BaseModel):
         default_factory=list,
         description="Human-readable flag messages (e.g. F5 cap applied, missing API keys).",
     )
+    degraded: bool = Field(
+        default=False,
+        description="True when F2 or F5 used fallback scores due to an Alpha Vantage rate-limit. Do not cache this response.",
+    )

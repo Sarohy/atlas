@@ -46,10 +46,10 @@ class RevenueGrowthIndicator(BaseModel):
         None,
         description="YoY quarterly revenue growth (%). Null when data is unavailable.",
     )
-    raw_score: int = Field(
-        ge=0, le=100, description="Raw 0-100 score before weighting."
+    raw_score: int | None = Field(
+        None, ge=0, le=100, description="Raw 0-100 score before weighting. Null when AV data is unavailable."
     )
-    score: int = Field(ge=0, le=30, description="Weighted F2 contribution (0-30).")
+    score: int | None = Field(None, ge=0, description="Weighted F2 contribution. Null when excluded via weight rescaling.")
     max_score: int = Field(default=30)
 
 
@@ -72,7 +72,7 @@ class EpsBeatsIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=20, description="Weighted F2 contribution (0-20).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=20)
 
 
@@ -80,23 +80,26 @@ class GuidanceIndicator(BaseModel):
     """Management guidance direction derived from the earnings-call transcript.
 
     Weight: 20%  →  max 20 pts contribution.
+    raw_score and score are None when guidance_label is UNDETECTED (no pattern
+    matched the transcript); the sub-factor is excluded from the F2 composite
+    and remaining weights are rescaled proportionally.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     guidance_label: str = Field(
         description=(
-            "Guidance classification: RAISE_FULL_YEAR | MAINTAIN | NARROW_RANGE | LOWER"
+            "Guidance classification: RAISE_FULL_YEAR | MAINTAIN | NARROW_RANGE | LOWER | UNDETECTED"
         )
     )
     transcript_quarter: str | None = Field(
         None,
         description="Fiscal quarter of the transcript used (e.g. '2024Q3').",
     )
-    raw_score: int = Field(
-        ge=0, le=100, description="Raw 0-100 score before weighting."
+    raw_score: int | None = Field(
+        default=None, ge=0, le=100, description="Raw 0-100 score before weighting. None when UNDETECTED."
     )
-    score: int = Field(ge=0, le=20, description="Weighted F2 contribution (0-20).")
+    score: int | None = Field(default=None, ge=0, description="Weighted F2 contribution. None when UNDETECTED.")
     max_score: int = Field(default=20)
 
 
@@ -116,7 +119,7 @@ class BacklogBtbIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=15)
 
 
@@ -142,7 +145,7 @@ class MarginTrajectoryIndicator(BaseModel):
     raw_score: int = Field(
         ge=0, le=100, description="Raw 0-100 score before weighting."
     )
-    score: int = Field(ge=0, le=15, description="Weighted F2 contribution (0-15).")
+    score: int = Field(ge=0, description="Weighted F2 contribution.")
     max_score: int = Field(default=15)
 
 
@@ -165,4 +168,17 @@ class EarningsResponse(BaseModel):
     f2_score: int = Field(ge=0, le=100, description="Composite F2 Earnings Quality score (0-100).")
     f2_grade: str = Field(
         description="F2 grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID"
+    )
+    data_available: bool = Field(
+        default=True,
+        description="False when Alpha Vantage returned no data (rate-limited); scores are fallback-only.",
+    )
+    is_pre_profitability: bool = Field(
+        default=False,
+        description=(
+            "True when the ticker is classified as a pre-profitability growth name "
+            "(negative EPS + revenue growth >20% YoY). When True, growth-trajectory "
+            "sub-factors (revenue + guidance) are weighted at 60% and profitability "
+            "sub-factors (EPS beat + margin + backlog) at 40%."
+        ),
     )

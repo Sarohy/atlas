@@ -18,7 +18,7 @@ export function useFundamental(ticker: string) {
     queryKey: fundamentalKey(ticker),
     queryFn: () => fetchFundamental(ticker),
     enabled: ticker.trim().length >= 1,
-    staleTime: 24 * 60 * 60 * 1_000,
+    staleTime: 0,
     retry: 1,
   });
 }

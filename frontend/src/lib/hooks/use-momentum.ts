@@ -19,8 +19,7 @@ export function useMomentum(ticker: string) {
     queryKey: momentumKey(ticker),
     queryFn: () => fetchMomentum(ticker),
     enabled: ticker.trim().length >= MIN_TICKER_LENGTH,
-    // Momentum indicators are based on daily close data — stale after 5 minutes.
-    staleTime: 5 * 60 * 1_000,
+    staleTime: 0,
     retry: 1,
   });
 }

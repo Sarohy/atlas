@@ -94,6 +94,8 @@ export const fundamentalResponseSchema = z.object({
   f5_score: z.number().int().min(0).max(100),
   /** STRONG | GOOD | NEUTRAL | WEAK | DISTRESSED */
   f5_grade: z.string(),
+  /** False when Alpha Vantage was rate-limited — scores are fallback values. */
+  data_available: z.boolean().default(true),
 });
 
 // ---------------------------------------------------------------------------

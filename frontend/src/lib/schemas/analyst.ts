@@ -17,13 +17,13 @@ export const consensusRatingIndicatorSchema = z.object({
   buy_pct: z.number().nullable(),
   /** STRONG BUY | BUY | HOLD | SELL | NO DATA */
   label: z.string(),
-  score: z.number().int().min(0).max(100),
+  score: z.number().int().min(0).max(100).nullable(),
   weight: z.number().default(0.35),
 });
 
 export const analystCoverageIndicatorSchema = z.object({
   num_analysts: z.number().int().min(0),
-  score: z.number().int().min(0).max(100),
+  score: z.number().int().min(0).max(100).nullable(),
   weight: z.number().default(0.10),
 });
 
@@ -32,16 +32,16 @@ export const ptUpsideIndicatorSchema = z.object({
   consensus_pt: z.number().nullable(),
   /** Percentage upside from current price to consensus PT. Negative = downside. */
   upside_pct: z.number().nullable(),
-  score: z.number().int().min(0).max(100),
+  score: z.number().int().min(0).max(100).nullable(),
   weight: z.number().default(0.30),
 });
 
 export const ptRevisionIndicatorSchema = z.object({
   raises_30d: z.number().int().min(0),
   lowers_30d: z.number().int().min(0),
-  /** MULTIPLE RAISES | 1 RAISE | NO CHANGE | LOWERED */
+  /** MULTIPLE RAISES | 1 RAISE | NO CHANGE | LOWERED | NO DATA */
   revision_label: z.string(),
-  score: z.number().int().min(0).max(100),
+  score: z.number().int().min(0).max(100).nullable(),
   weight: z.number().default(0.25),
 });
 
@@ -55,7 +55,7 @@ export const analystResponseSchema = z.object({
   analyst_coverage: analystCoverageIndicatorSchema,
   pt_upside: ptUpsideIndicatorSchema,
   pt_revision: ptRevisionIndicatorSchema,
-  f3_score: z.number().int().min(0).max(100),
+  f3_score: z.number().int().min(0).max(100).nullable(),
   f3_grade: z.string(),
 });
 

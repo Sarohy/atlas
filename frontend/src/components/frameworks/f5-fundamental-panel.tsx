@@ -15,8 +15,6 @@ import type {
 // Named constants
 // ---------------------------------------------------------------------------
 
-const SCORE_BAR_SEGMENTS = 10;
-
 const GRADE_TONE: Record<string, string> = {
   STRONG: 'is-green',
   GOOD: 'is-cyan',
@@ -172,9 +170,6 @@ function FundamentalContent({ data }: { data: FundamentalResponse }) {
       {/* Flags row */}
       <FlagsRow data={data} />
 
-      {/* Score bar */}
-      <ScoreBar score={data.f5_score} gradeTone={gradeTone} />
-
       {/* Five weighted indicator cards */}
       <div className="atlas-f5-indicators">
         <InsiderActivityCard insider={data.insider_activity} />
@@ -218,30 +213,6 @@ function FlagsRow({ data }: { data: FundamentalResponse }) {
               : ` (grey zone)`}
         </span>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Score bar
-// ---------------------------------------------------------------------------
-
-function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
-  const filled = Math.round((score / 100) * SCORE_BAR_SEGMENTS);
-  return (
-    <div
-      className="atlas-f5-score-bar"
-      role="progressbar"
-      aria-valuenow={score}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      {Array.from({ length: SCORE_BAR_SEGMENTS }, (_, i) => (
-        <span
-          key={i}
-          className={cn('atlas-f5-score-bar-seg', i < filled ? gradeTone : 'is-empty')}
-        />
-      ))}
     </div>
   );
 }

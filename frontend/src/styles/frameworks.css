@@ -2505,6 +2505,43 @@
 }
 
 /* ==========================================================================
+   Framework 5 — Cash Floor Panel  (.atlas-cash-floor-*)
+   Reuses .atlas-regime-* structural classes.
+   ========================================================================== */
+
+.atlas-cash-floor-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.atlas-cash-floor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Rationale box — left border colour follows condition tone ── */
+
+.atlas-cash-floor-rationale.is-red {
+  border-left-color: #ef4444;
+}
+.atlas-cash-floor-rationale.is-orange {
+  border-left-color: #f97316;
+}
+.atlas-cash-floor-rationale.is-green {
+  border-left-color: #22c55e;
+}
+.atlas-cash-floor-rationale.is-cyan {
+  border-left-color: #22d3ee;
+}
+
+/* ── "Not in portfolio" dim value ── */
+
+.atlas-cash-floor-no-position {
+  color: #334155;
+}
+
+/* ==========================================================================
    Degraded data banners — shown when a factor score is a fallback/partial
    value due to rate-limits, missing coverage, or no price history.
    Shared structure; each panel uses its own prefix (f1/f2/f3/f5/fws).

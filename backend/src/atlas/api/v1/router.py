@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from atlas.api.v1 import (
     analyst,
     auth,
+    cash_floor,
     clusters,
     earnings,
     framework_score,
@@ -39,4 +40,5 @@ router.include_router(framework_score.router)
 router.include_router(position_sizing.router)
 router.include_router(tranche_sizing.router)
 router.include_router(regime_modifier.router)
+router.include_router(cash_floor.router)
 router.include_router(market_conditions.router)

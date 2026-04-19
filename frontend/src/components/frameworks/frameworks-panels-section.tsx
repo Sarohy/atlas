@@ -14,6 +14,7 @@ import { RegimeGuidancePanel } from './regime-guidance-panel';
 import { FrameworkScorePanel } from './framework-score-panel';
 import { RegimeModifierPanel } from './regime-modifier-panel';
 import { TrancheSizingPanel } from './tranche-sizing-panel';
+import { CashFloorPanel } from './cash-floor-panel';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -132,6 +133,7 @@ export function FrameworksPanelsSection() {
       <div className="atlas-frameworks-secondary-row">
         <RegimeGuidancePanel ticker={activeTicker} baseScore={frameworkFinalScore} />
         <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
+        <CashFloorPanel ticker={activeTicker} />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

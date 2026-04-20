@@ -51,4 +51,13 @@ describe('Daily briefing page', () => {
     expect(stylesheet).toContain('.atlas-briefing-question');
     expect(stylesheet).toContain('color: #38bdf8;');
   });
+
+  it('renders the Framework 2 geopolitical gate controls in the morning briefing', async () => {
+    await renderPage();
+
+    expect(screen.getByText('Framework 2 Geopolitical Gate')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'None' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'De-escalating' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active' })).toBeInTheDocument();
+  });
 });

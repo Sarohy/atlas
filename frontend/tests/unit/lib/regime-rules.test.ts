@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  determineRule,
   computeRegimeOutput,
+  deriveEffectiveRegime,
+  determineRule,
   RULE1_BRENT_THRESHOLD,
   RULE1_VIX_THRESHOLD,
   RULE2_BRENT_LOW,
   RULE2_BRENT_HIGH,
-  RULE2_VIX_LOW,
-  RULE2_VIX_HIGH,
-  RULE3_VIX_CLEAR,
 } from '@/lib/utils/regime-rules';
 
 // ---------------------------------------------------------------------------
@@ -17,71 +15,77 @@ import {
 
 describe('determineRule', () => {
   describe('Rule 1 — Crisis', () => {
-    it('triggers on active_war regardless of market data', () => {
-      expect(determineRule(true, 80, 20, false)).toBe(1);
-    });
-
     it('triggers when brent > 110', () => {
-      expect(determineRule(false, RULE1_BRENT_THRESHOLD + 0.01, 20, false)).toBe(1);
+      expect(determineRule(RULE1_BRENT_THRESHOLD + 0.01, 20, 0)).toBe(1);
     });
 
     it('does NOT trigger when brent is exactly 110', () => {
-      expect(determineRule(false, RULE1_BRENT_THRESHOLD, 20, false)).not.toBe(1);
+      expect(determineRule(RULE1_BRENT_THRESHOLD, 20, 0)).not.toBe(1);
     });
 
     it('triggers when vix > 35', () => {
-      expect(determineRule(false, 80, RULE1_VIX_THRESHOLD + 0.1, false)).toBe(1);
+      expect(determineRule(80, RULE1_VIX_THRESHOLD + 0.1, 0)).toBe(1);
     });
 
     it('does NOT trigger when vix is exactly 35', () => {
-      expect(determineRule(false, 80, RULE1_VIX_THRESHOLD, false)).not.toBe(1);
-    });
-
-    it('takes priority over rule 2 conditions', () => {
-      expect(determineRule(true, 100, 28, false)).toBe(1);
+      expect(determineRule(80, RULE1_VIX_THRESHOLD, 0)).not.toBe(1);
     });
   });
 
   describe('Rule 2 — Caution', () => {
-    it('triggers when brent in [95,110] AND vix in [24,35]', () => {
-      expect(determineRule(false, 100, 28, false)).toBe(2);
+    it('triggers when brent in [95,110]', () => {
+      expect(determineRule(100, 28, 0)).toBe(2);
     });
 
-    it('triggers at lower brent boundary (95) and lower vix boundary (24)', () => {
-      expect(determineRule(false, RULE2_BRENT_LOW, RULE2_VIX_LOW, false)).toBe(2);
+    it('triggers at lower brent boundary (95)', () => {
+      expect(determineRule(RULE2_BRENT_LOW, 18, 0)).toBe(2);
     });
 
-    it('triggers at upper brent boundary (110) and upper vix boundary (35)', () => {
-      expect(determineRule(false, RULE2_BRENT_HIGH, RULE2_VIX_HIGH, false)).toBe(2);
+    it('triggers at upper brent boundary (110)', () => {
+      expect(determineRule(RULE2_BRENT_HIGH, 35, 0)).toBe(2);
     });
 
-    it('does NOT trigger with only brent in range', () => {
-      expect(determineRule(false, 100, 23, false)).toBeNull();
+    it('triggers when brent is below 95 but the clear streak is not met', () => {
+      expect(determineRule(90, 20, 1)).toBe(2);
     });
 
     it('does NOT trigger with only vix in range', () => {
-      expect(determineRule(false, 94, 28, false)).toBeNull();
+      expect(determineRule(94, 28, 0)).toBeNull();
     });
   });
 
   describe('Rule 3 — Clear', () => {
     it('triggers when brent below 95 for 2 consecutive closes AND vix < 24', () => {
-      expect(determineRule(false, 90, 22, true)).toBe(3);
+      expect(determineRule(90, 22, 2)).toBe(3);
     });
 
     it('does NOT trigger without two consecutive closes', () => {
-      expect(determineRule(false, 90, 22, false)).toBeNull();
-    });
-
-    it('does NOT trigger when vix is at or above 24', () => {
-      expect(determineRule(false, 90, RULE3_VIX_CLEAR, true)).toBeNull();
+      expect(determineRule(90, 22, 1)).toBe(2);
     });
   });
 
   describe('No rule', () => {
     it('returns null in a normal market', () => {
-      expect(determineRule(false, 85, 18, false)).toBeNull();
+      expect(determineRule(85, 25, 0)).toBeNull();
     });
+  });
+});
+
+describe('deriveEffectiveRegime', () => {
+  it('preserves the automatic regime when the geopolitical gate is NONE', () => {
+    expect(deriveEffectiveRegime('CLEAR', 'NONE')).toBe('CLEAR');
+  });
+
+  it('returns soft caution when clear is gated by active geopolitics', () => {
+    expect(deriveEffectiveRegime('CLEAR', 'ACTIVE')).toBe('SOFT CAUTION');
+  });
+
+  it('returns soft caution when normal is gated by de-escalating geopolitics', () => {
+    expect(deriveEffectiveRegime('NORMAL', 'DE_ESCALATING')).toBe('SOFT CAUTION');
+  });
+
+  it('does not downgrade an existing caution regime', () => {
+    expect(deriveEffectiveRegime('CAUTION', 'ACTIVE')).toBe('CAUTION');
   });
 });
 
@@ -135,8 +139,7 @@ describe('computeRegimeOutput', () => {
     expect(out.maxCashPct).toBe(0);
   });
 
-  it('active war with base 57 → adjusted 47', () => {
-    // Mirrors backend regression test
+  it('rule 1 with base 57 → adjusted 47', () => {
     const out = computeRegimeOutput(1, 57);
     expect(out.adjustedScore).toBe(47);
     expect(out.minCashPct).toBeCloseTo(0.35);

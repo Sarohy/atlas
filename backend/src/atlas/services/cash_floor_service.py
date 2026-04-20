@@ -187,7 +187,7 @@ class CashFloorService:
         # ── Step 1: determine live regime rule ────────────────────────────
         regime_result = await self._regime_service.compute_regime_modifier(
             ticker,
-            active_war=False,
+            geopolitical_state="NONE",
         )
 
         rule: str

@@ -39,6 +39,9 @@ const OUTPUT_RULE3 = 'only this stays in cash\neverything else\ncan be deployed'
 // ---------------------------------------------------------------------------
 
 export type RegimeRule = 1 | 2 | 3;
+export type AutomaticRegimeLabel = 'CRISIS' | 'CAUTION' | 'CLEAR' | 'NORMAL';
+export type EffectiveRegimeLabel = AutomaticRegimeLabel | 'SOFT CAUTION';
+export type GeopoliticalState = 'NONE' | 'DE_ESCALATING' | 'ACTIVE';
 
 export type RegimeOutput = {
   ruleTriggered: RegimeRule | null;
@@ -56,30 +59,39 @@ export type RegimeOutput = {
  * Return the highest-priority regime rule that fires, or null.
  *
  * Rules are evaluated in priority order:
- *   1 (Crisis)  — activeWar OR brent > 110 OR vix > 35
- *   2 (Caution) — brent ∈ [95, 110] AND vix ∈ [24, 35]
- *   3 (Clear)   — brentConsecutiveBelow95 AND vix < 24
- *
- * Null market data with no active war → no rule fires.
+ *   1 (Crisis)  — brent > 110 OR vix > 35
+ *   2 (Caution) — brent ∈ [95, 110] OR (brent < 95 AND vix < 24 AND streak < 2)
+ *   3 (Clear)   — two consecutive closes below 95 AND vix < 24
  */
 export function determineRule(
-  activeWar: boolean,
   brentPrice: number | null,
   vixValue: number | null,
-  brentConsecutiveBelow95: boolean,
+  brentConsecutiveBelow95Count: number,
 ): RegimeRule | null {
-  if (activeWar) return 1;
   if (brentPrice === null || vixValue === null) return null;
 
   if (brentPrice > RULE1_BRENT_THRESHOLD || vixValue > RULE1_VIX_THRESHOLD) return 1;
 
   const brentInCaution = brentPrice >= RULE2_BRENT_LOW && brentPrice <= RULE2_BRENT_HIGH;
-  const vixInCaution = vixValue >= RULE2_VIX_LOW && vixValue <= RULE2_VIX_HIGH;
-  if (brentInCaution && vixInCaution) return 2;
+  const brentLowVixLow =
+    brentPrice < RULE3_BRENT_CLEAR &&
+    vixValue < RULE3_VIX_CLEAR &&
+    brentConsecutiveBelow95Count < 2;
+  if (brentInCaution || brentLowVixLow) return 2;
 
-  if (brentConsecutiveBelow95 && vixValue < RULE3_VIX_CLEAR) return 3;
+  if (brentConsecutiveBelow95Count >= 2 && vixValue < RULE3_VIX_CLEAR) return 3;
 
   return null;
+}
+
+export function deriveEffectiveRegime(
+  automaticRegime: AutomaticRegimeLabel,
+  geopoliticalState: GeopoliticalState,
+): EffectiveRegimeLabel {
+  if (geopoliticalState === 'NONE' || automaticRegime === 'CRISIS' || automaticRegime === 'CAUTION') {
+    return automaticRegime;
+  }
+  return 'SOFT CAUTION';
 }
 
 /**

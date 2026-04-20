@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useTickers } from '@/lib/hooks/use-tickers';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
+import { useGeopoliticalStore } from '@/lib/stores/geopolitical-store';
 
 import { F1MomentumPanel } from './f1-momentum-panel';
 import { F2EarningsPanel } from './f2-earnings-panel';
@@ -44,7 +45,8 @@ export function FrameworksPanelsSection() {
 
   const [selectedTicker, setSelectedTicker] = useState<string>(EMPTY_TICKER);
   const [detailsOverlayOpen, setDetailsOverlayOpen] = useState(false);
-  const [activeWar, setActiveWar] = useState(false);
+  const geopoliticalState = useGeopoliticalStore((s) => s.geopoliticalState);
+  const setGeopoliticalState = useGeopoliticalStore((s) => s.setGeopoliticalState);
 
   // Prefer the user's explicit selection; fall back to the first portfolio
   // ticker so panels are populated automatically on first load.
@@ -60,7 +62,7 @@ export function FrameworksPanelsSection() {
   // Hoist the Framework 2 regime rule so Framework 4 uses the same value
   // the investor is seeing in the regime panel — no second independent fetch
   // (TanStack Query deduplicates: identical key, same cached response).
-  const { data: regimeData } = useRegimeModifier(activeTicker, activeWar);
+  const { data: regimeData } = useRegimeModifier(activeTicker, geopoliticalState);
   const regimeRule = regimeData?.rule ?? 'NORMAL';
 
   // Compute the score F1 actually displays: raw final_score + regime delta,
@@ -134,8 +136,8 @@ export function FrameworksPanelsSection() {
 
         <RegimeModifierPanel
           ticker={activeTicker}
-          activeWar={activeWar}
-          onToggleWar={() => setActiveWar((v) => !v)}
+          geopoliticalState={geopoliticalState}
+          onGeopoliticalStateChange={setGeopoliticalState}
         />
       </div>
 

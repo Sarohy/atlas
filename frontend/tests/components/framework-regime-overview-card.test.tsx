@@ -17,7 +17,7 @@ vi.mock('@/lib/hooks/use-tickers', () => ({
 vi.mock('@/lib/hooks/use-regime-modifier', () => ({
   useRegimeModifier: () => ({
     data: {
-      rule: 'CAUTION',
+      effective_regime: 'SOFT CAUTION',
       adjusted_score: 74,
     },
     isLoading: false,
@@ -25,11 +25,18 @@ vi.mock('@/lib/hooks/use-regime-modifier', () => ({
   }),
 }));
 
+vi.mock('@/lib/stores/geopolitical-store', () => ({
+  useGeopoliticalStore: (selector: (state: { geopoliticalState: string }) => string) =>
+    selector({ geopoliticalState: 'ACTIVE' }),
+}));
+
 describe('FrameworkRegimeOverviewCard', () => {
   it('renders the live Framework 2 regime value in the overview slot', () => {
     render(<FrameworkRegimeOverviewCard />);
 
-    expect(screen.getByTestId('framework-regime-overview-value')).toHaveTextContent('CAUTION');
+    expect(screen.getByTestId('framework-regime-overview-value')).toHaveTextContent(
+      'SOFT CAUTION',
+    );
     expect(screen.queryByText('Framework 2 Regime')).not.toBeInTheDocument();
     expect(screen.queryByText('AAPL · adjusted score 74')).not.toBeInTheDocument();
   });

@@ -432,27 +432,29 @@ export const handlers = [
   http.get(`${BASE}/api/v1/regime-modifier/:ticker`, ({ params, request }) => {
     const ticker = String(params['ticker'] ?? 'AAPL');
     const url = new URL(request.url);
-    const activeWar = url.searchParams.get('active_war') === 'true';
-    // Rule 1 triggers when war is active; otherwise Rule 2 (Brent $97.50 + VIX 27.30)
-    const ruleTriggered = activeWar ? 1 : 2;
+    const geopoliticalState = (url.searchParams.get('geopolitical_state') ?? 'ACTIVE').toUpperCase();
+    const ruleTriggered = 2;
     const baseScore = 79;
-    const adjustedScore = activeWar ? baseScore - 10 : baseScore - 5;
     return HttpResponse.json({
       ticker,
-      active_war: activeWar,
+      geopolitical_state: geopoliticalState,
       brent_price: 97.5,
       vix_value: 27.3,
+      brent_consecutive_below_95_count: 2,
       base_score: baseScore,
-      adjusted_score: adjustedScore,
+      adjusted_score: baseScore - 5,
       rule_triggered: ruleTriggered,
-      rule: activeWar ? 'CRISIS' : 'CAUTION',
-      min_cash_pct: activeWar ? 0.35 : 0.25,
-      max_cash_pct: activeWar ? 0.4 : 0.35,
-      min_cash_usd: activeWar ? 35000 : 25000,
-      max_cash_usd: activeWar ? 40000 : 35000,
-      output_text: activeWar
-        ? 'must stay in cash\ncannot be touched\nfor any trade'
-        : 'must stay in cash',
+      rule: 'CAUTION',
+      effective_regime: geopoliticalState === 'NONE' ? 'CAUTION' : 'SOFT CAUTION',
+      min_cash_pct: 0.25,
+      max_cash_pct: 0.35,
+      min_cash_usd: 25000,
+      max_cash_usd: 35000,
+      output_text: 'must stay in cash',
+      determination_text:
+        geopoliticalState === 'NONE'
+          ? 'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. No geopolitical gate applied.'
+          : 'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. Geopolitical flag ACTIVE adds a secondary gate, so the displayed regime is SOFT CAUTION.',
     });
   }),
 

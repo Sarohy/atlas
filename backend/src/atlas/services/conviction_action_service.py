@@ -184,7 +184,7 @@ class ConvictionActionService:
         # Slow path: call Framework 2 to obtain the regime-adjusted score.
         regime_result = await self._regime_service.compute_regime_modifier(
             ticker,
-            active_war=False,
+            geopolitical_state="NONE",
             provided_base_score=provided_base_score,
         )
 

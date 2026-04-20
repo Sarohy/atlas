@@ -218,6 +218,13 @@ function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreR
             {data.action}
           </span>
 
+          <div className="atlas-fws-score-summary">
+            <span className="atlas-fws-score-summary-label">Framework score before regime</span>
+            <span className="atlas-fws-score-summary-value" data-testid="fws-base-score-summary">
+              {data.final_score}/100
+            </span>
+          </div>
+
           {data.f5_blocked && (
             <span
               className="atlas-frameworks-pill is-red atlas-fws-block-pill"
@@ -258,9 +265,18 @@ function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreR
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
         </div>
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
-          <span className="atlas-fws-calc-label">Final score</span>
+          <span className="atlas-fws-calc-label">Framework score before regime</span>
           <span className={cn('atlas-fws-calc-value', toneCss)} data-testid="fws-final-score-calc">
             {data.final_score}
+          </span>
+        </div>
+        <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
+          <span className="atlas-fws-calc-label">Displayed after regime modifier</span>
+          <span
+            className={cn('atlas-fws-calc-value', toneCss)}
+            data-testid="fws-regime-adjusted-score"
+          >
+            {adjustedScore}
           </span>
         </div>
       </div>

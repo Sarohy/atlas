@@ -1,12 +1,13 @@
 import { apiFetch } from '@/lib/api/client';
 import {
   regimeModifierResponseSchema,
+  type GeopoliticalState,
   type RegimeModifierResponse,
 } from '@/lib/schemas/regime-modifier';
 
 /**
  * Fetch the regime-adjusted conviction score for a single ticker.
- * Calls GET /api/v1/regime-modifier/{ticker}?active_war={bool}[&base_score={n}].
+ * Calls GET /api/v1/regime-modifier/{ticker}?geopolitical_state={state}[&base_score={n}].
  *
  * When `baseScore` is provided (taken from the Framework 1 React Query cache)
  * the backend skips re-computing the Framework Score, guaranteeing F1 and F2
@@ -14,10 +15,10 @@ import {
  */
 export function fetchRegimeModifier(
   ticker: string,
-  activeWar: boolean,
+  geopoliticalState: GeopoliticalState,
   baseScore?: number,
 ): Promise<RegimeModifierResponse> {
-  const params = new URLSearchParams({ active_war: String(activeWar) });
+  const params = new URLSearchParams({ geopolitical_state: geopoliticalState });
   if (baseScore !== undefined) {
     params.set('base_score', String(baseScore));
   }

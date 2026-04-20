@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { fetchRegimeModifier } from '@/lib/api/regime-modifier';
 import type { FrameworkScoreResponse } from '@/lib/schemas/framework-score';
-import type { RegimeModifierResponse } from '@/lib/schemas/regime-modifier';
+import type { GeopoliticalState, RegimeModifierResponse } from '@/lib/schemas/regime-modifier';
 
 
 
@@ -14,12 +14,13 @@ import type { RegimeModifierResponse } from '@/lib/schemas/regime-modifier';
  * the same score value that F1 is currently displaying — eliminating any skew
  * between the two panels caused by independent fetch timings.
  *
- * The query is disabled when the ticker is empty. Changing `activeWar` is
- * included in the query key so toggling the war flag triggers a fresh fetch.
+ * The query is disabled when the ticker is empty. Changing the geopolitical
+ * state is included in the query key so the effective regime stays in sync
+ * with the morning briefing gate.
  */
 export function useRegimeModifier(
   ticker: string,
-  activeWar: boolean,
+  geopoliticalState: GeopoliticalState,
 ): {
   data: RegimeModifierResponse | undefined;
   isLoading: boolean;
@@ -29,13 +30,13 @@ export function useRegimeModifier(
   const queryClient = useQueryClient();
 
   return useQuery({
-    queryKey: ['regime-modifier', ticker, activeWar],
+    queryKey: ['regime-modifier', ticker, geopoliticalState],
     queryFn: () => {
       const cached = queryClient.getQueryData<FrameworkScoreResponse>([
         'framework-score',
         ticker,
       ]);
-      return fetchRegimeModifier(ticker, activeWar, cached?.final_score);
+      return fetchRegimeModifier(ticker, geopoliticalState, cached?.final_score);
     },
     enabled: ticker.trim().length >= 1,
     staleTime: 0,

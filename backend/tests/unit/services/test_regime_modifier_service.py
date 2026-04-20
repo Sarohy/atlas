@@ -1,13 +1,4 @@
-"""Unit tests for RegimeModifierService pure helpers.
-
-TDD — these tests are written BEFORE any implementation code.  They cover only
-the deterministic pure functions (no I/O) so the suite runs without any
-network calls or API keys.
-
-Pure functions under test:
-  _determine_rule        — (active_war, brent, vix, brent_consec) → 1|2|3|None
-  _compute_regime_output — (rule, base_score, position_value) → adjusted values
-"""
+"""Unit tests for RegimeModifierService pure helpers."""
 
 from __future__ import annotations
 
@@ -16,8 +7,10 @@ from decimal import Decimal
 import pytest
 
 from atlas.services.regime_modifier_service import (
+    _count_consecutive_brent_closes_below_95,
     _compute_regime_output,
     _determine_rule,
+    _derive_effective_regime,
     _parse_yahoo_vix_payload,
 )
 
@@ -31,110 +24,80 @@ class TestDetermineRule:
 
     # ── Rule 1 ──────────────────────────────────────────────────────────────
 
-    def test_rule1_triggers_on_active_war(self) -> None:
-        rule = _determine_rule(
-            active_war=True,
-            brent_price=80.0,
-            vix_value=20.0,
-            brent_consecutive_below_95=True,
-        )
-        assert rule == 1
-
     def test_rule1_triggers_on_brent_above_110(self) -> None:
         rule = _determine_rule(
-            active_war=False,
             brent_price=111.0,
             vix_value=20.0,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule == 1
 
     def test_rule1_triggers_on_brent_exactly_110(self) -> None:
         # Above $110 — exactly 110 does NOT trigger (must be > 110)
         rule = _determine_rule(
-            active_war=False,
             brent_price=110.0,
             vix_value=20.0,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule != 1
 
     def test_rule1_triggers_on_vix_above_35(self) -> None:
         rule = _determine_rule(
-            active_war=False,
             brent_price=80.0,
             vix_value=35.1,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule == 1
 
     def test_rule1_triggers_on_vix_exactly_35(self) -> None:
         # VIX must be > 35; exactly 35 does NOT trigger Rule 1
         rule = _determine_rule(
-            active_war=False,
             brent_price=80.0,
             vix_value=35.0,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule != 1
 
-    def test_rule1_takes_priority_over_rule2(self) -> None:
-        """Active war + caution Brent/VIX → Rule 1 wins."""
-        rule = _determine_rule(
-            active_war=True,
-            brent_price=100.0,
-            vix_value=28.0,
-            brent_consecutive_below_95=False,
-        )
-        assert rule == 1
-
     # ── Rule 2 ──────────────────────────────────────────────────────────────
 
-    def test_rule2_triggers_when_both_conditions_met(self) -> None:
-        """Brent in [95,110] AND VIX in [24,35] → Rule 2."""
+    def test_rule2_triggers_when_brent_is_in_caution_band(self) -> None:
         rule = _determine_rule(
-            active_war=False,
             brent_price=100.0,
             vix_value=28.0,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule == 2
 
     def test_rule2_triggers_at_brent_lower_boundary(self) -> None:
         rule = _determine_rule(
-            active_war=False,
             brent_price=95.0,
-            vix_value=24.0,
-            brent_consecutive_below_95=False,
+            vix_value=18.0,
+            brent_consecutive_below_95_count=0,
         )
         assert rule == 2
 
     def test_rule2_triggers_at_brent_upper_boundary(self) -> None:
         rule = _determine_rule(
-            active_war=False,
             brent_price=110.0,
-            vix_value=35.0,
-            brent_consecutive_below_95=False,
+            vix_value=20.0,
+            brent_consecutive_below_95_count=0,
         )
         assert rule == 2
 
-    def test_rule2_triggers_when_brent_in_range_and_vix_below_24(self) -> None:
-        """Brent in [95,110] AND VIX < 24 → Rule 2 (Caution)."""
+    def test_rule2_triggers_when_brent_is_below_95_but_clear_streak_is_not_met(self) -> None:
         rule = _determine_rule(
-            active_war=False,
-            brent_price=100.0,
-            vix_value=23.0,  # below VIX caution threshold — still triggers Rule 2
-            brent_consecutive_below_95=False,
+            brent_price=90.0,
+            vix_value=20.0,
+            brent_consecutive_below_95_count=1,
         )
         assert rule == 2
 
     def test_rule2_does_not_trigger_with_only_vix_in_range(self) -> None:
         """Only VIX in caution range — Rule 2 requires BOTH conditions."""
         rule = _determine_rule(
-            active_war=False,
             brent_price=94.0,  # below Brent caution threshold
             vix_value=28.0,
-            brent_consecutive_below_95=False,
+            brent_consecutive_below_95_count=0,
         )
         assert rule is None
 
@@ -143,43 +106,63 @@ class TestDetermineRule:
     def test_rule3_triggers_when_both_conditions_met(self) -> None:
         """Brent below $95 two consecutive closes AND VIX below 24 → Rule 3."""
         rule = _determine_rule(
-            active_war=False,
             brent_price=90.0,
             vix_value=22.0,
-            brent_consecutive_below_95=True,
+            brent_consecutive_below_95_count=2,
         )
         assert rule == 3
 
     def test_rule3_does_not_trigger_with_single_brent_close(self) -> None:
         """Only one close below $95 — Rule 3 requires TWO consecutive closes."""
         rule = _determine_rule(
-            active_war=False,
             brent_price=90.0,
             vix_value=22.0,
-            brent_consecutive_below_95=False,  # only one close counted
+            brent_consecutive_below_95_count=1,
         )
-        assert rule is None
-
-    def test_rule3_does_not_trigger_when_vix_at_or_above_24(self) -> None:
-        rule = _determine_rule(
-            active_war=False,
-            brent_price=90.0,
-            vix_value=24.0,  # must be strictly below 24
-            brent_consecutive_below_95=True,
-        )
-        assert rule is None
+        assert rule == 2
 
     # ── No rule ─────────────────────────────────────────────────────────────
 
     def test_no_rule_in_normal_market(self) -> None:
-        """Low Brent, low VIX, no war, single close — no rule fires."""
+        """Low Brent with VIX outside the clear lane and no crisis trigger → no rule."""
         rule = _determine_rule(
-            active_war=False,
             brent_price=85.0,
-            vix_value=18.0,
-            brent_consecutive_below_95=False,
+            vix_value=25.0,
+            brent_consecutive_below_95_count=0,
         )
         assert rule is None
+
+
+class TestConsecutiveBrentClosesBelow95:
+    """Verify the streak counter used for the automatic clear regime."""
+
+    def test_counts_two_consecutive_closes_below_95(self) -> None:
+        assert _count_consecutive_brent_closes_below_95([94.8, 94.1]) == 2
+
+    def test_counts_only_the_first_close_when_second_breaks_the_streak(self) -> None:
+        assert _count_consecutive_brent_closes_below_95([94.8, 96.0]) == 1
+
+    def test_returns_zero_when_the_latest_close_is_not_below_95(self) -> None:
+        assert _count_consecutive_brent_closes_below_95([96.2, 94.0]) == 0
+
+
+class TestDeriveEffectiveRegime:
+    """Verify the geopolitical gate only softens otherwise-open regimes."""
+
+    def test_preserves_primary_caution_when_market_is_already_caution(self) -> None:
+        assert _derive_effective_regime(automatic_rule=2, geopolitical_state="ACTIVE") == "CAUTION"
+
+    def test_returns_soft_caution_when_clear_is_gated_by_active_geopolitics(self) -> None:
+        assert _derive_effective_regime(automatic_rule=3, geopolitical_state="ACTIVE") == "SOFT CAUTION"
+
+    def test_returns_soft_caution_when_normal_is_gated_by_de_escalating_geopolitics(self) -> None:
+        assert (
+            _derive_effective_regime(automatic_rule=None, geopolitical_state="DE_ESCALATING")
+            == "SOFT CAUTION"
+        )
+
+    def test_leaves_clear_unchanged_when_no_geopolitical_gate_is_set(self) -> None:
+        assert _derive_effective_regime(automatic_rule=3, geopolitical_state="NONE") == "CLEAR"
 
 
 # ---------------------------------------------------------------------------

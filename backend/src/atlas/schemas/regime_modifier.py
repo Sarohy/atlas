@@ -1,17 +1,17 @@
 """Pydantic schemas for the Regime Modifier endpoint."""
 
 from pydantic import BaseModel, Field
+from typing import Literal
+
+
+GeopoliticalState = Literal["NONE", "DE_ESCALATING", "ACTIVE"]
 
 
 class RegimeModifierResponse(BaseModel):
-    """Response from the regime modifier endpoint.
-
-    Combines the base Framework Score with a market-regime adjustment driven
-    by Brent crude price, VIX level, and an active-war flag.
-    """
+    """Response from the regime modifier endpoint."""
 
     ticker: str
-    active_war: bool
+    geopolitical_state: GeopoliticalState
 
     # ── Market conditions (None when Polygon.io data unavailable) ─────────
     brent_price: float | None = Field(
@@ -19,6 +19,9 @@ class RegimeModifierResponse(BaseModel):
     )
     vix_value: float | None = Field(
         description="CBOE VIX index level (most recent daily close).",
+    )
+    brent_consecutive_below_95_count: int = Field(
+        description="Number of consecutive Brent closes below $95 using the most recent closes.",
     )
 
     # ── Framework score ───────────────────────────────────────────────────
@@ -37,6 +40,9 @@ class RegimeModifierResponse(BaseModel):
     rule: str = Field(
         description="Human-readable name of the triggered rule: "
         "CRISIS | CAUTION | CLEAR | NORMAL.",
+    )
+    effective_regime: str = Field(
+        description="Displayed regime after applying the geopolitical gate.",
     )
     modifier: int = Field(
         description="Score delta applied by the triggered rule: "
@@ -65,4 +71,7 @@ class RegimeModifierResponse(BaseModel):
     # ── Human-readable guidance ───────────────────────────────────────────
     output_text: str = Field(
         description="Regime cash-management instruction (multi-line for crisis rules).",
+    )
+    determination_text: str = Field(
+        description="Human-readable summary of the Brent/VIX calculation and geopolitical gate.",
     )

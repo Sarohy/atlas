@@ -1,18 +1,4 @@
-"""Regime Modifier service.
-
-Fetches live Brent crude and VIX values from Alpha Vantage, retrieves the base
-Framework Score for a ticker, and applies one of three market-regime rules to
-produce an adjusted conviction score with cash-management guidance.
-
-Rule priority (highest to lowest):
-  Rule 1 — Crisis   : active war OR Brent > $110 OR VIX > 35     → -10 pts
-  Rule 2 — Caution  : Brent in [$95, $110] (any VIX ≤ 35)        → -5 pts
-  Rule 3 — Clear    : Brent < $95 for 2 consecutive closes AND VIX < 24 → +5 pts
-  None   — Normal   : no modifier; cash guidance set to zero
-
-Pure helpers (_determine_rule, _compute_regime_output) are side-effect-free
-and unit-testable without any mocks or network calls.
-"""
+"""Regime Modifier service."""
 
 from __future__ import annotations
 
@@ -25,7 +11,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.schemas.framework_score import FrameworkScoreResponse
-from atlas.schemas.regime_modifier import RegimeModifierResponse
+from atlas.schemas.regime_modifier import GeopoliticalState, RegimeModifierResponse
 from atlas.services.framework_score_service import FrameworkScoreService
 from atlas.services.ticker_service import TickerService
 
@@ -179,23 +165,21 @@ def _parse_yahoo_brent_payload(payload: dict) -> list[float]:  # type: ignore[ty
 
 
 def _determine_rule(
-    active_war: bool,
     brent_price: float,
     vix_value: float,
-    brent_consecutive_below_95: bool,
+    brent_consecutive_below_95_count: int,
 ) -> int | None:
     """Return the highest-priority regime rule number that fires, or None.
 
     Rules are evaluated in priority order:
 
     Rule 1 (Crisis) — any ONE of:
-      • Active war confirmed (active_war is True)
       • Brent crude above $110
       • VIX above 35
 
     Rule 2 (Caution) — EITHER of:
       • Brent in [$95, $110]  (any VIX ≤ 35)
-      • Brent below $95 AND VIX below 24
+      • Brent below $95 AND VIX below 24, but without a two-close clear streak
 
     Rule 3 (Clear) — BOTH of:
       • Brent below $95 for two consecutive daily closes
@@ -204,21 +188,75 @@ def _determine_rule(
     Pure function — no I/O.
     """
     # ── Rule 1 ──────────────────────────────────────────────────────────────
-    if active_war or brent_price > _RULE1_BRENT_THRESHOLD or vix_value > _RULE1_VIX_THRESHOLD:
+    if brent_price > _RULE1_BRENT_THRESHOLD or vix_value > _RULE1_VIX_THRESHOLD:
         return 1
 
     # ── Rule 2 ──────────────────────────────────────────────────────────────
     # VIX > 35 already triggered Rule 1 above; reaching here means VIX ≤ 35.
     brent_in_caution = _RULE2_BRENT_LOW <= brent_price <= _RULE2_BRENT_HIGH
-    brent_low_vix_low = brent_price < _RULE3_BRENT_CLEAR and vix_value < _RULE3_VIX_CLEAR
+    brent_low_vix_low = (
+        brent_price < _RULE3_BRENT_CLEAR
+        and vix_value < _RULE3_VIX_CLEAR
+        and brent_consecutive_below_95_count < _BRENT_NUM_CLOSES
+    )
     if brent_in_caution or brent_low_vix_low:
         return 2
 
     # ── Rule 3 ──────────────────────────────────────────────────────────────
-    if brent_consecutive_below_95 and vix_value < _RULE3_VIX_CLEAR:
+    if brent_consecutive_below_95_count >= _BRENT_NUM_CLOSES and vix_value < _RULE3_VIX_CLEAR:
         return 3
 
     return None
+
+
+def _count_consecutive_brent_closes_below_95(closes: list[float]) -> int:
+    """Count consecutive most-recent Brent closes below the clear threshold."""
+    streak = 0
+    for close in closes[:_BRENT_NUM_CLOSES]:
+        if close < _RULE3_BRENT_CLEAR:
+            streak += 1
+            continue
+        break
+    return streak
+
+
+def _rule_name(rule: int | None) -> str:
+    """Return the automatic Brent/VIX regime label for a rule number."""
+    return {
+        1: "CRISIS",
+        2: "CAUTION",
+        3: "CLEAR",
+        None: "NORMAL",
+    }[rule]
+
+
+def _derive_effective_regime(automatic_rule: int | None, geopolitical_state: GeopoliticalState) -> str:
+    """Apply the geopolitical gate without changing the Brent/VIX score math."""
+    automatic_regime = _rule_name(automatic_rule)
+    if geopolitical_state == "NONE" or automatic_regime in {"CRISIS", "CAUTION"}:
+        return automatic_regime
+    return "SOFT CAUTION"
+
+
+def _build_determination_text(
+    automatic_regime: str,
+    effective_regime: str,
+    geopolitical_state: GeopoliticalState,
+    brent_consecutive_below_95_count: int,
+) -> str:
+    """Build a short explanation of the automatic and gated regime output."""
+    if geopolitical_state == "NONE" or effective_regime == automatic_regime:
+        return (
+            f"Automatic regime {automatic_regime} from Brent/VIX data. "
+            f"Brent streak below $95: {brent_consecutive_below_95_count}. "
+            "No geopolitical gate applied."
+        )
+    return (
+        f"Automatic regime {automatic_regime} from Brent/VIX data. "
+        f"Brent streak below $95: {brent_consecutive_below_95_count}. "
+        f"Geopolitical flag {geopolitical_state.replace('_', ' ')} adds a secondary gate, "
+        f"so the displayed regime is {effective_regime}."
+    )
 
 
 def _compute_regime_output(
@@ -320,7 +358,7 @@ class RegimeModifierService:
     async def compute_regime_modifier(
         self,
         ticker: str,
-        active_war: bool,
+        geopolitical_state: GeopoliticalState,
         provided_base_score: int | None = None,
     ) -> RegimeModifierResponse:
         """Return the regime-adjusted score and cash guidance for ``ticker``.
@@ -357,11 +395,10 @@ class RegimeModifierService:
 
         # ── Extract Brent price and consecutive-close flag ─────────────────
         brent_price: float | None = None
-        brent_consecutive_below_95 = False
+        brent_consecutive_below_95_count = 0
         if isinstance(brent_closes, list) and brent_closes:
             brent_price = brent_closes[0]
-            if len(brent_closes) >= 2:
-                brent_consecutive_below_95 = all(v < _RULE3_BRENT_CLEAR for v in brent_closes[:2])
+            brent_consecutive_below_95_count = _count_consecutive_brent_closes_below_95(brent_closes)
         else:
             logger.warning(
                 "Brent crude fetch failed or returned no data",
@@ -398,19 +435,12 @@ class RegimeModifierService:
             position_value_usd = db_ticker.position_value
 
         # ── Apply regime rules ────────────────────────────────────────────
-        # active_war alone is sufficient to trigger Rule 1; market data is
-        # only required when the war flag is not set (Brent/VIX thresholds
-        # cannot be evaluated without real values).
         if brent_price is not None and vix_value is not None:
             rule = _determine_rule(
-                active_war=active_war,
                 brent_price=brent_price,
                 vix_value=vix_value,
-                brent_consecutive_below_95=brent_consecutive_below_95,
+                brent_consecutive_below_95_count=brent_consecutive_below_95_count,
             )
-        elif active_war:
-            # No market data but war is confirmed — Rule 1 fires unconditionally.
-            rule = 1
         else:
             rule = None
 
@@ -423,35 +453,39 @@ class RegimeModifierService:
             output_text,
         ) = _compute_regime_output(rule, base_score, position_value_usd)
 
-        _RULE_NAMES: dict[int | None, str] = {
-            1: "CRISIS",
-            2: "CAUTION",
-            3: "CLEAR",
-            None: "NORMAL",
-        }
-
         _RULE_MODIFIERS: dict[int | None, int] = {
             1: _RULE1_SCORE_DELTA,
             2: _RULE2_SCORE_DELTA,
             3: _RULE3_SCORE_DELTA,
             None: 0,
         }
+        automatic_regime = _rule_name(rule)
+        effective_regime = _derive_effective_regime(rule, geopolitical_state)
+        determination_text = _build_determination_text(
+            automatic_regime=automatic_regime,
+            effective_regime=effective_regime,
+            geopolitical_state=geopolitical_state,
+            brent_consecutive_below_95_count=brent_consecutive_below_95_count,
+        )
 
         return RegimeModifierResponse(
             ticker=ticker,
-            active_war=active_war,
+            geopolitical_state=geopolitical_state,
             brent_price=brent_price,
             vix_value=vix_value,
+            brent_consecutive_below_95_count=brent_consecutive_below_95_count,
             base_score=base_score,
             adjusted_score=adjusted_score,
             rule_triggered=rule,
-            rule=_RULE_NAMES[rule],
+            rule=automatic_regime,
+            effective_regime=effective_regime,
             modifier=_RULE_MODIFIERS[rule],
             min_cash_pct=min_cash_pct,
             max_cash_pct=max_cash_pct,
             min_cash_usd=float(min_cash_usd) if min_cash_usd is not None else None,
             max_cash_usd=float(max_cash_usd) if max_cash_usd is not None else None,
             output_text=output_text,
+            determination_text=determination_text,
         )
 
     async def _fetch_brent(self, client: httpx.AsyncClient) -> list[float]:

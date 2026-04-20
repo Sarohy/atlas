@@ -2771,6 +2771,286 @@
 }
 
 /* ==========================================================================
+   Framework 7 — Earnings Gate Rule  (.atlas-f7-*)
+   ========================================================================== */
+
+/* ── Tone colours ── */
+
+.atlas-f7-panel { flex: 1; min-width: 0; }
+
+.is-f7-green  { color: #22c55e; }
+.is-f7-red    { color: #ef4444; }
+.is-f7-amber  { color: #f59e0b; }
+.is-f7-purple { color: #a855f7; }
+
+/* ── Header ── */
+
+.atlas-f7-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.atlas-f7-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f7-status-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Content wrapper ── */
+
+.atlas-f7-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Stat cards row ── */
+
+.atlas-f7-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.atlas-f7-stat-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f7-stat-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-f7-stat-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+/* ── Main action text ── */
+
+.atlas-f7-action-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: clamp(1.1rem, 2.8vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+/* ── Score vs threshold bar ── */
+
+.atlas-f7-score-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f7-score-bar-track {
+  position: relative;
+  height: 8px;
+  background: #1e2d40;
+  border-radius: 4px;
+  overflow: visible;
+}
+
+.atlas-f7-score-bar-fill {
+  height: 100%;
+  border-radius: 4px 0 0 4px;
+  background: currentColor;
+  transition: width 0.3s ease;
+}
+
+/* Amber vertical line at score = 80 */
+.atlas-f7-score-bar-threshold {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: #f59e0b;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.atlas-f7-score-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #4b6070;
+}
+
+.atlas-f7-threshold-label {
+  position: absolute;
+  left: 80%;
+  transform: translateX(-50%);
+  color: #f59e0b;
+  font-weight: 700;
+}
+
+/* ── Countdown bar ── */
+
+.atlas-f7-countdown-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f7-countdown-bar-track {
+  height: 5px;
+  background: #1e2d40;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.atlas-f7-countdown-bar-fill {
+  height: 100%;
+  background: #94a3b8;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.atlas-f7-countdown-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #4b6070;
+  position: relative;
+}
+
+.atlas-f7-countdown-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+/* ── Rule explanation box ── */
+
+.atlas-f7-rule-box {
+  border-radius: 4px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+}
+
+.atlas-f7-rule-box.is-f7-green  { background: rgba(34,197,94,0.07);  border-color: rgba(34,197,94,0.25);  }
+.atlas-f7-rule-box.is-f7-red    { background: rgba(239,68,68,0.07);   border-color: rgba(239,68,68,0.25);  }
+.atlas-f7-rule-box.is-f7-amber  { background: rgba(245,158,11,0.07);  border-color: rgba(245,158,11,0.25); }
+.atlas-f7-rule-box.is-f7-purple { background: rgba(168,85,247,0.07);  border-color: rgba(168,85,247,0.25); }
+
+.atlas-f7-f8-box { margin-top: 4px; }
+
+.atlas-f7-rule-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  color: #c8d8e8;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ── 50% CAP deployment boxes ── */
+
+.atlas-f7-cap-boxes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.atlas-f7-cap-box {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.atlas-f7-cap-box-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-f7-cap-box-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.atlas-f7-cap-box-sub {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #4b6070;
+}
+
+/* ── Post-earnings sequence ── */
+
+.atlas-f7-sequence {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.atlas-f7-sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.atlas-f7-sequence-step {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  font-weight: 600;
+  color: #4b6070;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 3px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.atlas-f7-sequence-arrow {
+  font-size: 0.5rem;
+  color: #2d3f54;
+}
+
+/* ==========================================================================
    Degraded data banners — shown when a factor score is a fallback/partial
    value due to rate-limits, missing coverage, or no price history.
    Shared structure; each panel uses its own prefix (f1/f2/f3/f5/fws).

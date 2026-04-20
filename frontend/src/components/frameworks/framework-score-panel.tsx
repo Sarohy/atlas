@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAnalyst } from '@/lib/hooks/use-analyst';
 import { useEarnings } from '@/lib/hooks/use-earnings';
@@ -7,6 +8,7 @@ import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
+import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 
 // ---------------------------------------------------------------------------
@@ -196,6 +198,13 @@ function DegradedBanner({
 
 function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreResponse; regimeModifier: number }) {
   const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
+  const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
+
+  // Publish the exact score the investor sees so F6, F7, and any other panel
+  // consume the same value — no recomputation from a different data source.
+  useEffect(() => {
+    setF1DisplayScore(adjustedScore);
+  }, [adjustedScore, setF1DisplayScore]);
   const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
   const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
 

@@ -9,6 +9,7 @@ from atlas.api.v1 import (
     clusters,
     conviction_action,
     earnings,
+    framework7,
     framework_score,
     fundamental,
     health,
@@ -38,6 +39,7 @@ router.include_router(analyst.router)
 router.include_router(options_flow.router)
 router.include_router(fundamental.router)
 router.include_router(framework_score.router)
+router.include_router(framework7.router)
 router.include_router(position_sizing.router)
 router.include_router(tranche_sizing.router)
 router.include_router(regime_modifier.router)

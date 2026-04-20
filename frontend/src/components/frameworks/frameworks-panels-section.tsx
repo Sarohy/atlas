@@ -17,6 +17,7 @@ import { RegimeModifierPanel } from './regime-modifier-panel';
 import { TrancheSizingPanel } from './tranche-sizing-panel';
 import { CashFloorPanel } from './cash-floor-panel';
 import { ConvictionActionPanel } from './conviction-action-panel';
+import { Framework7Card } from './framework7-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -39,6 +40,11 @@ const EMPTY_TICKER = '';
 export function FrameworksPanelsSection() {
   const { data: tickerList, isLoading: tickersLoading, isError: tickersError } = useTickers();
   const setActiveTicker = useFrameworkStore((s) => s.setActiveTicker);
+  // Read the exact score written by FrameworkScorePanel — this is the value
+  // the investor actually sees (re-computed from live factor hooks + regime
+  // modifier). Reading it from the store guarantees F6/F7 use an identical
+  // number rather than re-deriving from a different data source.
+  const f1DisplayScore = useFrameworkStore((s) => s.f1DisplayScore);
 
   // Derive a sorted, deduplicated list of portfolio ticker symbols.
   const tickers: string[] = (tickerList ?? []).map((t) => t.ticker).sort();
@@ -64,14 +70,6 @@ export function FrameworksPanelsSection() {
   // (TanStack Query deduplicates: identical key, same cached response).
   const { data: regimeData } = useRegimeModifier(activeTicker, geopoliticalState);
   const regimeRule = regimeData?.rule ?? 'NORMAL';
-
-  // Compute the score F1 actually displays: raw final_score + regime delta,
-  // clamped to [0, 100]. F6 uses this directly so the regime modifier is
-  // never applied twice.
-  const f1DisplayScore: number | undefined =
-    frameworkFinalScore !== undefined && regimeData !== undefined
-      ? Math.max(0, Math.min(100, frameworkFinalScore + (regimeData.modifier ?? 0)))
-      : undefined;
 
   useEffect(() => {
     setActiveTicker(activeTicker);
@@ -146,6 +144,10 @@ export function FrameworksPanelsSection() {
         <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
         <CashFloorPanel ticker={activeTicker} />
         <ConvictionActionPanel ticker={activeTicker} adjustedScore={f1DisplayScore} />
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <Framework7Card ticker={activeTicker} adjustedScore={f1DisplayScore} />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

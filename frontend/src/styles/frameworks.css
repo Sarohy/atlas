@@ -2542,6 +2542,168 @@
 }
 
 /* ==========================================================================
+   Framework 6 — Conviction Action Panel  (.atlas-conviction-*)
+   Reuses .atlas-regime-* structural classes.
+   ========================================================================== */
+
+.atlas-conviction-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.atlas-conviction-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  text-align: center;
+}
+
+/* ── Action label — the sole output shown in the panel ── */
+
+.atlas-conviction-action-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: clamp(1rem, 2.8vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.atlas-conviction-action-label.is-green  { color: #22c55e; }
+.atlas-conviction-action-label.is-cyan   { color: #22d3ee; }
+.atlas-conviction-action-label.is-yellow { color: #eab308; }
+.atlas-conviction-action-label.is-orange { color: #f97316; }
+.atlas-conviction-action-label.is-red    { color: #ef4444; }
+
+/* ── Score hero ── */
+
+.atlas-conviction-score-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.atlas-conviction-score-ring {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  line-height: 1;
+}
+
+.atlas-conviction-score-num {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: clamp(2.2rem, 5.8vw, 4rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.atlas-conviction-score-num.is-green  { color: #22c55e; }
+.atlas-conviction-score-num.is-cyan   { color: #22d3ee; }
+.atlas-conviction-score-num.is-yellow { color: #eab308; }
+.atlas-conviction-score-num.is-orange { color: #f97316; }
+.atlas-conviction-score-num.is-red    { color: #ef4444; }
+
+.atlas-conviction-score-denom {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.7rem;
+  color: #4b6070;
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+
+.atlas-conviction-score-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-conviction-tier-pill {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.atlas-conviction-regime-tag {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-conviction-base-score {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+/* ── Score bar ── */
+
+.atlas-conviction-score-bar {
+  display: flex;
+  gap: 3px;
+  height: 6px;
+}
+
+.atlas-conviction-score-seg {
+  flex: 1;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.atlas-conviction-score-seg.is-empty  { background: #1e2d40; }
+.atlas-conviction-score-seg.is-green  { background: #22c55e; }
+.atlas-conviction-score-seg.is-cyan   { background: #22d3ee; }
+.atlas-conviction-score-seg.is-yellow { background: #eab308; }
+.atlas-conviction-score-seg.is-orange { background: #f97316; }
+.atlas-conviction-score-seg.is-red    { background: #ef4444; }
+
+/* ── Action block ── */
+
+.atlas-conviction-actions {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.atlas-conviction-action-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.atlas-conviction-action-bullet {
+  font-size: 0.44rem;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+
+.atlas-conviction-action-bullet.is-green  { color: #22c55e; }
+.atlas-conviction-action-bullet.is-cyan   { color: #22d3ee; }
+.atlas-conviction-action-bullet.is-yellow { color: #eab308; }
+.atlas-conviction-action-bullet.is-orange { color: #f97316; }
+.atlas-conviction-action-bullet.is-red    { color: #ef4444; }
+
+.atlas-conviction-action-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e8edf5;
+  line-height: 1.5;
+}
+
+/* ==========================================================================
    Degraded data banners — shown when a factor score is a fallback/partial
    value due to rate-limits, missing coverage, or no price history.
    Shared structure; each panel uses its own prefix (f1/f2/f3/f5/fws).

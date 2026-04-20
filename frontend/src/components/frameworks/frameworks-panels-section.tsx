@@ -15,6 +15,7 @@ import { FrameworkScorePanel } from './framework-score-panel';
 import { RegimeModifierPanel } from './regime-modifier-panel';
 import { TrancheSizingPanel } from './tranche-sizing-panel';
 import { CashFloorPanel } from './cash-floor-panel';
+import { ConvictionActionPanel } from './conviction-action-panel';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -61,6 +62,14 @@ export function FrameworksPanelsSection() {
   // (TanStack Query deduplicates: identical key, same cached response).
   const { data: regimeData } = useRegimeModifier(activeTicker, activeWar);
   const regimeRule = regimeData?.rule ?? 'NORMAL';
+
+  // Compute the score F1 actually displays: raw final_score + regime delta,
+  // clamped to [0, 100]. F6 uses this directly so the regime modifier is
+  // never applied twice.
+  const f1DisplayScore: number | undefined =
+    frameworkFinalScore !== undefined && regimeData !== undefined
+      ? Math.max(0, Math.min(100, frameworkFinalScore + (regimeData.modifier ?? 0)))
+      : undefined;
 
   useEffect(() => {
     setActiveTicker(activeTicker);
@@ -134,6 +143,7 @@ export function FrameworksPanelsSection() {
         <RegimeGuidancePanel ticker={activeTicker} baseScore={frameworkFinalScore} />
         <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
         <CashFloorPanel ticker={activeTicker} />
+        <ConvictionActionPanel ticker={activeTicker} adjustedScore={f1DisplayScore} />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

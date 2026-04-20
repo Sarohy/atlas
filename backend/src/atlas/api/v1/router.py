@@ -7,6 +7,7 @@ from atlas.api.v1 import (
     auth,
     cash_floor,
     clusters,
+    conviction_action,
     earnings,
     framework_score,
     fundamental,
@@ -41,4 +42,5 @@ router.include_router(position_sizing.router)
 router.include_router(tranche_sizing.router)
 router.include_router(regime_modifier.router)
 router.include_router(cash_floor.router)
+router.include_router(conviction_action.router)
 router.include_router(market_conditions.router)

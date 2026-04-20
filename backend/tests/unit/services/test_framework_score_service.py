@@ -74,45 +74,48 @@ class TestComputeRawTotal:
     """Verifies that factor weights are applied correctly.
 
     Weights per Factor_Mapping_Guide:
-      F1 x 0.20  F2 x 0.25  F3 x 0.15  F4 x 0.15  F5 x 0.20  -> max = 95
+      F1 x 0.15  F2 x 0.25  F3 x 0.15  F4 x 0.15  F5 x 0.30  -> max = 100
     """
 
-    def test_all_perfect_scores_give_95(self) -> None:
-        assert _compute_raw_total(100, 100, 100, 100, 100) == pytest.approx(95.0)
+    def test_all_perfect_scores_give_100(self) -> None:
+        assert _compute_raw_total(100, 100, 100, 100, 100) == pytest.approx(100.0)
 
     def test_all_zero_scores_give_0(self) -> None:
         assert _compute_raw_total(0, 0, 0, 0, 0) == pytest.approx(0.0)
 
     def test_only_f1_contributes(self) -> None:
-        # 100 x 0.20 = 20.0
-        assert _compute_raw_total(100, 0, 0, 0, 0) == pytest.approx(20.0)
+        # 100 x 0.15 = 15.0
+        assert _compute_raw_total(100, 0, 0, 0, 0) == pytest.approx(15.0)
 
     def test_only_f2_contributes(self) -> None:
         # 100 x 0.25 = 25.0
         assert _compute_raw_total(0, 100, 0, 0, 0) == pytest.approx(25.0)
 
     def test_only_f3_contributes(self) -> None:
+        # 100 x 0.15 = 15.0
         assert _compute_raw_total(0, 0, 100, 0, 0) == pytest.approx(15.0)
 
     def test_only_f4_contributes(self) -> None:
+        # 100 x 0.15 = 15.0
         assert _compute_raw_total(0, 0, 0, 100, 0) == pytest.approx(15.0)
 
     def test_only_f5_contributes(self) -> None:
-        assert _compute_raw_total(0, 0, 0, 0, 100) == pytest.approx(20.0)
+        # 100 x 0.30 = 30.0
+        assert _compute_raw_total(0, 0, 0, 0, 100) == pytest.approx(30.0)
 
     def test_lite_worked_example(self) -> None:
         """LITE example from Factor_Mapping_Guide (before regime modifier).
 
         F1=86, F2=94, F3=100, F4=82, F5=78 (using guide sample scores)
-          86 x 0.20 = 17.20
+          86 x 0.15 = 12.90
           94 x 0.25 = 23.50
          100 x 0.15 = 15.00
           82 x 0.15 = 12.30
-          78 x 0.20 = 15.60
-          Total     = 83.60
+          78 x 0.30 = 23.40
+          Total     = 87.10
         """
         result = _compute_raw_total(86, 94, 100, 82, 78)
-        assert result == pytest.approx(83.60, abs=0.01)
+        assert result == pytest.approx(87.10, abs=0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +136,11 @@ class TestComputeFinalScore:
     def test_clamp_at_0(self) -> None:
         assert _compute_final_score(0.0) == 0
 
-    def test_max_possible_score_is_95(self) -> None:
-        """Perfect score on all factors gives 95 (weights sum to 0.95)."""
-        raw = _compute_raw_total(100, 100, 100, 100, 100)  # 95.0
-        final = _compute_final_score(raw)  # 95
-        assert final == 95
+    def test_max_possible_score_is_100(self) -> None:
+        """Perfect score on all factors gives 100 (weights sum to 1.00)."""
+        raw = _compute_raw_total(100, 100, 100, 100, 100)  # 100.0
+        final = _compute_final_score(raw)  # 100
+        assert final == 100
 
     def test_rounding(self) -> None:
         # 82.6 → rounds to 83

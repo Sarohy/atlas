@@ -34,6 +34,7 @@ const GUIDANCE_LABEL: Record<string, string> = {
   NARROW_RANGE: 'Narrowed Range',
   LOWER: 'Lowered',
   UNDETECTED: 'Unable to detect from transcript',
+  NO_DATA_AVAILABLE: 'No data available',
 };
 
 /** CSS tone classes for the guidance_label categorical string. */
@@ -43,6 +44,7 @@ const GUIDANCE_TONE: Record<string, string> = {
   NARROW_RANGE: 'is-yellow',
   LOWER: 'is-red',
   UNDETECTED: 'is-muted',
+  NO_DATA_AVAILABLE: 'is-muted',
 };
 
 /** Human-readable labels for the backlog_label categorical string. */
@@ -287,7 +289,8 @@ function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
 }
 
 function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
-  const isUndetected = guidance.guidance_label === 'UNDETECTED';
+  const isUndetected =
+    guidance.guidance_label === 'UNDETECTED' || guidance.guidance_label === 'NO_DATA_AVAILABLE';
   const label = GUIDANCE_LABEL[guidance.guidance_label] ?? guidance.guidance_label;
   const tone = GUIDANCE_TONE[guidance.guidance_label] ?? 'is-yellow';
 
@@ -307,7 +310,7 @@ function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
         {isUndetected && (
           <div className="atlas-f2-dl-row">
             <dt>Impact</dt>
-            <dd className="is-muted">Excluded from F2 score</dd>
+            <dd className="is-muted">Fixed fallback</dd>
           </div>
         )}
       </dl>

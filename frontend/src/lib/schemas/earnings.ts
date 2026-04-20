@@ -27,13 +27,13 @@ export const epsBeatsIndicatorSchema = z.object({
 });
 
 export const guidanceIndicatorSchema = z.object({
-  /** Guidance classification from transcript NLP. UNDETECTED when no pattern matched. */
+  /** Fixed guidance fallback label because transcript NLP is disabled. */
   guidance_label: z.string(),
-  /** Fiscal quarter of the transcript used (e.g. '2024Q3'). */
+  /** Always null because transcript-driven guidance analysis is disabled. */
   transcript_quarter: z.string().nullable(),
-  /** Raw 0-100 score before weighting. Null when UNDETECTED. */
+  /** Fixed raw fallback score (50). */
   raw_score: z.number().int().min(0).max(100).nullable(),
-  /** Weighted F2 contribution. Null when UNDETECTED (sub-factor excluded from F2). */
+  /** Fixed weighted F2 contribution (10). */
   score: z.number().int().min(0).nullable(),
   max_score: z.number().int().default(20),
 });

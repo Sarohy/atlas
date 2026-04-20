@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
@@ -48,13 +48,14 @@ describe('F2EarningsPanel', () => {
     expect(screen.getByTestId('f2-indicator-margin-trajectory')).toBeInTheDocument();
   });
 
-  it('displays revenue growth and guidance direction', async () => {
+  it('displays revenue growth and fixed no-data guidance', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('f2-content'));
 
     // Revenue growth value from mock: +65.0%
     expect(screen.getByText('+65.0%')).toBeInTheDocument();
-    // Guidance direction from mock: guidance_label='RAISE_FULL_YEAR' → "Raised Full Year"
-    expect(screen.getByText('Raised Full Year')).toBeInTheDocument();
+    expect(screen.getByText('No data available')).toBeInTheDocument();
+    expect(screen.getByText('Fixed fallback')).toBeInTheDocument();
+    expect(within(screen.getByTestId('f2-indicator-guidance')).getByText('10')).toBeInTheDocument();
   });
 });

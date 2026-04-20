@@ -2,10 +2,10 @@
 
 Schema field names mirror the Factor_Mapping_Guide §F2 rework:
   - All indicators carry ``raw_score`` (0-100 pre-weight) and ``score`` (weighted contribution).
-  - ``GuidanceIndicator`` uses a categorical ``guidance_label`` string.
+  - ``GuidanceIndicator`` now uses a fixed fallback label/value rather than transcript NLP.
   - ``BacklogBtbIndicator`` uses a categorical ``backlog_label`` string.
   - ``MarginTrajectoryIndicator`` exposes ``margin_change_pts`` in percentage points.
-  - Max-score values reflect the new internal weights (30/20/20/15/15).
+  - Max-score values reflect the internal weights (30/20/20/15/15).
 """
 
 from __future__ import annotations
@@ -77,29 +77,25 @@ class EpsBeatsIndicator(BaseModel):
 
 
 class GuidanceIndicator(BaseModel):
-    """Management guidance direction derived from the earnings-call transcript.
+    """Fallback guidance signal used in F2.
 
-    Weight: 20%  →  max 20 pts contribution.
-    raw_score and score are None when guidance_label is UNDETECTED (no pattern
-    matched the transcript); the sub-factor is excluded from the F2 composite
-    and remaining weights are rescaled proportionally.
+    Weight: 20%  →  represented as a fixed 10 pt contribution with the label
+    ``NO_DATA_AVAILABLE``.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     guidance_label: str = Field(
-        description=(
-            "Guidance classification: RAISE_FULL_YEAR | MAINTAIN | NARROW_RANGE | LOWER | UNDETECTED"
-        )
+        description="Fixed guidance classification: NO_DATA_AVAILABLE."
     )
     transcript_quarter: str | None = Field(
         None,
-        description="Fiscal quarter of the transcript used (e.g. '2024Q3').",
+        description="Always null because transcript-driven guidance analysis is disabled.",
     )
     raw_score: int | None = Field(
-        default=None, ge=0, le=100, description="Raw 0-100 score before weighting. None when UNDETECTED."
+        default=None, ge=0, le=100, description="Fixed raw fallback score (50)."
     )
-    score: int | None = Field(default=None, ge=0, description="Weighted F2 contribution. None when UNDETECTED.")
+    score: int | None = Field(default=None, ge=0, description="Fixed weighted F2 contribution (10).")
     max_score: int = Field(default=20)
 
 

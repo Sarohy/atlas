@@ -77,7 +77,7 @@ class TestScoreRevenueGrowthYoy:
         assert _score_revenue_growth_yoy(-10.0) == 20
 
     def test_none_scores_0(self) -> None:
-        assert _score_revenue_growth_yoy(None) == 0
+        assert _score_revenue_growth_yoy(None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -108,24 +108,13 @@ class TestScoreEpsBeatHistory:
 
 
 class TestScoreGuidanceDirection:
-    """Factor Guide: Raise full year->100, Maintain->70, Narrow range->55, Lower->20."""
+    """Guidance now uses a fixed fallback contribution instead of transcript NLP."""
 
-    def test_raise_full_year_scores_100_lite_example(self) -> None:
-        # LITE: guidance raised full year -> 100 pts
-        assert _score_guidance_direction("RAISE_FULL_YEAR") == 100
+    def test_guidance_scores_fixed_fallback_raw_50(self) -> None:
+        assert _score_guidance_direction("NO_DATA_AVAILABLE") == 50
 
-    def test_maintain_scores_70(self) -> None:
-        assert _score_guidance_direction("MAINTAIN") == 70
-
-    def test_narrow_range_scores_55(self) -> None:
-        assert _score_guidance_direction("NARROW_RANGE") == 55
-
-    def test_lower_scores_20(self) -> None:
-        assert _score_guidance_direction("LOWER") == 20
-
-    def test_unknown_label_scores_55(self) -> None:
-        # Unknown / no_commentary defaults to NARROW_RANGE (55)
-        assert _score_guidance_direction("UNKNOWN") == 55
+    def test_unknown_label_scores_fixed_fallback_raw_50(self) -> None:
+        assert _score_guidance_direction("UNKNOWN") == 50
 
 
 # ---------------------------------------------------------------------------
@@ -195,35 +184,12 @@ class TestScoreBacklogVisibility:
 
 
 class TestClassifyGuidanceFromTranscript:
-    def test_raise_full_year_pattern(self) -> None:
-        text = (
-            "We are pleased to raise our full-year guidance for fiscal 2024 "
-            "to reflect the strong performance across all segments."
-        )
-        assert _classify_guidance_from_transcript(text) == "RAISE_FULL_YEAR"
+    def test_any_transcript_returns_no_data_available(self) -> None:
+        text = "We are pleased to raise our full-year guidance for fiscal 2024."
+        assert _classify_guidance_from_transcript(text) == "NO_DATA_AVAILABLE"
 
-    def test_raised_guidance_pattern(self) -> None:
-        text = "Management raised guidance for the full year to $5.20-$5.40 EPS."
-        assert _classify_guidance_from_transcript(text) == "RAISE_FULL_YEAR"
-
-    def test_lowered_guidance_pattern(self) -> None:
-        text = "We lowered our full-year guidance due to macro headwinds."
-        assert _classify_guidance_from_transcript(text) == "LOWER"
-
-    def test_maintain_guidance_pattern(self) -> None:
-        text = "We are reaffirming and maintaining guidance for the full year."
-        assert _classify_guidance_from_transcript(text) == "MAINTAIN"
-
-    def test_narrow_range_pattern(self) -> None:
-        text = "We have narrowed our guidance range given improved visibility."
-        assert _classify_guidance_from_transcript(text) == "NARROW_RANGE"
-
-    def test_empty_transcript_returns_maintain(self) -> None:
-        assert _classify_guidance_from_transcript("") == "MAINTAIN"
-
-    def test_case_insensitive(self) -> None:
-        text = "RAISED OUR FULL-YEAR GUIDANCE RANGE."
-        assert _classify_guidance_from_transcript(text) == "RAISE_FULL_YEAR"
+    def test_empty_transcript_returns_no_data_available(self) -> None:
+        assert _classify_guidance_from_transcript("") == "NO_DATA_AVAILABLE"
 
 
 # ---------------------------------------------------------------------------
@@ -266,24 +232,24 @@ class TestClassifyBacklogFromTranscript:
 
 
 class TestComputeF2Total:
-    def test_lite_example_scores_94(self) -> None:
-        """LITE: Rev 90x0.30 + EPS 100x0.20 + Guid 100x0.20 + Margin 80x0.15 + Backlog 100x0.15 = 94."""
+    def test_fixed_guidance_contribution_scores_84(self) -> None:
+        """Guidance now contributes a fixed 10 pts after its nominal 20% weighting."""
         total = _compute_f2_total(
             rev_raw=90,
             eps_raw=100,
-            guidance_raw=100,
+            guidance_raw=50,
             margin_raw=80,
             backlog_raw=100,
         )
-        assert total == 94
+        assert total == 84
 
-    def test_perfect_score_is_100(self) -> None:
+    def test_perfect_score_is_90_with_fixed_guidance_fallback(self) -> None:
         total = _compute_f2_total(100, 100, 100, 100, 100)
-        assert total == 100
+        assert total == 90
 
-    def test_all_raw_zero_is_0(self) -> None:
+    def test_all_raw_zero_keeps_fixed_guidance_10(self) -> None:
         total = _compute_f2_total(0, 0, 0, 0, 0)
-        assert total == 0
+        assert total == 10
 
     def test_capped_at_100(self) -> None:
         # Even if raw scores somehow exceed 100, total is capped.

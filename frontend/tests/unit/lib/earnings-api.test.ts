@@ -29,10 +29,10 @@ const EARNINGS_RESPONSE = {
     max_score: 20,
   },
   guidance: {
-    guidance_label: 'RAISE_FULL_YEAR',
-    transcript_quarter: '2024Q3',
-    raw_score: 100,
-    score: 20,
+    guidance_label: 'NO_DATA_AVAILABLE',
+    transcript_quarter: null,
+    raw_score: 50,
+    score: 10,
     max_score: 20,
   },
   margin_trajectory: {
@@ -48,7 +48,7 @@ const EARNINGS_RESPONSE = {
     score: 15,
     max_score: 15,
   },
-  f2_score: 94,
+  f2_score: 84,
   f2_grade: 'STRONG BUY',
 };
 
@@ -79,7 +79,7 @@ describe('fetchEarnings', () => {
     const result = await fetchEarnings('AAPL');
 
     expect(result.ticker).toBe('AAPL');
-    expect(result.f2_score).toBe(94);
+    expect(result.f2_score).toBe(84);
     expect(result.f2_grade).toBe('STRONG BUY');
     expect(result.revenue_growth.yoy_pct).toBe(65.0);
   });

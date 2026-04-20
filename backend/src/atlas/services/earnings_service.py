@@ -91,16 +91,13 @@ _GRADE_WEAK_MIN: Final[int] = 20
 # Named constants — guidance label scores (Factor_Mapping_Guide §F2)
 # ---------------------------------------------------------------------------
 
-# Categorical guidance scores mapped from transcript analysis.
-# UNDETECTED is excluded — it means no pattern fired in the transcript;
-# the sub-factor is dropped and remaining weights are rescaled to 100%.
+# Guidance is intentionally fixed to a neutral fallback contribution.
+# Transcript NLP is no longer used for the guidance sub-factor.
 _GUIDANCE_SCORES: Final[dict[str, int]] = {
-    "RAISE_FULL_YEAR": 100,  # management raised full-year guidance
-    "MAINTAIN": 70,  # guidance maintained / reaffirmed
-    "NARROW_RANGE": 55,  # guidance range narrowed
-    "LOWER": 20,  # guidance cut / lowered
-    "UNDETECTED": -1,  # sentinel — no pattern matched; excluded from scoring
+    "NO_DATA_AVAILABLE": 50,  # fixed raw fallback -> 10 weighted pts at the nominal 20% weight
 }
+
+_GUIDANCE_FIXED_CONTRIBUTION: Final[int] = 10
 
 # Categorical backlog/visibility scores mapped from transcript analysis.
 _BACKLOG_SCORES: Final[dict[str, int]] = {
@@ -130,158 +127,6 @@ _POLYGON_FINANCIALS_URL: Final[str] = "https://api.polygon.io/vX/reference/finan
 _FMP_EARNINGS_URL: Final[str] = "https://financialmodelingprep.com/stable/earnings"
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Guidance semantic scoring rubric
-# ---------------------------------------------------------------------------
-
-# Extracts sentences that are plausibly forward-looking.  Used to focus the
-# scorer on guidance-bearing text and reduce noise from historical commentary.
-_FORWARD_LOOKING_FILTER: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:expect|anticipat|forecast|project|outlook|guid|plan\s|will\s+"
-    r"(?:be|likely|continue|remain)|next\s+(?:quarter|fiscal|year)|"
-    r"full.?year|fiscal\s+\d{4}|calendar\s+\d{4}|going\s+forward|"
-    r"look(?:ing)?\s+ahead)",
-    re.I,
-)
-
-# Scoring rubric: each category maps to a list of (term, weight) pairs.
-# Term is a lowercase substring; weight is the evidence strength.
-# The scorer sums weights of all terms found in the forward-looking text,
-# then picks the category with the highest aggregate score above the
-# minimum threshold.  Multiple weak signals accumulate into a verdict —
-# no single exact phrase is required.
-_GUIDANCE_RUBRIC: Final[dict[str, list[tuple[str, float]]]] = {
-    "RAISE_FULL_YEAR": [
-        # Explicit raise language
-        ("raising guidance",          5.0),
-        ("raise guidance",            5.0),
-        ("raised guidance",           5.0),
-        ("raising our guidance",      5.0),
-        ("raised our guidance",       5.0),
-        ("increasing guidance",       4.5),
-        ("increase our guidance",     4.5),
-        ("increased our guidance",    4.5),
-        ("upward revision",           5.0),
-        ("upwardly revising",         4.5),
-        ("raising outlook",           4.5),
-        ("raised outlook",            4.5),
-        ("raising our outlook",       4.5),
-        # Above-prior-call signals
-        ("higher than our last",      5.0),
-        ("higher than our prior",     5.0),
-        ("above our prior",           4.0),
-        ("above prior expectations",  4.5),
-        ("above our expectations",    3.5),
-        ("above the high end of our guidance", 5.0),
-        ("well above",                3.0),
-        ("above guidance",            3.5),
-        ("exceeded guidance",         3.5),
-        ("beat guidance",             3.5),
-        ("exceeded the high end",     4.0),
-        ("above our forecast",        4.0),
-        # Record / new-high framing
-        ("record revenue",            4.0),
-        ("record earnings",           3.5),
-        ("record eps",                3.5),
-        ("record free cash flow",     3.0),
-        ("new record",                3.0),
-        ("new records",               3.0),
-        ("anticipate record",         4.0),
-        ("anticipate substantial",    3.5),
-        ("expect record",             3.5),
-        ("substantially new records", 4.0),
-        ("substantial new records",   4.0),
-        ("expect revenue to be a record", 4.5),
-        # Scope amplifiers — add weight when full-year framing is present
-        ("full fiscal year",          2.0),
-        ("full year",                 1.5),
-        ("fiscal year 20",            1.5),
-        ("for the year",              1.0),
-        ("calendar year",             1.0),
-    ],
-    "LOWER": [
-        # Explicit cut language
-        ("lowering guidance",         5.0),
-        ("lowering our guidance",     5.0),
-        ("lower our guidance",        5.0),
-        ("reducing guidance",         5.0),
-        ("reducing our guidance",     5.0),
-        ("cutting guidance",          5.0),
-        ("cut our guidance",          5.0),
-        ("revising down",             4.5),
-        ("downward revision",         5.0),
-        ("downwardly revising",       4.5),
-        ("lowering outlook",          4.5),
-        ("lower our outlook",         4.5),
-        # Below-prior signals
-        ("below guidance",            4.0),
-        ("below our guidance",        4.0),
-        ("below expectations",        3.5),
-        ("below our expectations",    3.5),
-        ("below our prior",           4.0),
-        ("below prior",               3.0),
-        ("miss guidance",             4.0),
-        ("missed guidance",           4.0),
-        ("weaker than expected",      3.0),
-        ("weaker than anticipated",   3.0),
-        # Macro/demand headwinds context
-        ("disappointing",             2.0),
-        ("headwinds",                 1.5),
-        ("challenging environment",   1.5),
-        ("uncertain demand",          2.0),
-        ("macro uncertainty",         1.5),
-        ("softer demand",             2.5),
-        ("slowing demand",            2.5),
-    ],
-    "NARROW_RANGE": [
-        ("narrowing our guidance",    5.0),
-        ("narrowing guidance",        5.0),
-        ("narrowing the range",       4.5),
-        ("narrowed our range",        4.5),
-        ("narrowed the range",        4.5),
-        ("tightening guidance",       4.5),
-        ("tightening our guidance",   5.0),
-        ("tighter guidance range",    4.5),
-        ("refined our guidance",      4.0),
-        ("more confident in our",     2.5),
-        ("better visibility",         2.0),
-    ],
-    "MAINTAIN": [
-        # Explicit reaffirmation
-        ("reaffirm",                  5.0),
-        ("reaffirming",               5.0),
-        ("reiterate",                 5.0),
-        ("reiterating",               5.0),
-        ("maintain guidance",         5.0),
-        ("maintaining guidance",      5.0),
-        ("maintaining our guidance",  5.0),
-        ("on track",                  3.0),
-        ("in line with our guidance", 4.5),
-        ("consistent with our guidance", 4.5),
-        # Issuing specific next-quarter guidance (forward, not a raise/cut)
-        ("non-gaap guidance",         3.5),
-        ("plus or minus",             3.0),
-        ("guidance of",               3.0),
-        ("guidance for",              2.5),
-        ("guiding for",               3.5),
-        ("expect revenue of",         3.0),
-        ("expect revenue to be",      2.5),
-        ("forecast revenue of",       3.5),
-        ("midpoint of",               3.0),
-        ("our outlook is",            3.0),
-        ("outlook for the",           2.5),
-    ],
-}
-
-# Minimum aggregate score for a category to be accepted.
-# Below this threshold the scorer returns UNDETECTED.
-_GUIDANCE_MIN_SCORE: Final[float] = 4.0
-
-# Tie-break priority (highest to lowest) when two categories score equally.
-_GUIDANCE_PRIORITY: Final[list[str]] = [
-    "RAISE_FULL_YEAR", "LOWER", "NARROW_RANGE", "MAINTAIN",
-]
-
 _BACKLOG_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
     # EXPLICIT_MULTI_QUARTER — dollar amount or multi-quarter visibility stated
     (re.compile(r"backlog.{0,50}\$\s*[\d,.]+", re.I), "EXPLICIT_MULTI_QUARTER"),
@@ -349,19 +194,9 @@ def _score_eps_beat_history(beats_in_3: int) -> int:
     return _EPS_BEAT_SCORE.get(max(0, min(3, beats_in_3)), 20)
 
 
-def _score_guidance_direction(guidance_label: str) -> int | None:
-    """Map guidance category label to a 0-100 raw score, or None when undetected.
-
-    Factor_Mapping_Guide §F2 Guidance Direction bands:
-      RAISE_FULL_YEAR → 100  (raised full-year guidance; LITE → 100)
-      MAINTAIN        →  70  (maintained / reaffirmed)
-      NARROW_RANGE    →  55  (narrowed range)
-      LOWER           →  20  (guidance cut)
-      UNDETECTED      → None (no pattern matched transcript — excluded from F2)
-    """
-    if guidance_label == "UNDETECTED":
-        return None
-    return _GUIDANCE_SCORES.get(guidance_label, 55)
+def _score_guidance_direction(guidance_label: str) -> int:
+    """Return the fixed raw fallback used for the deprecated guidance signal."""
+    return _GUIDANCE_SCORES.get(guidance_label, 50)
 
 
 def _score_gross_margin_trend(change_pts: float | None) -> int:
@@ -399,40 +234,8 @@ def _score_backlog_visibility(backlog_label: str) -> int:
 
 
 def _classify_guidance_from_transcript(transcript_text: str) -> str:
-    """Score guidance direction from an earnings-call transcript.
-
-    Algorithm:
-      1. Extract forward-looking sentences via _FORWARD_LOOKING_FILTER to
-         focus on guidance-bearing text and reduce noise.
-      2. For each category in _GUIDANCE_RUBRIC, sum the weights of all terms
-         found in the extracted text (case-insensitive substring match).
-      3. Return the highest-scoring category whose total exceeds
-         _GUIDANCE_MIN_SCORE.  Ties break by _GUIDANCE_PRIORITY order.
-      4. Return UNDETECTED when no category clears the threshold.
-
-    Multiple weak signals accumulate into a verdict — no single exact phrase
-    is required.  This is a pure function: no I/O, no randomness.
-    """
-    if not transcript_text.strip():
-        return "UNDETECTED"
-
-    # Step 1 — extract forward-looking sentences
-    sentences = re.split(r"[.!?]\s+", transcript_text)
-    forward_sentences = [s for s in sentences if _FORWARD_LOOKING_FILTER.search(s)]
-    scoring_text = " ".join(forward_sentences).lower() if forward_sentences else transcript_text.lower()
-
-    # Step 2 — score each category
-    scores: dict[str, float] = {cat: 0.0 for cat in _GUIDANCE_RUBRIC}
-    for category, terms in _GUIDANCE_RUBRIC.items():
-        for term, weight in terms:
-            if term in scoring_text:
-                scores[category] += weight
-
-    # Step 3 — pick winner above threshold in priority order
-    eligible = [cat for cat in _GUIDANCE_PRIORITY if scores[cat] >= _GUIDANCE_MIN_SCORE]
-    if not eligible:
-        return "UNDETECTED"
-    return max(eligible, key=lambda cat: scores[cat])
+    """Guidance transcript classification is disabled; always return the fallback label."""
+    return "NO_DATA_AVAILABLE"
 
 
 def _classify_backlog_from_transcript(transcript_text: str) -> str:
@@ -480,7 +283,7 @@ def _is_pre_profitability(
 def _compute_f2_total(
     rev_raw: int | None,
     eps_raw: int,
-    guidance_raw: int | None,
+    guidance_raw: int,
     margin_raw: int,
     backlog_raw: int,
     *,
@@ -493,8 +296,8 @@ def _compute_f2_total(
     profitability sub-factors (EPS beat + margin + backlog) receive 40%,
     as per the Factor_Mapping_Guide §F2 pre-profitability adjustment.
 
-    Any sub-factor whose raw score is None (no data) is excluded and the
-    remaining weights are rescaled proportionally so they still sum to 1.0.
+    Guidance is deprecated and contributes a fixed 10 points instead of
+    transcript-derived scoring.
     """
     if pre_profitability:
         w_rev, w_eps, w_guid, w_mar, w_bkl = (
@@ -513,16 +316,13 @@ def _compute_f2_total(
             _W_BACKLOG,
         )
 
-    missing_weight = (
-        (w_rev if rev_raw is None else 0.0)
-        + (w_guid if guidance_raw is None else 0.0)
-    )
+    missing_weight = w_rev if rev_raw is None else 0.0
     scale = 1.0 / (1.0 - missing_weight) if missing_weight < 1.0 else 1.0
 
     weighted = (
         (rev_raw * w_rev * scale if rev_raw is not None else 0.0)
         + eps_raw * w_eps * scale
-        + (guidance_raw * w_guid * scale if guidance_raw is not None else 0.0)
+        + _GUIDANCE_FIXED_CONTRIBUTION
         + margin_raw * w_mar * scale
         + backlog_raw * w_bkl * scale
     )
@@ -642,7 +442,7 @@ class EarningsService:
 
         # ---- Guidance Direction (from transcript) ----
         guidance_label = _classify_guidance_from_transcript(transcript_text)
-        guidance_raw = _score_guidance_direction(guidance_label)  # None when UNDETECTED
+        guidance_raw = _score_guidance_direction(guidance_label)
 
         # ---- Gross Margin Trend ----
         gross_margins = self._extract_gross_margins(income_data)
@@ -670,7 +470,7 @@ class EarningsService:
 
         rev_score      = round(rev_raw * w_rev) if rev_raw is not None else None
         eps_score      = round(eps_raw * w_eps)
-        guidance_score = round(guidance_raw * w_guid) if guidance_raw is not None else None
+        guidance_score = _GUIDANCE_FIXED_CONTRIBUTION
         margin_score   = round(margin_raw * w_mar)
         backlog_score  = round(backlog_raw * w_bkl)
         logger.debug(
@@ -705,7 +505,7 @@ class EarningsService:
             ),
             guidance=GuidanceIndicator(
                 guidance_label=guidance_label,
-                transcript_quarter=transcript_quarter_str,
+                transcript_quarter=None,
                 raw_score=guidance_raw,
                 score=guidance_score,
                 max_score=20,

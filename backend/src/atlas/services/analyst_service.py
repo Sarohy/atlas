@@ -1,31 +1,30 @@
-"""F3 Analyst Conviction service.
+"""F3 Analyst Conviction service — v7.3.4 scoring algorithm.
 
 Data sources:
-  - Benzinga        → consensus ratings, analyst count, consensus PT, PT revision direction
-  - Alpha Vantage   → fallback consensus when Benzinga has no coverage (OVERVIEW endpoint)
-  - FMP             → second fallback consensus when both Benzinga and AV have no data
-  - Polygon.io      → current stock price
+  - Benzinga   → consensus ratings, analyst count, consensus PT, PT revision,
+                 net upgrades/downgrades in last 30 days
+  - Alpha Vantage → fallback consensus (OVERVIEW endpoint)
+  - FMP        → second fallback consensus
+  - Polygon.io → current stock price
 
-F3 sub-indicators and weights (Factor_Mapping_Guide):
-  1. Consensus Rating     (35%) — (Strong Buy + Buy) % of total analysts
-  2. Analyst Count        (10%) — unique analysts covering the stock
-  3. PT vs Current Price  (30%) — % upside from current price to consensus PT
-  4. PT Revision Direction(25%) — PT raises / lowers from Benzinga in last 30 days
+F3 v7.3.4 scoring (base-score + modifier approach):
+  Priority 1: Consensus label  → base score (Strong Buy 90 / Buy 78 / Hold 55 / Sell 30)
+  Priority 2: Analyst count    → modifier (+8/+5/+3/0/-5)
+  Priority 3: PT revision dir  → modifier (+5/+3/0/-5/-10)
+  Priority 4: Net upgrades 30d → modifier (+5/+3/0/-5/-10)
+  Priority 5: Price vs target  → adjustment (applied last)
 
-F3 = (score1 × 0.35) + (score2 × 0.10) + (score3 × 0.30) + (score4 × 0.25)
-
-LITE worked example (from guide):
-  Consensus 80 × 0.35 = 28.0
-  Coverage  85 × 0.10 =  8.5   (10-20 analysts)
-  PT Upside 85 × 0.30 = 25.5   (15-30% above current)
-  PT Revision 100 × 0.25 = 25.0 (multiple raises)
-  F3 = 87 → rounds to 88 per guide (Mizuho top pick, multiple PT raises)
+High consensus override: Buy/SB + >=9 analysts + 0 sells + raised/maintained PT → min 78
+Hard cap: pvt > +20% → f3_final = min(f3_before, 45)
+Half penalty: pvt in (10%,20%] AND consensus NOT deteriorating → -7 instead of -15
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -35,32 +34,43 @@ from atlas.schemas.analyst import (
     AnalystCoverageIndicator,
     AnalystResponse,
     ConsensusRatingIndicator,
-    PtRevisionIndicator,
+    PtDirectionIndicator,
     PtUpsideIndicator,
+    RecentUpgradesIndicator,
 )
 
 # ---------------------------------------------------------------------------
-# Weights
+# F3 factor weight (in the conviction score formula)
 # ---------------------------------------------------------------------------
 
-_W_CONSENSUS: Final[float] = 0.35
-_W_COVERAGE: Final[float] = 0.10
-_W_PT_UPSIDE: Final[float] = 0.30
-_W_PT_REVISION: Final[float] = 0.25
+_W_F3: Final[float] = 0.15
 
 # ---------------------------------------------------------------------------
-# Grade thresholds
+# v7.3.4 base score constants — Priority 1
 # ---------------------------------------------------------------------------
 
+_BASE_STRONG_BUY: Final[int] = 90
+_BASE_BUY: Final[int] = 78
+_BASE_HOLD: Final[int] = 55
+_BASE_SELL: Final[int] = 30
+
+# Hard cap applied when price is >20% above consensus target
+_HARD_CAP_ABOVE_20: Final[int] = 45
+
+# Full penalty when price is 10-20% above target
+_ABOVE_10_FULL_PENALTY: Final[int] = -15
+
+# Half penalty divisor — int(-15 / 2) = -7 (truncate toward zero)
+_ABOVE_10_HALF_PENALTY: Final[int] = -7
+
+# High consensus override minimum score
+_HIGH_CONSENSUS_MIN: Final[int] = 78
+
+# Grade thresholds (unchanged from v7.3.3)
 _GRADE_STRONG_BUY: Final[int] = 80
 _GRADE_BUY: Final[int] = 60
 _GRADE_NEUTRAL: Final[int] = 40
 _GRADE_WEAK: Final[int] = 20
-
-# PT Ratio cap — when current_price / consensus_PT > 1.40, the stock is
-# trading more than 40% above analyst targets; F3 is capped at 55 (NEUTRAL).
-_PT_RATIO_CAP_THRESHOLD: Final[float] = 1.40
-_PT_RATIO_F3_CAP: Final[int] = 55
 
 # ---------------------------------------------------------------------------
 # API constants
@@ -71,83 +81,174 @@ _POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
 _FMP_BASE_URL: Final[str] = "https://financialmodelingprep.com"
 _TIMEOUT: Final[float] = 10.0
 
-# PT revision look-back window in days
+# PT revision / upgrade look-back window in days
 _REVISION_DAYS: Final[int] = 30
 
+# Price vs target band labels
+_BAND_BELOW_20: Final[str] = "20%+ below target (+10)"
+_BAND_BELOW_10: Final[str] = "10-20% below target (+5)"
+_BAND_NEUTRAL: Final[str] = "At target — neutral (0)"
+_BAND_ABOVE_10: Final[str] = "10-20% above target (-15)"
+_BAND_ABOVE_20: Final[str] = "20%+ above target (capped at 45)"
+
+
 # ---------------------------------------------------------------------------
-# Scoring functions — each returns 0-100
+# FactorScore return type for score_f3
 # ---------------------------------------------------------------------------
 
 
-def _score_consensus(buy_pct: float | None) -> int | None:
-    """Consensus Rating score (0-100). Returns None when no data available."""
-    if buy_pct is None:
-        return None
-    if buy_pct > 80:
-        return 100
-    if buy_pct >= 60:
-        return 80
-    if buy_pct >= 40:
-        return 55
-    return 20
+@dataclass
+class FactorScore:
+    """Return value from score_f3 — full breakdown of the F3 calculation."""
+
+    raw_score: float
+    """F3 score clamped to [0, 100]."""
+
+    weight: float
+    """F3 weight in the conviction formula (always 0.15)."""
+
+    weighted_contribution: float
+    """raw_score * weight — contribution to the final conviction score."""
+
+    breakdown: dict[str, Any]
+    """Per-component values for audit trail and UI display."""
+
+    override_applied: bool
+    """True when the high consensus override lifted the score to 78."""
+
+    override_reason: str | None
+    """Human-readable reason string when override_applied is True."""
 
 
-def _score_analyst_coverage(count: int | None) -> int | None:
-    """Analyst Count score (0-100). Returns None when no coverage data available."""
-    if count is None or count == 0:
-        return None
-    if count > 20:
-        return 100
-    if count >= 10:
-        return 85
-    if count >= 5:
-        return 65
-    return 40  # <5 analysts: hard cap at 40
+# ---------------------------------------------------------------------------
+# v7.3.4 pure scoring helpers — no I/O, no side effects
+# ---------------------------------------------------------------------------
 
 
-def _score_pt_upside(upside_pct: float | None) -> int | None:
-    """PT vs Current Price score (0-100). Returns None when price/PT data unavailable."""
-    if upside_pct is None:
-        return None
-    if upside_pct > 30:
-        return 100
-    if upside_pct >= 15:
-        return 85
-    if upside_pct >= 5:
-        return 70
-    if upside_pct >= 0:
-        return 55
-    return 20
+def _base_score_from_consensus(consensus_rating: str) -> int:
+    """Priority 1 — map consensus label to base score.
 
-
-def _score_pt_revision(raises: int, lowers: int) -> int:
-    """PT Revision Direction score (0-100).
-
-    Guide: Multiple upgrades last 30d → 100 | 1 upgrade → 80
-           No change → 60 | Downgrade → 20
-    'Raises' and 'Announces' from Benzinga action_pt count as raises.
-    'Lowers' counts as a downgrade.
+    Strong Buy → 90 | Buy → 78 | Hold → 55 | Sell (or unknown) → 30
     """
-    if raises >= 2:
-        return 100
-    if raises == 1:
-        return 80
-    if lowers == 0:
-        return 60  # no change / maintains
-    return 20  # any downgrade
+    r = consensus_rating.strip().upper()
+    if r == "STRONG BUY":
+        return _BASE_STRONG_BUY
+    if r == "BUY":
+        return _BASE_BUY
+    if r == "HOLD":
+        return _BASE_HOLD
+    return _BASE_SELL
 
 
-def _revision_label(raises: int, lowers: int) -> str:
-    if raises >= 2:
-        return "MULTIPLE RAISES"
-    if raises == 1:
-        return "1 RAISE"
-    if lowers == 0:
-        return "NO CHANGE"
-    return "LOWERED"
+def _analyst_count_modifier(count: int) -> int:
+    """Priority 2 — analyst coverage count → modifier.
+
+    >30 → +8 | 20-30 → +5 | 10-19 → +3 | 5-9 → 0 | <5 → -5
+    """
+    if count > 30:
+        return 8
+    if count >= 20:
+        return 5
+    if count >= 10:
+        return 3
+    if count >= 5:
+        return 0
+    return -5
+
+
+def _pt_revision_direction_label(raises: int, lowers: int) -> str:
+    """Derive PT revision direction label from raw raise/lower counts.
+
+    Computes net = raises - lowers then maps to label:
+      net >= 2  → MULTIPLE_RAISES
+      net == 1  → SINGLE_RAISE
+      net == 0  → NO_CHANGE
+      net == -1 → SINGLE_CUT
+      net <= -2 → MULTIPLE_CUTS
+    """
+    net = raises - lowers
+    if net >= 2:
+        return "MULTIPLE_RAISES"
+    if net == 1:
+        return "SINGLE_RAISE"
+    if net == 0:
+        return "NO_CHANGE"
+    if net == -1:
+        return "SINGLE_CUT"
+    return "MULTIPLE_CUTS"
+
+
+def _pt_revision_modifier(direction: str) -> int:
+    """Priority 3 — PT revision direction → modifier.
+
+    MULTIPLE_RAISES → +5 | SINGLE_RAISE → +3 | NO_CHANGE → 0
+    SINGLE_CUT → -5 | MULTIPLE_CUTS → -10
+    """
+    d = direction.strip().upper()
+    if d == "MULTIPLE_RAISES":
+        return 5
+    if d == "SINGLE_RAISE":
+        return 3
+    if d == "NO_CHANGE":
+        return 0
+    if d == "SINGLE_CUT":
+        return -5
+    return -10
+
+
+def _upgrade_downgrade_modifier(net_upgrades: int) -> int:
+    """Priority 4 — net rating upgrades/downgrades (last 30d) → modifier.
+
+    > 2 → +5 | 1-2 → +3 | 0 → 0 | -1 to -2 → -5 | < -2 → -10
+    """
+    if net_upgrades > 2:
+        return 5
+    if net_upgrades >= 1:
+        return 3
+    if net_upgrades == 0:
+        return 0
+    if net_upgrades >= -2:
+        return -5
+    return -10
+
+
+def _is_deteriorating(*, net_upgrades: int, pt_direction: str) -> bool:
+    """Return True when consensus is weakening (net downgrades OR PT cuts).
+
+    Used to decide between full penalty (-15) and half penalty (-7) when
+    price is 10-20% above the consensus target.
+    """
+    has_net_downgrades = net_upgrades < 0
+    has_pt_cuts = pt_direction.strip().upper() in ("SINGLE_CUT", "MULTIPLE_CUTS")
+    return has_net_downgrades or has_pt_cuts
+
+
+def _price_vs_target(current_price: float, analyst_target: float) -> float:
+    """Priority 5 — compute price vs target ratio.
+
+    price_vs_target = round((current_price - analyst_target) / analyst_target, 4)
+    Positive = stock above target. Negative = stock below target.
+    """
+    if analyst_target == 0:
+        return 0.0
+    return round((current_price - analyst_target) / analyst_target, 4)
+
+
+def _price_vs_target_band(pvt: float) -> str:
+    """Return the display band label for the given pvt ratio."""
+    if pvt < -0.20:
+        return _BAND_BELOW_20
+    if pvt < -0.10:
+        return _BAND_BELOW_10
+    if pvt <= 0.10:
+        return _BAND_NEUTRAL
+    if pvt <= 0.20:
+        return _BAND_ABOVE_10
+    return _BAND_ABOVE_20
 
 
 def _grade_from_total(total: int) -> str:
+    """Map F3 score to grade label (unchanged from v7.3.3)."""
     if total >= _GRADE_STRONG_BUY:
         return "STRONG BUY"
     if total >= _GRADE_BUY:
@@ -159,12 +260,8 @@ def _grade_from_total(total: int) -> str:
     return "AVOID"
 
 
-# ---------------------------------------------------------------------------
-# Consensus label helper
-# ---------------------------------------------------------------------------
-
-
 def _consensus_label(buy_pct: float | None) -> str:
+    """Map buy percentage to consensus label for display and scoring."""
     if buy_pct is None:
         return "NO DATA"
     if buy_pct > 80:
@@ -177,34 +274,150 @@ def _consensus_label(buy_pct: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Assembly
+# score_f3 — public pure function (Priority 1-5 + overrides)
 # ---------------------------------------------------------------------------
 
 
-def _compute_f3_total(
-    consensus_raw: int | None,
-    coverage_raw: int | None,
-    upside_raw: int | None,
-    revision_raw: int | None,
-) -> int | None:
-    """Compute weighted F3 total, rescaling when sub-factors have no data.
+def score_f3(
+    consensus_rating: str,
+    analyst_count: int,
+    pt_revision_direction: str,
+    net_upgrades_30d: int,
+    current_price: float,
+    analyst_target: float,
+    sell_count: int,
+) -> FactorScore:
+    """Compute the v7.3.4 F3 Analyst Conviction score.
 
-    Sub-factors with None scores are excluded and the remaining weights are
-    rescaled proportionally so they sum to 1.0.  Returns None only when ALL
-    four sub-factors have no data.
+    Parameters
+    ----------
+    consensus_rating:
+        Consensus label: "Strong Buy", "Buy", "Hold", or "Sell".
+    analyst_count:
+        Total number of analysts covering the stock.
+    pt_revision_direction:
+        PT direction label: "MULTIPLE_RAISES", "SINGLE_RAISE", "NO_CHANGE",
+        "SINGLE_CUT", or "MULTIPLE_CUTS".
+    net_upgrades_30d:
+        Net rating upgrades minus downgrades in the last 30 days.
+        Positive = net upgrades, negative = net downgrades.
+    current_price:
+        Most recent closing price (USD).
+    analyst_target:
+        Consensus 12-month price target (USD).
+    sell_count:
+        Number of analysts with a Sell or Strong Sell rating.
+
+    Returns
+    -------
+    FactorScore
+        raw_score clamped to [0, 100], weight=0.15, full breakdown dict,
+        override_applied flag, override_reason string.
     """
-    pairs = [
-        (consensus_raw, _W_CONSENSUS),
-        (coverage_raw, _W_COVERAGE),
-        (upside_raw, _W_PT_UPSIDE),
-        (revision_raw, _W_PT_REVISION),
-    ]
-    available = [(score, w) for score, w in pairs if score is not None]
-    if not available:
-        return None
-    total_weight = sum(w for _, w in available)
-    weighted = sum(score * (w / total_weight) for score, w in available)
-    return round(weighted)
+    # Priority 1 — base score from consensus label
+    base = _base_score_from_consensus(consensus_rating)
+
+    # Priority 2 — analyst count modifier
+    count_mod = _analyst_count_modifier(analyst_count)
+
+    # Priority 3 — PT revision direction modifier
+    pt_mod = _pt_revision_modifier(pt_revision_direction)
+
+    # Priority 4 — net upgrades/downgrades modifier
+    ud_mod = _upgrade_downgrade_modifier(net_upgrades_30d)
+
+    f3_before = base + count_mod + pt_mod + ud_mod
+
+    # Priority 5 — price vs target adjustment
+    pvt = _price_vs_target(current_price, analyst_target)
+    band_label = _price_vs_target_band(pvt)
+    deteriorating = _is_deteriorating(
+        net_upgrades=net_upgrades_30d,
+        pt_direction=pt_revision_direction,
+    )
+
+    if pvt < -0.20:
+        # 20%+ below target → +10
+        adjustment = 10
+        f3_after = f3_before + adjustment
+    elif pvt < -0.10:
+        # 10-20% below target → +5
+        adjustment = 5
+        f3_after = f3_before + adjustment
+    elif pvt <= 0.10:
+        # Neutral zone → 0
+        adjustment = 0
+        f3_after = f3_before
+    elif pvt <= 0.20:
+        # 10-20% above target
+        # Part 4: full penalty only when BOTH above target AND consensus deteriorating.
+        # If consensus is NOT deteriorating → half penalty (-7 instead of -15).
+        adjustment = _ABOVE_10_FULL_PENALTY if deteriorating else _ABOVE_10_HALF_PENALTY
+        f3_after = f3_before + adjustment
+    else:
+        # 20%+ above target → hard cap at 45
+        f3_after = min(f3_before, _HARD_CAP_ABOVE_20)
+        adjustment = f3_after - f3_before  # 0 or negative
+
+    # Clamp to [0, 100] before override check
+    f3_clamped = max(0, min(100, f3_after))
+
+    # High consensus override — minimum 78 when ALL conditions met.
+    # Exception: when price is >20% above target (the hard-cap band) the
+    # hard cap takes priority and the override does NOT fire.  The spec's
+    # "REGARDLESS of price vs target" covers the neutral zone and the
+    # 10-20% above band, NOT the extreme >20% hard-cap case.
+    in_hard_cap_band = pvt > 0.20
+
+    is_buy_or_sb = consensus_rating.strip().upper() in ("BUY", "STRONG BUY")
+    sufficient_coverage = analyst_count >= 9
+    no_sells = sell_count == 0
+    pt_maintained_or_raised = pt_revision_direction.strip().upper() in (
+        "MULTIPLE_RAISES",
+        "SINGLE_RAISE",
+        "NO_CHANGE",
+    )
+
+    override_applied = False
+    override_reason: str | None = None
+
+    if (
+        not in_hard_cap_band
+        and is_buy_or_sb
+        and sufficient_coverage
+        and no_sells
+        and pt_maintained_or_raised
+        and f3_clamped < _HIGH_CONSENSUS_MIN
+    ):
+        f3_clamped = _HIGH_CONSENSUS_MIN
+        override_applied = True
+        override_reason = "High consensus minimum rule applied"
+
+    breakdown: dict[str, Any] = {
+        "base_score": base,
+        "analyst_count_modifier": count_mod,
+        "pt_revision_modifier": pt_mod,
+        "upgrade_downgrade_modifier": ud_mod,
+        "f3_before_price_adjustment": f3_before,
+        "price_vs_target": pvt,
+        "price_vs_target_band_label": band_label,
+        "price_vs_target_adjustment": adjustment,
+        "deteriorating": deteriorating,
+    }
+
+    return FactorScore(
+        raw_score=float(f3_clamped),
+        weight=_W_F3,
+        weighted_contribution=f3_clamped * _W_F3,
+        breakdown=breakdown,
+        override_applied=override_applied,
+        override_reason=override_reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Assembly function — called by AnalystService.compute_analyst
+# ---------------------------------------------------------------------------
 
 
 def _build_analyst_response(
@@ -220,80 +433,167 @@ def _build_analyst_response(
     has_coverage: bool,
     ratings_data: dict[str, int] | None,
 ) -> AnalystResponse:
-    """Assemble an AnalystResponse from raw fetched values."""
+    """Assemble an AnalystResponse from raw fetched values using v7.3.4 scoring."""
     total_analysts = strong_buy + buy + hold + sell + strong_sell
-    effective_count: int | None = (num_analysts if num_analysts is not None else total_analysts) if has_coverage else None
+    effective_count = (
+        (num_analysts if num_analysts is not None else total_analysts) if has_coverage else 0
+    )
 
-    # Buy percentage = (Strong Buy + Buy) / total * 100
+    # Buy percentage for consensus label derivation
     buy_pct: float | None = None
     if has_coverage and total_analysts > 0:
         buy_pct = (strong_buy + buy) / total_analysts * 100.0
 
-    # PT upside
+    # Traditional upside (for display)
     upside_pct: float | None = None
-    pt_ratio: float | None = None
-    if current_price and consensus_pt and current_price > 0:
+    if current_price and consensus_pt and current_price > 0 and consensus_pt > 0:
         upside_pct = (consensus_pt - current_price) / current_price * 100.0
-        pt_ratio = current_price / consensus_pt  # >1.0 means stock exceeds PT
 
-    # Individual scores — None when data unavailable (no fallback points)
-    consensus_score = _score_consensus(buy_pct)
-    coverage_score = _score_analyst_coverage(effective_count)
-    upside_score = _score_pt_upside(upside_pct)
-    revision_score: int | None
-    if ratings_data is None:
-        revision_score = None
-    else:
-        revision_score = _score_pt_revision(ratings_data["raises"], ratings_data["lowers"])
-
-    # Weighted F3 — excludes None sub-factors and rescales remaining weights
-    f3_score = _compute_f3_total(consensus_score, coverage_score, upside_score, revision_score)
-
-    # PT Ratio cap — when stock price exceeds consensus PT by >40%, F3 is
-    # capped at 55 (NEUTRAL) regardless of the weighted composite.
-    if f3_score is not None and pt_ratio is not None and pt_ratio > _PT_RATIO_CAP_THRESHOLD:
-        f3_score = min(f3_score, _PT_RATIO_F3_CAP)
-
+    # PT revision data
     pt_raises = ratings_data["raises"] if ratings_data is not None else 0
     pt_lowers = ratings_data["lowers"] if ratings_data is not None else 0
-    revision_label = _revision_label(pt_raises, pt_lowers) if ratings_data is not None else "NO DATA"
+    raw_net_upgrades = ratings_data["net_upgrades"] if ratings_data is not None else 0
+    direction_label = (
+        _pt_revision_direction_label(pt_raises, pt_lowers)
+        if ratings_data is not None
+        else "NO_DATA"
+    )
+
+    # Compute F3 score when we have enough data
+    f3_score: int | None = None
+    f3_before: int | None = None
+    pvt: float | None = None
+    pvt_band: str | None = None
+    pvt_adj: int | None = None
+    override_applied = False
+    override_reason: str | None = None
+
+    if has_coverage and current_price and consensus_pt and current_price > 0 and consensus_pt > 0:
+        sell_count = sell + strong_sell
+        consensus_label = _consensus_label(buy_pct)
+        # Use "HOLD" if no data / neutral label
+        if consensus_label == "NO DATA":
+            consensus_label = "HOLD"
+
+        fs = score_f3(
+            consensus_rating=consensus_label,
+            analyst_count=effective_count,
+            pt_revision_direction=direction_label if direction_label != "NO_DATA" else "NO_CHANGE",
+            net_upgrades_30d=raw_net_upgrades,
+            current_price=current_price,
+            analyst_target=consensus_pt,
+            sell_count=sell_count,
+        )
+
+        f3_score = round(fs.raw_score)
+        f3_before = fs.breakdown["f3_before_price_adjustment"]
+        pvt = fs.breakdown["price_vs_target"]
+        pvt_band = fs.breakdown["price_vs_target_band_label"]
+        pvt_adj = fs.breakdown["price_vs_target_adjustment"]
+        override_applied = fs.override_applied
+        override_reason = fs.override_reason
+    elif has_coverage and (not current_price or not consensus_pt):
+        # Coverage exists but no price data — score without price adjustment
+        sell_count = sell + strong_sell
+        consensus_label = _consensus_label(buy_pct)
+        if consensus_label == "NO DATA":
+            consensus_label = "HOLD"
+        count = effective_count
+        pt_mod = _pt_revision_modifier(
+            direction_label if direction_label != "NO_DATA" else "NO_CHANGE"
+        )
+        ud_mod = _upgrade_downgrade_modifier(raw_net_upgrades)
+        base = _base_score_from_consensus(consensus_label)
+        count_mod = _analyst_count_modifier(count)
+        raw = base + count_mod + pt_mod + ud_mod
+        raw_clamped = max(0, min(100, raw))
+
+        # No price data → skip pvt adjustment; still check override
+        is_buy_or_sb = consensus_label.upper() in ("BUY", "STRONG BUY")
+        no_sells = sell_count == 0
+        sufficient_cov = count >= 9
+        pt_ok = (direction_label if direction_label != "NO_DATA" else "NO_CHANGE").upper() in (
+            "MULTIPLE_RAISES",
+            "SINGLE_RAISE",
+            "NO_CHANGE",
+        )
+        if (
+            is_buy_or_sb
+            and no_sells
+            and sufficient_cov
+            and pt_ok
+            and raw_clamped < _HIGH_CONSENSUS_MIN
+        ):
+            raw_clamped = _HIGH_CONSENSUS_MIN
+            override_applied = True
+            override_reason = "High consensus minimum rule applied"
+
+        f3_score = raw_clamped
+        f3_before = raw
+        pvt_adj = 0
+        pvt_band = _BAND_NEUTRAL
+
+    # Build sub-indicators
+    consensus_indicator = ConsensusRatingIndicator(
+        strong_buy_count=strong_buy,
+        buy_count=buy,
+        hold_count=hold,
+        sell_count=sell,
+        strong_sell_count=strong_sell,
+        total_analysts=total_analysts,
+        buy_pct=buy_pct,
+        label=_consensus_label(buy_pct),
+        base_score=_base_score_from_consensus(_consensus_label(buy_pct))
+        if buy_pct is not None
+        else None,
+    )
+
+    coverage_indicator = AnalystCoverageIndicator(
+        num_analysts=effective_count,
+        modifier=_analyst_count_modifier(effective_count) if has_coverage else None,
+    )
+
+    pt_direction_indicator = PtDirectionIndicator(
+        raises_30d=pt_raises,
+        lowers_30d=pt_lowers,
+        direction_label=direction_label,
+        modifier=_pt_revision_modifier(direction_label)
+        if ratings_data is not None and direction_label != "NO_DATA"
+        else None,
+    )
+
+    recent_upgrades_indicator = RecentUpgradesIndicator(
+        upgrades_30d=max(0, raw_net_upgrades) if ratings_data is not None else 0,
+        downgrades_30d=max(0, -raw_net_upgrades) if ratings_data is not None else 0,
+        net_upgrades_30d=raw_net_upgrades,
+        modifier=_upgrade_downgrade_modifier(raw_net_upgrades)
+        if ratings_data is not None
+        else None,
+    )
+
+    pt_upside_indicator = PtUpsideIndicator(
+        current_price=current_price,
+        consensus_pt=consensus_pt,
+        upside_pct=upside_pct,
+        price_vs_target=pvt,
+        price_vs_target_band=pvt_band,
+        adjustment=pvt_adj,
+    )
+
+    grade = _grade_from_total(f3_score) if f3_score is not None else "NO DATA"
 
     return AnalystResponse(
         ticker=ticker.upper(),
-        consensus_rating=ConsensusRatingIndicator(
-            strong_buy_count=strong_buy,
-            buy_count=buy,
-            hold_count=hold,
-            sell_count=sell,
-            strong_sell_count=strong_sell,
-            total_analysts=total_analysts,
-            buy_pct=buy_pct,
-            label=_consensus_label(buy_pct),
-            score=consensus_score,
-            weight=_W_CONSENSUS,
-        ),
-        analyst_coverage=AnalystCoverageIndicator(
-            num_analysts=effective_count if effective_count is not None else 0,
-            score=coverage_score,
-            weight=_W_COVERAGE,
-        ),
-        pt_upside=PtUpsideIndicator(
-            current_price=current_price,
-            consensus_pt=consensus_pt,
-            upside_pct=upside_pct,
-            pt_ratio=round(pt_ratio, 4) if pt_ratio is not None else None,
-            score=upside_score,
-            weight=_W_PT_UPSIDE,
-        ),
-        pt_revision=PtRevisionIndicator(
-            raises_30d=pt_raises,
-            lowers_30d=pt_lowers,
-            revision_label=revision_label,
-            score=revision_score,
-            weight=_W_PT_REVISION,
-        ),
+        consensus_rating=consensus_indicator,
+        analyst_coverage=coverage_indicator,
+        pt_direction=pt_direction_indicator,
+        recent_upgrades=recent_upgrades_indicator,
+        pt_upside=pt_upside_indicator,
+        f3_before_price_adjustment=f3_before,
+        override_applied=override_applied,
+        override_reason=override_reason,
         f3_score=f3_score,
-        f3_grade=_grade_from_total(f3_score) if f3_score is not None else "NO DATA",
+        f3_grade=grade,
     )
 
 
@@ -335,13 +635,10 @@ class AnalystService:
         """Fetch data from Benzinga + Polygon and return an AnalystResponse."""
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             consensus_data = await self._fetch_consensus(client, ticker)
-            # Benzinga returns null aggregate_ratings for tickers it doesn't index
-            # (typically smaller-cap stocks). Fall back to Alpha Vantage OVERVIEW.
             if not consensus_data:
                 consensus_data = await self._fetch_consensus_av(
                     client, ticker, overview_task=overview_task
                 )
-            # If AV also has no data, try FMP grades-consensus as a second fallback.
             if not consensus_data:
                 consensus_data = await self._fetch_consensus_fmp(client, ticker)
             ratings_data = await self._fetch_recent_ratings(client, ticker)
@@ -374,14 +671,8 @@ class AnalystService:
     # Benzinga — consensus ratings
     # ------------------------------------------------------------------
 
-    async def _fetch_consensus(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
-        """Fetch consensus rating breakdown from Benzinga.
-
-        Endpoint: GET /api/v1/consensus-ratings
-        Params: tickers, aggregate_type=number, token
-        """
+    async def _fetch_consensus(self, client: httpx.AsyncClient, ticker: str) -> dict[str, Any]:
+        """Fetch consensus rating breakdown from Benzinga."""
         try:
             resp = await client.get(
                 f"{_BENZINGA_BASE_URL}/api/v1/consensus-ratings",
@@ -394,11 +685,6 @@ class AnalystService:
             resp.raise_for_status()
             raw = resp.json()
 
-            # Benzinga returns a flat dict for covered tickers:
-            #   aggregate_ratings: {strong_buy, buy, hold, sell} | null
-            #   consensus_price_target: float
-            #   unique_analyst_count: int
-            # For tickers with no coverage it returns [] (an empty list).
             if not isinstance(raw, dict):
                 return {}
             payload: dict[str, Any] = raw
@@ -423,18 +709,14 @@ class AnalystService:
             sell = _get_count(["sell"])
             strong_sell = _get_count(["strong_sell", "strongSell"])
 
-            # unique_analyst_count is more accurate than total_analyst_count
             raw_count = payload.get("unique_analyst_count") or payload.get("total_analyst_count")
             num_analysts: int | None = int(raw_count) if raw_count else None
 
-            # Consensus price target lives at the top level of the payload
             raw_pt = payload.get("consensus_price_target")
             consensus_pt: float | None = None
-            if raw_pt:
-                try:
+            with contextlib.suppress(TypeError, ValueError):
+                if raw_pt:
                     consensus_pt = float(raw_pt)
-                except (TypeError, ValueError):
-                    pass
 
             return {
                 "strong_buy": strong_buy,
@@ -449,7 +731,7 @@ class AnalystService:
             return {}
 
     # ------------------------------------------------------------------
-    # Alpha Vantage — consensus fallback (OVERVIEW endpoint)
+    # Alpha Vantage — consensus fallback
     # ------------------------------------------------------------------
 
     async def _fetch_consensus_av(
@@ -459,27 +741,20 @@ class AnalystService:
         *,
         overview_task: asyncio.Task[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Fallback consensus from Alpha Vantage OVERVIEW when Benzinga has no coverage.
-
-        Relevant fields returned by AV:
-          AnalystRatingStrongBuy, AnalystRatingBuy, AnalystRatingHold,
-          AnalystRatingSell, AnalystRatingStrongSell, AnalystTargetPrice
-        Analyst count is derived by summing the rating counts.
-
-        Note: AV does not provide PT revision direction — that sub-factor
-        stays at its default (NO CHANGE / 60) when this fallback is used.
-        """
+        """Fallback consensus from Alpha Vantage OVERVIEW."""
         if not self._av_key:
             return {}
         try:
-            # Use the pre-fetched shared task when available (avoids a
-            # duplicate OVERVIEW call that FundamentalService also makes).
             if overview_task is not None:
                 payload: dict[str, Any] = await overview_task
             else:
                 resp = await client.get(
                     "https://www.alphavantage.co/query",
-                    params={"function": "OVERVIEW", "symbol": ticker.upper(), "apikey": self._av_key},
+                    params={
+                        "function": "OVERVIEW",
+                        "symbol": ticker.upper(),
+                        "apikey": self._av_key,
+                    },
                 )
                 resp.raise_for_status()
                 payload = resp.json()
@@ -504,11 +779,9 @@ class AnalystService:
 
             consensus_pt: float | None = None
             raw_pt = payload.get("AnalystTargetPrice")
-            if raw_pt:
-                try:
+            with contextlib.suppress(TypeError, ValueError):
+                if raw_pt:
                     consensus_pt = float(raw_pt)
-                except (TypeError, ValueError):
-                    pass
 
             return {
                 "strong_buy": strong_buy,
@@ -526,15 +799,8 @@ class AnalystService:
     # FMP — consensus grades fallback
     # ------------------------------------------------------------------
 
-    async def _fetch_consensus_fmp(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
-        """Fallback consensus from FMP when both Benzinga and AV have no data.
-
-        Endpoints used:
-          GET /stable/grades-consensus  → strongBuy, buy, hold, sell, strongSell
-          GET /stable/price-target-consensus → targetConsensus
-        """
+    async def _fetch_consensus_fmp(self, client: httpx.AsyncClient, ticker: str) -> dict[str, Any]:
+        """Fallback consensus from FMP."""
         if not self._fmp_key:
             return {}
         try:
@@ -576,12 +842,9 @@ class AnalystService:
             consensus_pt: float | None = None
             if pt_list and isinstance(pt_list, list):
                 raw_pt = pt_list[0].get("targetConsensus")
-                if raw_pt:
-                    try:
+                with contextlib.suppress(TypeError, ValueError):
+                    if raw_pt:
                         consensus_pt = float(raw_pt)
-                    except (TypeError, ValueError):
-                        pass
-
             return {
                 "strong_buy": strong_buy,
                 "buy": buy,
@@ -595,20 +858,20 @@ class AnalystService:
             return {}
 
     # ------------------------------------------------------------------
-    # Benzinga — calendar ratings (PT revision direction, last 30 days)
+    # Benzinga — calendar ratings (PT revision direction + net upgrades)
     # ------------------------------------------------------------------
 
     async def _fetch_recent_ratings(
         self, client: httpx.AsyncClient, ticker: str
     ) -> dict[str, int] | None:
-        """Count PT raises and lowers from Benzinga calendar/ratings (last 30 days).
+        """Count PT raises/lowers and net rating upgrades from Benzinga (last 30 days).
 
         action_pt values that count as raises: 'Raises', 'Announces'
         action_pt values that count as lowers: 'Lowers'
-        'Maintains' → no change (ignored in counts)
+        action_company values that count as upgrades: 'Upgrades', 'Initiates Coverage On'
+        action_company values that count as downgrades: 'Downgrades'
 
-        Returns None on any fetch/parse failure so the caller can distinguish
-        between "no revisions in 30 days" and "data unavailable".
+        Returns None on any fetch/parse failure.
         """
         try:
             date_from = (date.today() - timedelta(days=_REVISION_DAYS)).isoformat()
@@ -630,18 +893,30 @@ class AnalystService:
             ratings: list[Any] = payload.get("ratings") or []
             raises = 0
             lowers = 0
+            upgrades = 0
+            downgrades = 0
+
             for r in ratings:
-                # Benzinga may ignore the tickers param and return unrelated tickers;
-                # always guard by checking the ticker field explicitly.
                 if r.get("ticker", "").upper() != ticker.upper():
                     continue
+
                 action_pt: str = (r.get("action_pt") or "").strip().lower()
                 if action_pt in ("raises", "announces"):
                     raises += 1
                 elif action_pt == "lowers":
                     lowers += 1
 
-            return {"raises": raises, "lowers": lowers}
+                action_co: str = (r.get("action_company") or "").strip().lower()
+                if action_co in ("upgrades", "initiates coverage on"):
+                    upgrades += 1
+                elif action_co == "downgrades":
+                    downgrades += 1
+
+            return {
+                "raises": raises,
+                "lowers": lowers,
+                "net_upgrades": upgrades - downgrades,
+            }
         except Exception:
             return None
 
@@ -649,16 +924,10 @@ class AnalystService:
     # Polygon.io — current price
     # ------------------------------------------------------------------
 
-    async def _fetch_current_price(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> float | None:
+    async def _fetch_current_price(self, client: httpx.AsyncClient, ticker: str) -> float | None:
         """Return the most recent closing price from Polygon snapshot.
 
-        Prefers ``day.c`` (today's close).  Falls back to ``prevDay.c`` when
-        ``day.c`` is absent or zero — Polygon sets it to 0 before any trade
-        executes on the current session (pre-market / closed market).  Using 0
-        as the current price would make the ``if current_price`` truthiness
-        guard fail and silently skip the PT-ratio cap.
+        Prefers day.c. Falls back to prevDay.c when day.c is absent or zero.
         """
         if not self._polygon_key:
             return None
@@ -674,7 +943,6 @@ class AnalystService:
             raw = day.get("c")
             if raw is not None and float(raw) > 0:
                 return float(raw)
-            # day.c is 0 or absent — fall back to the previous session's close
             prev_day: dict[str, Any] = ticker_data.get("prevDay", {})
             raw_prev = prev_day.get("c")
             return float(raw_prev) if raw_prev is not None and float(raw_prev) > 0 else None

@@ -1,15 +1,15 @@
-"""Unit tests for AnalystService — pure calculation functions.
+"""Unit tests for AnalystService — v7.3.4 F3 scoring algorithm.
 
-All external HTTP calls are avoided; these tests cover the computation
-logic that is deterministic from a known input.
+F3 v7.3.4 uses a base-score + modifier approach:
+  Priority 1: Consensus label → base score (90/78/55/30)
+  Priority 2: Analyst count   → modifier (+8/+5/+3/0/-5)
+  Priority 3: PT revision     → modifier (+5/+3/0/-5/-10)
+  Priority 4: Net upgrades    → modifier (+5/+3/0/-5/-10)
+  Priority 5: Price vs target adjustment (with override rules)
 
-F3 Analyst Conviction sub-indicators (0-100 each, weighted):
-  1. Consensus Rating     (35%) — (Strong Buy + Buy) % of total analysts
-  2. Analyst Count        (10%) — unique analysts covering the stock
-  3. PT vs Current Price  (30%) — % upside from current price to consensus PT
-  4. PT Revision Direction(25%) — PT raises / lowers in last 30 days
-
-PT Ratio guard: when current_price / consensus_PT > 1.40, F3 is capped at 55.
+High consensus override: Buy/SB + ≥9 analysts + 0 sells + raised/maintained PT → min 78
+Hard cap: when pvt > +20%, f3_final = min(f3_before, 45)
+Half penalty: when pvt in (10%, 20%] AND consensus NOT deteriorating → apply -7 not -15
 """
 
 from __future__ import annotations
@@ -19,155 +19,260 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from atlas.services.analyst_service import (
-    _PT_RATIO_CAP_THRESHOLD,
-    _PT_RATIO_F3_CAP,
+    _HARD_CAP_ABOVE_20,
+    _analyst_count_modifier,
+    _base_score_from_consensus,
     _build_analyst_response,
     _grade_from_total,
-    _score_analyst_coverage,
-    _score_consensus,
-    _score_pt_revision,
-    _score_pt_upside,
+    _is_deteriorating,
+    _price_vs_target,
+    _price_vs_target_band,
+    _pt_revision_direction_label,
+    _pt_revision_modifier,
+    _upgrade_downgrade_modifier,
+    score_f3,
     AnalystService,
 )
 
 # ---------------------------------------------------------------------------
-# _score_consensus
+# _base_score_from_consensus
 # ---------------------------------------------------------------------------
 
 
-class TestScoreConsensus:
-    """Buy-percentage → 0-100 component score (35% weight in F3)."""
+class TestBaseScoreFromConsensus:
+    """Consensus rating string -> base score (90 / 78 / 55 / 30)."""
 
-    def test_above_80_pct_buy_scores_100(self) -> None:
-        assert _score_consensus(81.0) == 100
+    def test_strong_buy_returns_90(self) -> None:
+        assert _base_score_from_consensus("Strong Buy") == 90
 
-    def test_exactly_80_pct_scores_80(self) -> None:
-        # ">80" is the STRONG BUY gate; 80.0 is not > 80
-        assert _score_consensus(80.0) == 80
+    def test_strong_buy_case_insensitive(self) -> None:
+        assert _base_score_from_consensus("STRONG BUY") == 90
+        assert _base_score_from_consensus("strong buy") == 90
 
-    def test_60_pct_buy_scores_80(self) -> None:
-        assert _score_consensus(60.0) == 80
+    def test_buy_returns_78(self) -> None:
+        assert _base_score_from_consensus("Buy") == 78
+        assert _base_score_from_consensus("BUY") == 78
 
-    def test_59_pct_buy_scores_55(self) -> None:
-        assert _score_consensus(59.9) == 55
+    def test_hold_returns_55(self) -> None:
+        assert _base_score_from_consensus("Hold") == 55
+        assert _base_score_from_consensus("HOLD") == 55
 
-    def test_40_pct_buy_scores_55(self) -> None:
-        assert _score_consensus(40.0) == 55
+    def test_sell_returns_30(self) -> None:
+        assert _base_score_from_consensus("Sell") == 30
+        assert _base_score_from_consensus("SELL") == 30
 
-    def test_39_pct_buy_scores_20(self) -> None:
-        assert _score_consensus(39.9) == 20
-
-    def test_zero_pct_buy_scores_20(self) -> None:
-        assert _score_consensus(0.0) == 20
-
-    def test_none_returns_55_neutral(self) -> None:
-        # No analyst data → neutral, not zero
-        assert _score_consensus(None) == 55
+    def test_unknown_label_returns_sell_score(self) -> None:
+        assert _base_score_from_consensus("Unknown") == 30
 
 
 # ---------------------------------------------------------------------------
-# _score_analyst_coverage
+# _analyst_count_modifier
 # ---------------------------------------------------------------------------
 
 
-class TestScoreAnalystCoverage:
-    """Analyst count → 0-100 component score (10% weight in F3)."""
+class TestAnalystCountModifier:
+    """Analyst count -> modifier (+8/+5/+3/0/-5)."""
 
-    def test_more_than_20_analysts_scores_100(self) -> None:
-        assert _score_analyst_coverage(21) == 100
+    def test_above_30_returns_8(self) -> None:
+        assert _analyst_count_modifier(31) == 8
+        assert _analyst_count_modifier(50) == 8
 
-    def test_exactly_20_analysts_scores_85(self) -> None:
-        # ">20" gate; 20 falls into the 10-20 band
-        assert _score_analyst_coverage(20) == 85
+    def test_exactly_30_returns_5(self) -> None:
+        assert _analyst_count_modifier(30) == 5
 
-    def test_10_analysts_scores_85(self) -> None:
-        assert _score_analyst_coverage(10) == 85
+    def test_20_to_30_returns_5(self) -> None:
+        assert _analyst_count_modifier(20) == 5
+        assert _analyst_count_modifier(25) == 5
 
-    def test_9_analysts_scores_65(self) -> None:
-        assert _score_analyst_coverage(9) == 65
+    def test_10_to_19_returns_3(self) -> None:
+        assert _analyst_count_modifier(10) == 3
+        assert _analyst_count_modifier(15) == 3
+        assert _analyst_count_modifier(19) == 3
 
-    def test_5_analysts_scores_65(self) -> None:
-        assert _score_analyst_coverage(5) == 65
+    def test_5_to_9_returns_0(self) -> None:
+        assert _analyst_count_modifier(5) == 0
+        assert _analyst_count_modifier(9) == 0
 
-    def test_4_analysts_scores_40(self) -> None:
-        # Hard cap at 40 for <5 analysts per guide
-        assert _score_analyst_coverage(4) == 40
-
-    def test_0_analysts_scores_40(self) -> None:
-        assert _score_analyst_coverage(0) == 40
-
-    def test_none_returns_40(self) -> None:
-        assert _score_analyst_coverage(None) == 40
+    def test_below_5_returns_minus_5(self) -> None:
+        assert _analyst_count_modifier(4) == -5
+        assert _analyst_count_modifier(0) == -5
 
 
 # ---------------------------------------------------------------------------
-# _score_pt_upside
+# _pt_revision_direction_label
 # ---------------------------------------------------------------------------
 
 
-class TestScorePtUpside:
-    """% upside to consensus PT → 0-100 component score (30% weight in F3)."""
+class TestPtRevisionDirectionLabel:
+    """(raises, lowers) -> direction label string."""
 
-    def test_above_30_pct_upside_scores_100(self) -> None:
-        assert _score_pt_upside(31.0) == 100
+    def test_two_net_raises_gives_multiple_raises(self) -> None:
+        assert _pt_revision_direction_label(2, 0) == "MULTIPLE_RAISES"
+        assert _pt_revision_direction_label(3, 1) == "MULTIPLE_RAISES"
 
-    def test_exactly_30_pct_upside_scores_85(self) -> None:
-        # ">30" gate; 30.0 is not > 30
-        assert _score_pt_upside(30.0) == 85
+    def test_one_net_raise_gives_single_raise(self) -> None:
+        assert _pt_revision_direction_label(1, 0) == "SINGLE_RAISE"
+        assert _pt_revision_direction_label(2, 1) == "SINGLE_RAISE"
 
-    def test_15_pct_upside_scores_85(self) -> None:
-        assert _score_pt_upside(15.0) == 85
+    def test_no_change_gives_no_change(self) -> None:
+        assert _pt_revision_direction_label(0, 0) == "NO_CHANGE"
+        assert _pt_revision_direction_label(1, 1) == "NO_CHANGE"
 
-    def test_14_pct_upside_scores_70(self) -> None:
-        assert _score_pt_upside(14.9) == 70
+    def test_one_net_lower_gives_single_cut(self) -> None:
+        assert _pt_revision_direction_label(0, 1) == "SINGLE_CUT"
+        assert _pt_revision_direction_label(1, 2) == "SINGLE_CUT"
 
-    def test_5_pct_upside_scores_70(self) -> None:
-        assert _score_pt_upside(5.0) == 70
-
-    def test_4_pct_upside_scores_55(self) -> None:
-        assert _score_pt_upside(4.9) == 55
-
-    def test_zero_upside_scores_55(self) -> None:
-        assert _score_pt_upside(0.0) == 55
-
-    def test_negative_upside_scores_20(self) -> None:
-        # Stock above PT → 20 (bearish signal)
-        assert _score_pt_upside(-10.0) == 20
-
-    def test_none_returns_55_neutral(self) -> None:
-        assert _score_pt_upside(None) == 55
+    def test_two_net_lowers_gives_multiple_cuts(self) -> None:
+        assert _pt_revision_direction_label(0, 2) == "MULTIPLE_CUTS"
+        assert _pt_revision_direction_label(0, 5) == "MULTIPLE_CUTS"
 
 
 # ---------------------------------------------------------------------------
-# _score_pt_revision
+# _pt_revision_modifier
 # ---------------------------------------------------------------------------
 
 
-class TestScorePtRevision:
-    """PT revision counts (last 30 days) → 0-100 component score (25% weight in F3)."""
+class TestPtRevisionModifier:
+    """PT direction label -> modifier (+5/+3/0/-5/-10)."""
 
-    def test_two_or_more_raises_scores_100(self) -> None:
-        assert _score_pt_revision(raises=2, lowers=0) == 100
-        assert _score_pt_revision(raises=5, lowers=1) == 100
+    def test_multiple_raises_returns_5(self) -> None:
+        assert _pt_revision_modifier("MULTIPLE_RAISES") == 5
 
-    def test_one_raise_scores_80(self) -> None:
-        assert _score_pt_revision(raises=1, lowers=0) == 80
+    def test_single_raise_returns_3(self) -> None:
+        assert _pt_revision_modifier("SINGLE_RAISE") == 3
 
-    def test_no_change_scores_60(self) -> None:
-        assert _score_pt_revision(raises=0, lowers=0) == 60
+    def test_no_change_returns_0(self) -> None:
+        assert _pt_revision_modifier("NO_CHANGE") == 0
 
-    def test_any_lower_scores_20(self) -> None:
-        assert _score_pt_revision(raises=0, lowers=1) == 20
-        assert _score_pt_revision(raises=0, lowers=3) == 20
+    def test_single_cut_returns_minus_5(self) -> None:
+        assert _pt_revision_modifier("SINGLE_CUT") == -5
+
+    def test_multiple_cuts_returns_minus_10(self) -> None:
+        assert _pt_revision_modifier("MULTIPLE_CUTS") == -10
+
+    def test_case_insensitive(self) -> None:
+        assert _pt_revision_modifier("multiple_raises") == 5
+        assert _pt_revision_modifier("single_cut") == -5
 
 
 # ---------------------------------------------------------------------------
-# _grade_from_total
+# _upgrade_downgrade_modifier
+# ---------------------------------------------------------------------------
+
+
+class TestUpgradeDowngradeModifier:
+    """Net upgrades/downgrades integer -> modifier (+5/+3/0/-5/-10)."""
+
+    def test_more_than_2_returns_5(self) -> None:
+        assert _upgrade_downgrade_modifier(3) == 5
+        assert _upgrade_downgrade_modifier(10) == 5
+
+    def test_1_or_2_returns_3(self) -> None:
+        assert _upgrade_downgrade_modifier(1) == 3
+        assert _upgrade_downgrade_modifier(2) == 3
+
+    def test_zero_returns_0(self) -> None:
+        assert _upgrade_downgrade_modifier(0) == 0
+
+    def test_minus_1_or_minus_2_returns_minus_5(self) -> None:
+        assert _upgrade_downgrade_modifier(-1) == -5
+        assert _upgrade_downgrade_modifier(-2) == -5
+
+    def test_less_than_minus_2_returns_minus_10(self) -> None:
+        assert _upgrade_downgrade_modifier(-3) == -10
+        assert _upgrade_downgrade_modifier(-10) == -10
+
+
+# ---------------------------------------------------------------------------
+# _is_deteriorating
+# ---------------------------------------------------------------------------
+
+
+class TestIsDeterioriating:
+    """Consensus deteriorating iff net downgrades OR PT cuts present."""
+
+    def test_net_downgrades_is_deteriorating(self) -> None:
+        assert _is_deteriorating(net_upgrades=-1, pt_direction="NO_CHANGE") is True
+
+    def test_pt_cuts_is_deteriorating(self) -> None:
+        assert _is_deteriorating(net_upgrades=0, pt_direction="SINGLE_CUT") is True
+        assert _is_deteriorating(net_upgrades=2, pt_direction="MULTIPLE_CUTS") is True
+
+    def test_positive_upgrades_and_no_cuts_not_deteriorating(self) -> None:
+        assert _is_deteriorating(net_upgrades=2, pt_direction="NO_CHANGE") is False
+        assert _is_deteriorating(net_upgrades=0, pt_direction="NO_CHANGE") is False
+
+    def test_raises_not_deteriorating(self) -> None:
+        assert _is_deteriorating(net_upgrades=3, pt_direction="MULTIPLE_RAISES") is False
+
+
+# ---------------------------------------------------------------------------
+# _price_vs_target
+# ---------------------------------------------------------------------------
+
+
+class TestPriceVsTarget:
+    """price_vs_target = round((current - target) / target, 4)."""
+
+    def test_at_target_gives_zero(self) -> None:
+        assert _price_vs_target(100.0, 100.0) == 0.0
+
+    def test_above_target_gives_positive(self) -> None:
+        assert _price_vs_target(110.0, 100.0) == 0.10
+
+    def test_below_target_gives_negative(self) -> None:
+        assert _price_vs_target(90.0, 100.0) == -0.10
+
+    def test_result_is_rounded_to_4_decimals(self) -> None:
+        # (400-460)/460 = -0.130434... -> -0.1304
+        result = _price_vs_target(400.0, 460.0)
+        assert result == -0.1304
+
+    def test_mu_at_target_is_zero(self) -> None:
+        assert _price_vs_target(458.25, 458.25) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _price_vs_target_band
+# ---------------------------------------------------------------------------
+
+
+class TestPriceVsTargetBand:
+    """pvt float -> band label string."""
+
+    def test_more_than_20_below_gives_below_20_band(self) -> None:
+        band = _price_vs_target_band(-0.21)
+        assert "20%+" in band and "below" in band
+
+    def test_exactly_minus_20_is_below_10_band(self) -> None:
+        # -0.20 is NOT < -0.20, falls into 10-20% below
+        band = _price_vs_target_band(-0.20)
+        assert "10-20%" in band and "below" in band
+
+    def test_between_10_and_20_below_gives_below_10_band(self) -> None:
+        band = _price_vs_target_band(-0.15)
+        assert "10-20%" in band and "below" in band
+
+    def test_zero_gives_neutral(self) -> None:
+        band = _price_vs_target_band(0.0)
+        assert "neutral" in band.lower() or "target" in band.lower()
+
+    def test_between_10_and_20_above_gives_above_10_band(self) -> None:
+        band = _price_vs_target_band(0.15)
+        assert "10-20%" in band and "above" in band
+
+    def test_more_than_20_above_gives_above_20_band(self) -> None:
+        band = _price_vs_target_band(0.25)
+        assert "20%+" in band and "above" in band
+
+
+# ---------------------------------------------------------------------------
+# _grade_from_total — UNCHANGED
 # ---------------------------------------------------------------------------
 
 
 class TestGradeFromTotal:
-    """F3 score → STRONG BUY / BUY / NEUTRAL / WEAK / AVOID label."""
+    """F3 score -> STRONG BUY / BUY / NEUTRAL / WEAK / AVOID label."""
 
     def test_80_is_strong_buy(self) -> None:
         assert _grade_from_total(80) == "STRONG BUY"
@@ -201,111 +306,335 @@ class TestGradeFromTotal:
 
 
 # ---------------------------------------------------------------------------
-# _build_analyst_response — PT Ratio cap
-#
-# The cap: if current_price / consensus_PT > 1.40 the stock is trading more
-# than 40% above analyst targets. F3 is capped at 55 (NEUTRAL) regardless of
-# the weighted composite.  The cap must run BEFORE the AnalystResponse is
-# built so that f3_score in the response is already the final, capped value.
+# score_f3 — six spec test cases + edge cases
 # ---------------------------------------------------------------------------
 
 
-def _bullish_response(
-    *,
-    current_price: float | None,
-    consensus_pt: float | None,
-) -> object:
-    """Build a response with maximally bullish non-price inputs so that the
-    raw F3 before any cap would be well above 55, making cap-vs-no-cap easy
-    to distinguish.
+class TestHighConsensusOverride:
+    """Min 78 fires when Buy/SB + >=9 analysts + 0 sells + raised/maintained PT."""
 
-    strong_buy=10 → buy_pct=100% → consensus_score=100 (>80%)
-    num_analysts=15 → coverage_score=85 (10-20 analysts)
-    pt_raises=2, pt_lowers=0 → revision_score=100 (multiple raises)
-    Weighted pre-cap = 100*0.35 + 85*0.10 + upside*0.30 + 100*0.25
-    When stock is above PT (upside_score=20): pre-cap = 35+8.5+6+25 = 74.5 → 75
-    When no PT data (upside_score=55): pre-cap = 35+8.5+16.5+25 = 85 → 85
-    """
-    return _build_analyst_response(
-        ticker="TEST",
-        strong_buy=10,
-        buy=0,
-        hold=0,
-        sell=0,
-        strong_sell=0,
-        num_analysts=15,
-        consensus_pt=consensus_pt,
-        current_price=current_price,
-        pt_raises=2,
-        pt_lowers=0,
-    )
+    def test_override_lifts_score_to_78(self) -> None:
+        # Buy(78) + count=9(0) + NO_CHANGE(0) + 0 upgrades(0) = 78,
+        # pvt ~+0.1387 (14% above, not deteriorating) -> half penalty -7 -> 71 < 78.
+        # Override: Buy + 9 + 0 sells + NO_CHANGE (maintained) -> min 78.
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=9,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=521.95,
+            analyst_target=458.25,
+            sell_count=0,
+        )
+        assert result.raw_score == 78
+        assert result.override_applied is True
+
+    def test_override_does_not_fire_with_sell_count_nonzero(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=9,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=521.95,
+            analyst_target=458.25,
+            sell_count=1,
+        )
+        assert result.override_applied is False
+
+    def test_override_does_not_fire_with_hold_consensus(self) -> None:
+        result = score_f3(
+            consensus_rating="Hold",
+            analyst_count=15,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert result.override_applied is False
+
+    def test_override_does_not_fire_when_count_below_9(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=8,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert result.override_applied is False
+
+    def test_override_does_not_fire_with_multiple_cuts(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=10,
+            pt_revision_direction="MULTIPLE_CUTS",
+            net_upgrades_30d=0,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert result.override_applied is False
 
 
-class TestPtRatioCap:
-    """PT Ratio cap — current_price / consensus_PT > 1.40 → f3_score ≤ 55."""
+class TestScoreF3:
+    """spec test cases 1-6 plus edge cases."""
 
-    def test_cap_applies_when_ratio_above_threshold(self) -> None:
-        # pt_ratio = 150/100 = 1.50 > 1.40 → cap must fire
-        response = _bullish_response(current_price=150.0, consensus_pt=100.0)
-        assert response.f3_score <= _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_1_price_at_target_neutral_not_penalized(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=38,
+            pt_revision_direction="MULTIPLE_RAISES",
+            net_upgrades_30d=2,
+            current_price=458.25,
+            analyst_target=458.25,
+            sell_count=0,
+        )
+        # f3_before = 78+8+5+3 = 94; pvt=0 neutral; no adjustment
+        assert result.raw_score == 94
+        assert result.raw_score > 59, "Bug: price-at-target must not penalize F3"
+        assert result.breakdown["price_vs_target_adjustment"] == 0
 
-    def test_cap_brings_score_to_exactly_55_when_raw_is_higher(self) -> None:
-        # Without cap the bullish inputs would produce 75; cap must give 55
-        response = _bullish_response(current_price=150.0, consensus_pt=100.0)
-        assert response.f3_score == _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_2_ten_to_twenty_pct_below_adds_5(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=15,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=400.0,
+            analyst_target=460.0,
+            sell_count=0,
+        )
+        assert result.breakdown["f3_before_price_adjustment"] == 81
+        assert result.breakdown["price_vs_target_adjustment"] == 5
+        assert result.raw_score == 86
 
-    def test_cap_does_not_apply_at_exact_threshold(self) -> None:
-        # pt_ratio = 140/100 = 1.40; condition is "> 1.40" so 1.40 is excluded
-        response = _bullish_response(current_price=140.0, consensus_pt=100.0)
-        assert response.f3_score > _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_3_twenty_plus_pct_above_hard_cap_45(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=10,
+            pt_revision_direction="SINGLE_RAISE",
+            net_upgrades_30d=1,
+            current_price=580.0,
+            analyst_target=460.0,
+            sell_count=0,
+        )
+        assert result.breakdown["f3_before_price_adjustment"] == 87
+        assert result.raw_score == _HARD_CAP_ABOVE_20
 
-    def test_cap_does_not_apply_when_price_below_pt(self) -> None:
-        # Stock below PT → pt_ratio < 1 → no cap
-        response = _bullish_response(current_price=80.0, consensus_pt=100.0)
-        assert response.f3_score > _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_4_high_consensus_override_minimum_78(self) -> None:
+        result = score_f3(
+            consensus_rating="Strong Buy",
+            analyst_count=9,
+            pt_revision_direction="SINGLE_RAISE",
+            net_upgrades_30d=3,
+            current_price=470.0,
+            analyst_target=458.25,
+            sell_count=0,
+        )
+        assert result.raw_score >= 78
+        assert result.raw_score == 98  # already above 78
 
-    def test_cap_does_not_apply_when_no_current_price(self) -> None:
-        # Polygon returned no price → pt_ratio is None → cap must not silently
-        # lower an otherwise legitimate score
-        response = _bullish_response(current_price=None, consensus_pt=100.0)
-        assert response.f3_score > _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_5_hold_above_target_full_penalty_capped(self) -> None:
+        result = score_f3(
+            consensus_rating="Hold",
+            analyst_count=8,
+            pt_revision_direction="SINGLE_CUT",
+            net_upgrades_30d=-3,
+            current_price=560.0,
+            analyst_target=458.25,
+            sell_count=2,
+        )
+        # f3_before=55+0-5-10=40; pvt>20% above; min(40,45)=40
+        assert result.breakdown["f3_before_price_adjustment"] == 40
+        assert result.raw_score == 40
+        assert result.override_applied is False
 
-    def test_cap_does_not_apply_when_no_consensus_pt(self) -> None:
-        response = _bullish_response(current_price=150.0, consensus_pt=None)
-        assert response.f3_score > _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_6_ten_to_twenty_above_strong_consensus_half_penalty(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=20,
+            pt_revision_direction="SINGLE_RAISE",
+            net_upgrades_30d=2,
+            current_price=510.0,
+            analyst_target=458.25,
+            sell_count=0,
+        )
+        assert result.breakdown["f3_before_price_adjustment"] == 89
+        assert result.breakdown["price_vs_target_adjustment"] == -7
+        assert result.raw_score == 82
 
-    def test_cap_threshold_constant_is_1_40(self) -> None:
-        assert _PT_RATIO_CAP_THRESHOLD == 1.40
+    def test_score_clamped_at_100(self) -> None:
+        # Strong Buy(90) + >30(+8) + multiple_raises(+5) + >2 upgrades(+5) = 108 -> 100
+        result = score_f3(
+            consensus_rating="Strong Buy",
+            analyst_count=35,
+            pt_revision_direction="MULTIPLE_RAISES",
+            net_upgrades_30d=5,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert result.raw_score == 100
 
-    def test_cap_value_constant_is_55(self) -> None:
-        assert _PT_RATIO_F3_CAP == 55
+    def test_weight_is_0_15(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=15,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert result.weight == 0.15
 
-    def test_f3_score_stored_in_response_is_already_capped(self) -> None:
-        """f3_score on AnalystResponse must be the final, post-cap value so
-        that framework_score_service always reads the capped number."""
-        response = _bullish_response(current_price=200.0, consensus_pt=100.0)
-        # pt_ratio=2.0 >> 1.40; score must be 55, not the raw 75
-        assert response.f3_score == 55  # type: ignore[union-attr]
+    def test_weighted_contribution_equals_score_times_weight(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=15,
+            pt_revision_direction="NO_CHANGE",
+            net_upgrades_30d=0,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        assert abs(result.weighted_contribution - result.raw_score * 0.15) < 0.001
 
-    def test_cap_applies_just_above_threshold(self) -> None:
-        # pt_ratio = 141/100 = 1.41, just over the line
-        response = _bullish_response(current_price=141.0, consensus_pt=100.0)
-        assert response.f3_score == _PT_RATIO_F3_CAP  # type: ignore[union-attr]
+    def test_breakdown_has_all_required_keys(self) -> None:
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=15,
+            pt_revision_direction="SINGLE_RAISE",
+            net_upgrades_30d=1,
+            current_price=100.0,
+            analyst_target=100.0,
+            sell_count=0,
+        )
+        for key in (
+            "base_score",
+            "analyst_count_modifier",
+            "pt_revision_modifier",
+            "upgrade_downgrade_modifier",
+            "f3_before_price_adjustment",
+            "price_vs_target",
+            "price_vs_target_band_label",
+            "price_vs_target_adjustment",
+        ):
+            assert key in result.breakdown, f"Missing breakdown key: {key}"
+
+    def test_full_penalty_when_deteriorating(self) -> None:
+        # Price ~15% above AND deteriorating (net_upgrades=-1, single_cut) -> -15
+        result = score_f3(
+            consensus_rating="Buy",
+            analyst_count=10,
+            pt_revision_direction="SINGLE_CUT",
+            net_upgrades_30d=-1,
+            current_price=529.0,
+            analyst_target=458.25,
+            sell_count=0,
+        )
+        assert result.breakdown["price_vs_target_adjustment"] == -15
 
 
 # ---------------------------------------------------------------------------
-# _fetch_current_price — prevDay.c fallback
-#
-# Polygon sets day.c = 0 before any trade executes on the current session
-# (pre-market / overnight).  Using 0 as the price would make the
-# ``if current_price`` guard fail in _build_analyst_response, leaving
-# pt_ratio as None and silently bypassing the PT-ratio cap.
-# The method must fall back to prevDay.c in that case.
+# _build_analyst_response smoke tests
+# ---------------------------------------------------------------------------
+
+
+def _make_ratings(raises: int, lowers: int, net_upgrades: int) -> dict[str, int]:
+    return {"raises": raises, "lowers": lowers, "net_upgrades": net_upgrades}
+
+
+class TestBuildAnalystResponse:
+    """Smoke tests for _build_analyst_response assembly."""
+
+    def test_at_target_no_penalty(self) -> None:
+        response = _build_analyst_response(
+            ticker="MU",
+            strong_buy=20,
+            buy=18,
+            hold=0,
+            sell=0,
+            strong_sell=0,
+            num_analysts=38,
+            consensus_pt=458.25,
+            current_price=458.25,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=3, lowers=0, net_upgrades=2),
+        )
+        assert response.f3_score is not None
+        assert response.f3_score > 59, (
+            f"Bug regression: price-at-target returned {response.f3_score}"
+        )
+
+    def test_no_coverage_returns_none_score(self) -> None:
+        response = _build_analyst_response(
+            ticker="TINY",
+            strong_buy=0,
+            buy=0,
+            hold=0,
+            sell=0,
+            strong_sell=0,
+            num_analysts=None,
+            consensus_pt=None,
+            current_price=None,
+            has_coverage=False,
+            ratings_data=None,
+        )
+        assert response.f3_score is None
+
+    def test_override_flag_propagated(self) -> None:
+        # Buy + 9 analysts + 0 sells + no cut PT, pvt neutral -> f3=78, override present but no change
+        response = _build_analyst_response(
+            ticker="TST",
+            strong_buy=0,
+            buy=9,
+            hold=0,
+            sell=0,
+            strong_sell=0,
+            num_analysts=9,
+            consensus_pt=100.0,
+            current_price=100.0,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
+        )
+        assert response.f3_score is not None
+        # score=78 already, override min 78 met but no actual lift needed
+        assert response.override_applied is False
+
+    def test_grade_matches_score(self) -> None:
+        response = _build_analyst_response(
+            ticker="MU",
+            strong_buy=10,
+            buy=5,
+            hold=3,
+            sell=0,
+            strong_sell=0,
+            num_analysts=18,
+            consensus_pt=460.0,
+            current_price=400.0,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=1, lowers=0, net_upgrades=1),
+        )
+        if response.f3_score is not None:
+            score = response.f3_score
+            grade = response.f3_grade
+            if score >= 80:
+                assert grade == "STRONG BUY"
+            elif score >= 60:
+                assert grade == "BUY"
+            elif score >= 40:
+                assert grade == "NEUTRAL"
+
+
+# ---------------------------------------------------------------------------
+# _fetch_current_price — prevDay.c fallback (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 
 def _polygon_snapshot(day_close: float | None, prev_close: float | None) -> dict:
-    """Build a minimal Polygon v2/snapshot response for testing."""
     day: dict = {}
     if day_close is not None:
         day["c"] = day_close

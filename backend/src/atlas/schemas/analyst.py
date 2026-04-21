@@ -1,35 +1,20 @@
-"""Pydantic schemas for the F3 Analyst Conviction endpoint.
+"""Pydantic schemas for the F3 Analyst Conviction endpoint — v7.3.4.
 
-F3 has four sub-indicators with internal weights (per Factor_Mapping_Guide):
-  1. Consensus Rating     — buy % of analyst coverage            (35%)
-  2. Analyst Count        — number of unique covering analysts   (10%)
-  3. PT vs Current Price  — % upside from current to consensus PT (30%)
-  4. PT Revision Direction — PT raises / lowers in last 30 days  (25%)
+F3 v7.3.4 uses a base-score + modifier approach:
+  Priority 1: Consensus label  → base score  (Strong Buy 90 / Buy 78 / Hold 55 / Sell 30)
+  Priority 2: Analyst count    → modifier     (+8 / +5 / +3 / 0 / -5)
+  Priority 3: PT revision dir  → modifier     (+5 / +3 / 0 / -5 / -10)
+  Priority 4: Net upgrades 30d → modifier     (+5 / +3 / 0 / -5 / -10)
+  Priority 5: Price vs target  → adjustment   (applied last)
 
-Each indicator is scored 0–100. The F3 score is:
-  F3 = (consensus × 0.35) + (count × 0.10) + (pt_upside × 0.30) + (pt_revision × 0.25)
+High consensus override: Buy/SB + ≥9 analysts + 0 sells + raised/maintained PT → min 78
+Hard cap: pvt > +20% → f3_final = min(f3_before, 45)
+Half penalty: pvt in (10%,20%] AND consensus NOT deteriorating → -7 not -15
 """
 
 from __future__ import annotations
 
-from typing import Final
-
 from pydantic import BaseModel, ConfigDict, Field
-
-# ---------------------------------------------------------------------------
-# F3 grade literals
-# ---------------------------------------------------------------------------
-
-
-class F3Grade:
-    """Named constants for the five F3 analyst-conviction grades."""
-
-    STRONG_BUY: Final[str] = "STRONG BUY"
-    BUY: Final[str] = "BUY"
-    NEUTRAL: Final[str] = "NEUTRAL"
-    WEAK: Final[str] = "WEAK"
-    AVOID: Final[str] = "AVOID"
-
 
 # ---------------------------------------------------------------------------
 # Sub-indicator schemas
@@ -37,104 +22,128 @@ class F3Grade:
 
 
 class ConsensusRatingIndicator(BaseModel):
-    """Analyst buy/hold/sell breakdown and the resulting consensus label.
+    """Analyst buy/hold/sell breakdown and consensus label.
 
-    Scoring rule (0-100):
-      buy_pct > 80% → 100 (Strong Buy) | 60-80% → 80 (Buy)
-      40-60% → 55 (Hold) | < 40% → 20 (Sell)
-    Weight in F3: 35%
+    base_score maps the label to the v7.3.4 base value:
+      Strong Buy → 90 | Buy → 78 | Hold → 55 | Sell → 30
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    strong_buy_count: int = Field(ge=0, description="Analysts with a Strong Buy rating.")
-    buy_count: int = Field(ge=0, description="Analysts with a Buy rating.")
-    hold_count: int = Field(ge=0, description="Analysts with a Hold / Neutral rating.")
-    sell_count: int = Field(ge=0, description="Analysts with a Sell rating.")
-    strong_sell_count: int = Field(ge=0, description="Analysts with a Strong Sell rating.")
-    total_analysts: int = Field(ge=0, description="Total analyst count.")
+    strong_buy_count: int = Field(ge=0)
+    buy_count: int = Field(ge=0)
+    hold_count: int = Field(ge=0)
+    sell_count: int = Field(ge=0)
+    strong_sell_count: int = Field(ge=0)
+    total_analysts: int = Field(ge=0)
     buy_pct: float | None = Field(
         None,
-        description="(Strong Buy + Buy) as a percentage of total (0-100). Null when no analysts.",
+        description="(Strong Buy + Buy) as % of total. Null when no analyst coverage.",
     )
-    label: str = Field(
-        description="Consensus label: STRONG BUY | BUY | HOLD | SELL | NO DATA"
+    label: str = Field(description="STRONG BUY | BUY | HOLD | SELL | NO DATA")
+    base_score: int | None = Field(
+        default=None,
+        description="v7.3.4 base score for this consensus label (90/78/55/30).",
     )
-    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when no coverage data available.")
-    weight: float = Field(default=0.35, description="Weight in F3 formula.")
 
 
 class AnalystCoverageIndicator(BaseModel):
-    """Depth of analyst coverage.
+    """Analyst coverage count and its v7.3.4 modifier.
 
-    Scoring rule (0-100):
-      > 20 analysts → 100 | 10-20 → 85 | 5-10 → 65 | < 5 → 40 (hard cap)
-    Note: names with fewer than 5 analysts score max 40 per guide.
-    Weight in F3: 10%
+    Modifier mapping: >30 → +8 | 20-30 → +5 | 10-19 → +3 | 5-9 → 0 | <5 → -5
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    num_analysts: int = Field(ge=0, description="Total number of analysts covering the stock.")
-    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when no coverage data available.")
-    weight: float = Field(default=0.10, description="Weight in F3 formula.")
-
-
-class PtUpsideIndicator(BaseModel):
-    """Price target upside vs the current market price.
-
-    Scoring rule (0-100):
-      PT > 30% above current → 100 | 15-30% → 85 | 5-15% → 70
-      0-5% → 55 | PT below current → 20
-    Weight in F3: 30%
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    current_price: float | None = Field(
-        None, description="Latest closing price (USD). Null when unavailable."
+    num_analysts: int = Field(ge=0)
+    modifier: int | None = Field(
+        default=None,
+        description="v7.3.4 analyst count modifier. Null when no coverage data.",
     )
-    consensus_pt: float | None = Field(
-        None, description="Consensus 12-month price target (USD). Null when unavailable."
-    )
-    upside_pct: float | None = Field(
-        None,
-        description=(
-            "Percentage upside from current price to consensus PT. "
-            "Negative indicates downside. Null when price data is missing."
-        ),
-    )
-    pt_ratio: float | None = Field(
-        None,
-        description=(
-            "current_price / consensus_PT. >1.40 triggers the F3 cap at 55. "
-            "Null when price or PT data is missing."
-        ),
-    )
-    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when price or PT data is unavailable.")
-    weight: float = Field(default=0.30, description="Weight in F3 formula.")
 
 
-class PtRevisionIndicator(BaseModel):
-    """Direction of analyst PT revisions over the last 30 days.
+class PtDirectionIndicator(BaseModel):
+    """PT revision direction over the last 30 days and its v7.3.4 modifier.
 
-    Uses Benzinga calendar/ratings action_pt field:
-      'Raises' / 'Announces' → upgrade | 'Lowers' → downgrade | 'Maintains' → no change
+    direction_label values:
+      MULTIPLE_RAISES | SINGLE_RAISE | NO_CHANGE | SINGLE_CUT | MULTIPLE_CUTS | NO_DATA
 
-    Scoring rule (0-100):
-      ≥ 2 raises in 30d → 100 | 1 raise → 80 | No change → 60 | Any lower → 20
-    Weight in F3: 25%
+    Modifier mapping:
+      MULTIPLE_RAISES → +5 | SINGLE_RAISE → +3 | NO_CHANGE → 0
+      SINGLE_CUT → -5 | MULTIPLE_CUTS → -10
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     raises_30d: int = Field(ge=0, description="PT raises (Raises/Announces) in last 30 days.")
     lowers_30d: int = Field(ge=0, description="PT cuts (Lowers) in last 30 days.")
-    revision_label: str = Field(
-        description="Summary label: MULTIPLE RAISES | 1 RAISE | NO CHANGE | LOWERED"
+    direction_label: str = Field(
+        description=(
+            "MULTIPLE_RAISES | SINGLE_RAISE | NO_CHANGE | SINGLE_CUT | MULTIPLE_CUTS | NO_DATA"
+        )
     )
-    score: int | None = Field(default=None, ge=0, le=100, description="Raw indicator score (0-100). Null when Benzinga ratings fetch failed.")
-    weight: float = Field(default=0.25, description="Weight in F3 formula.")
+    modifier: int | None = Field(
+        default=None,
+        description="v7.3.4 PT revision modifier. Null when Benzinga data unavailable.",
+    )
+
+
+class RecentUpgradesIndicator(BaseModel):
+    """Net rating upgrades/downgrades over the last 30 days and its v7.3.4 modifier.
+
+    Modifier mapping:
+      net > 2 → +5 | net 1-2 → +3 | net 0 → 0 | net -1 to -2 → -5 | net < -2 → -10
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    upgrades_30d: int = Field(ge=0, description="Rating upgrades in last 30 days.")
+    downgrades_30d: int = Field(ge=0, description="Rating downgrades in last 30 days.")
+    net_upgrades_30d: int = Field(
+        description="Net upgrades (positive) or net downgrades (negative) in last 30 days."
+    )
+    modifier: int | None = Field(
+        default=None,
+        description="v7.3.4 upgrade/downgrade modifier. Null when Benzinga data unavailable.",
+    )
+
+
+class PtUpsideIndicator(BaseModel):
+    """Price vs analyst consensus target — used for Priority 5 adjustment.
+
+    upside_pct:          Traditional upside % for display (positive = stock below target).
+    price_vs_target:     (current - target) / target — used for band determination.
+    price_vs_target_band: Descriptive band label.
+    adjustment:          The score adjustment applied (0, +5, +10, -7, -15, or cap delta).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    current_price: float | None = Field(None, description="Latest closing price (USD).")
+    consensus_pt: float | None = Field(None, description="Consensus 12-month price target (USD).")
+    upside_pct: float | None = Field(
+        None,
+        description=(
+            "Traditional upside from current price to PT. "
+            "Positive = stock below target (upside), negative = above."
+        ),
+    )
+    price_vs_target: float | None = Field(
+        None,
+        description="(current_price - consensus_pt) / consensus_pt, rounded to 4 dp.",
+    )
+    price_vs_target_band: str | None = Field(
+        None,
+        description=(
+            "Band label: '20%+ below target (+10)' | '10-20% below target (+5)' | "
+            "'At target — neutral (0)' | '10-20% above target (-15)' | "
+            "'20%+ above target (capped at 45)'"
+        ),
+    )
+    adjustment: int | None = Field(
+        None,
+        description="Score adjustment applied by the price vs target band.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,22 +152,41 @@ class PtRevisionIndicator(BaseModel):
 
 
 class AnalystResponse(BaseModel):
-    """Complete F3 Analyst Conviction analysis for a single ticker.
-
-    F3 = (consensus_rating.score × 0.35)
-       + (analyst_coverage.score × 0.10)
-       + (pt_upside.score × 0.30)
-       + (pt_revision.score × 0.25)
-    """
+    """Complete F3 Analyst Conviction analysis for a single ticker — v7.3.4."""
 
     model_config = ConfigDict(from_attributes=True)
 
     ticker: str = Field(description="Ticker symbol (upper-case).")
+
+    # Sub-indicators
     consensus_rating: ConsensusRatingIndicator
     analyst_coverage: AnalystCoverageIndicator
+    pt_direction: PtDirectionIndicator
+    recent_upgrades: RecentUpgradesIndicator
     pt_upside: PtUpsideIndicator
-    pt_revision: PtRevisionIndicator
-    f3_score: int | None = Field(
-        default=None, ge=0, le=100, description="Composite F3 Analyst Conviction score (0-100). Null when all sub-factors have no data."
+
+    # Score computation trail
+    f3_before_price_adjustment: int | None = Field(
+        default=None,
+        description=(
+            "base_score + analyst_count_mod + pt_revision_mod + upgrade_downgrade_mod, "
+            "before the price vs target adjustment is applied."
+        ),
     )
-    f3_grade: str = Field(description="F3 grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID")
+    override_applied: bool = Field(
+        default=False,
+        description="True when the high consensus override lifted the score to 78 minimum.",
+    )
+    override_reason: str | None = Field(
+        default=None,
+        description="Reason string when the high consensus override was applied.",
+    )
+
+    # Final score
+    f3_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Composite F3 Analyst Conviction score (0-100). Null when no analyst coverage.",
+    )
+    f3_grade: str = Field(description="STRONG BUY | BUY | NEUTRAL | WEAK | AVOID | NO DATA")

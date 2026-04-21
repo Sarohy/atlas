@@ -8,7 +8,7 @@ const REGIME_TONE: Record<string, string> = {
   CLEAR: 'is-green',
   CAUTION: 'is-orange',
   'SOFT CAUTION': 'is-yellow',
-  CRISIS: 'is-red',
+  'CRISIS HALT': 'is-red',
   NORMAL: 'is-cyan',
 };
 
@@ -69,8 +69,10 @@ const GEOPOLITICAL_OPTIONS: ReadonlyArray<{
   value: GeopoliticalState;
 }> = [
   { label: 'None', value: 'NONE' },
+  { label: 'Resolved', value: 'RESOLVED' },
   { label: 'De-escalating', value: 'DE_ESCALATING' },
-  { label: 'Active', value: 'ACTIVE' },
+  { label: 'Active risk', value: 'ACTIVE_RISK' },
+  { label: 'Escalating', value: 'ESCALATING' },
 ];
 
 function GeopoliticalToggle({
@@ -206,8 +208,12 @@ function RegimeStat({
 }
 
 function formatGeopoliticalState(state: GeopoliticalState): string {
-  if (state === 'DE_ESCALATING') {
-    return 'DE-ESCALATING';
-  }
-  return state;
+  const labels: Record<GeopoliticalState, string> = {
+    NONE: 'NONE',
+    RESOLVED: 'RESOLVED',
+    DE_ESCALATING: 'DE-ESCALATING',
+    ACTIVE_RISK: 'ACTIVE RISK',
+    ESCALATING: 'ESCALATING',
+  };
+  return labels[state];
 }

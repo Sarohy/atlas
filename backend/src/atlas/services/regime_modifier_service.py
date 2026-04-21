@@ -38,7 +38,7 @@ _AV_BASE_URL: Final[str] = "https://www.alphavantage.co/query"
 _BRENT_NUM_CLOSES: Final[int] = 2
 
 # ---------------------------------------------------------------------------
-# Rule 1 — Crisis thresholds
+# Rule 1 — Crisis Halt thresholds
 # ---------------------------------------------------------------------------
 
 # Brent above this triggers Rule 1 (strictly greater than).
@@ -58,12 +58,11 @@ _RULE1_MAX_CASH_PCT: Final[float] = 0.40
 # Rule 2 — Caution thresholds
 # ---------------------------------------------------------------------------
 
-# Brent must be within this inclusive range for a Rule 2 trigger.
-# VIX level below 35 is already guaranteed by Rule 1 priority; no VIX
-# range check is needed here — any VIX ≤ 35 triggers Caution when Brent
-# is in this band.
-_RULE2_BRENT_LOW: Final[float] = 95.0  # USD per barrel (inclusive)
+# Brent in this inclusive range OR VIX in 24-35 triggers Rule 2.
+_RULE2_BRENT_LOW: Final[float] = 95.0   # USD per barrel (inclusive)
 _RULE2_BRENT_HIGH: Final[float] = 110.0  # USD per barrel (inclusive)
+_RULE2_VIX_LOW: Final[float] = 24.0    # VIX level (inclusive)
+_RULE2_VIX_HIGH: Final[float] = 35.0   # VIX level (inclusive)
 
 # Score modifier for Rule 2.
 _RULE2_SCORE_DELTA: Final[int] = -5
@@ -73,21 +72,38 @@ _RULE2_MIN_CASH_PCT: Final[float] = 0.25
 _RULE2_MAX_CASH_PCT: Final[float] = 0.35
 
 # ---------------------------------------------------------------------------
-# Rule 3 — Clear thresholds
+# Rule 3 — Soft Caution thresholds
 # ---------------------------------------------------------------------------
 
-# Brent must be strictly below this for Rule 3 (checked against last 2 closes).
-_RULE3_BRENT_CLEAR: Final[float] = 95.0  # USD per barrel
+# Brent must be below this for Rule 3 (strictly less than).
+_RULE3_BRENT_THRESHOLD: Final[float] = 100.0  # USD per barrel
 
-# VIX must be strictly below this for Rule 3.
-_RULE3_VIX_CLEAR: Final[float] = 24.0
+# VIX must be below this for Rule 3 (strictly less than).
+_RULE3_VIX_THRESHOLD: Final[float] = 22.0
 
 # Score modifier for Rule 3.
-_RULE3_SCORE_DELTA: Final[int] = 5
+_RULE3_SCORE_DELTA: Final[int] = -3
 
 # Cash fraction bounds for Rule 3.
-_RULE3_MIN_CASH_PCT: Final[float] = 0.10
-_RULE3_MAX_CASH_PCT: Final[float] = 0.12
+_RULE3_MIN_CASH_PCT: Final[float] = 0.15
+_RULE3_MAX_CASH_PCT: Final[float] = 0.25
+
+# ---------------------------------------------------------------------------
+# Rule 4 — Clear thresholds
+# ---------------------------------------------------------------------------
+
+# Brent must be strictly below this for Rule 4 (checked against last 2 closes).
+_RULE4_BRENT_CLEAR: Final[float] = 95.0  # USD per barrel
+
+# VIX must be strictly below this for Rule 4.
+_RULE4_VIX_CLEAR: Final[float] = 24.0
+
+# Score modifier for Rule 4.
+_RULE4_SCORE_DELTA: Final[int] = 5
+
+# Cash fraction bounds for Rule 4.
+_RULE4_MIN_CASH_PCT: Final[float] = 0.10
+_RULE4_MAX_CASH_PCT: Final[float] = 0.12
 
 # ---------------------------------------------------------------------------
 # Output text constants — multi-line strings match the spec verbatim
@@ -97,7 +113,9 @@ _OUTPUT_RULE1: Final[str] = "must stay in cash\ncannot be touched\nfor any trade
 
 _OUTPUT_RULE2: Final[str] = "must stay in cash"
 
-_OUTPUT_RULE3: Final[str] = "only this stays in cash\neverything else\ncan be deployed"
+_OUTPUT_RULE3: Final[str] = "reduce exposure\nmonitor conditions closely"
+
+_OUTPUT_RULE4: Final[str] = "only this stays in cash\neverything else\ncan be deployed"
 
 _OUTPUT_NONE: Final[str] = ""
 
@@ -168,52 +186,73 @@ def _determine_rule(
     brent_price: float,
     vix_value: float,
     brent_consecutive_below_95_count: int,
+    geopolitical_state: GeopoliticalState = "NONE",
 ) -> int | None:
-    """Return the highest-priority regime rule number that fires, or None.
+    """Return the highest-priority regime rule that fires, or None.
 
-    Rules are evaluated in priority order:
+    Each rule requires BOTH specific market conditions AND a specific
+    geopolitical state set by the investor.  Rules are checked in
+    descending severity order so the most restrictive always wins.
 
-    Rule 1 (Crisis) — any ONE of:
-      • Brent crude above $110
-      • VIX above 35
+    Rule 1 — CRISIS HALT:
+      (Brent > $110 OR VIX > 35) AND geo = ESCALATING → -10
 
-    Rule 2 (Caution) — EITHER of:
-      • Brent in [$95, $110]  (any VIX ≤ 35)
-      • Brent below $95 AND VIX below 24, but without a two-close clear streak
+    Rule 2 — CAUTION:
+      (Brent $95–$110 OR VIX 24–35) AND geo = ACTIVE_RISK → -5
 
-    Rule 3 (Clear) — BOTH of:
-      • Brent below $95 for two consecutive daily closes
-      • VIX below 24
+    Rule 3 — SOFT CAUTION:
+      Brent < $100, streak < 2 closes below $95, VIX < 22,
+      AND geo = DE_ESCALATING → -3
+
+    Rule 4 — CLEAR:
+      Brent < $95 for two consecutive closes AND VIX < 24
+      AND geo = RESOLVED → +5
+
+    Default — no rule matched → CAUTION (-5).
 
     Pure function — no I/O.
     """
-    # ── Rule 1 ──────────────────────────────────────────────────────────────
-    if brent_price > _RULE1_BRENT_THRESHOLD or vix_value > _RULE1_VIX_THRESHOLD:
+    # ── Rule 1 — CRISIS HALT ────────────────────────────────────────────────
+    crisis_market = (
+        brent_price > _RULE1_BRENT_THRESHOLD or vix_value > _RULE1_VIX_THRESHOLD
+    )
+    if crisis_market and geopolitical_state == "ESCALATING":
         return 1
 
-    # ── Rule 2 ──────────────────────────────────────────────────────────────
-    # VIX > 35 already triggered Rule 1 above; reaching here means VIX ≤ 35.
-    brent_in_caution = _RULE2_BRENT_LOW <= brent_price <= _RULE2_BRENT_HIGH
-    brent_low_vix_low = (
-        brent_price < _RULE3_BRENT_CLEAR
-        and vix_value < _RULE3_VIX_CLEAR
-        and brent_consecutive_below_95_count < _BRENT_NUM_CLOSES
+    # ── Rule 2 — CAUTION ───────────────────────────────────────────────────
+    caution_market = (
+        _RULE2_BRENT_LOW <= brent_price <= _RULE2_BRENT_HIGH
+        or _RULE2_VIX_LOW <= vix_value <= _RULE2_VIX_HIGH
     )
-    if brent_in_caution or brent_low_vix_low:
+    if caution_market and geopolitical_state == "ACTIVE_RISK":
         return 2
 
-    # ── Rule 3 ──────────────────────────────────────────────────────────────
-    if brent_consecutive_below_95_count >= _BRENT_NUM_CLOSES and vix_value < _RULE3_VIX_CLEAR:
+    # ── Rule 3 — SOFT CAUTION ──────────────────────────────────────────────
+    soft_caution_market = (
+        brent_price < _RULE3_BRENT_THRESHOLD
+        and brent_consecutive_below_95_count < _BRENT_NUM_CLOSES
+        and vix_value < _RULE3_VIX_THRESHOLD
+    )
+    if soft_caution_market and geopolitical_state == "DE_ESCALATING":
         return 3
 
-    return None
+    # ── Rule 4 — CLEAR ─────────────────────────────────────────────────────
+    clear_market = (
+        brent_consecutive_below_95_count >= _BRENT_NUM_CLOSES
+        and vix_value < _RULE4_VIX_CLEAR
+    )
+    if clear_market and geopolitical_state == "RESOLVED":
+        return 4
+
+    # Default — no specific rule matched; treat as CAUTION.
+    return 2
 
 
 def _count_consecutive_brent_closes_below_95(closes: list[float]) -> int:
     """Count consecutive most-recent Brent closes below the clear threshold."""
     streak = 0
     for close in closes[:_BRENT_NUM_CLOSES]:
-        if close < _RULE3_BRENT_CLEAR:
+        if close < _RULE4_BRENT_CLEAR:
             streak += 1
             continue
         break
@@ -221,21 +260,25 @@ def _count_consecutive_brent_closes_below_95(closes: list[float]) -> int:
 
 
 def _rule_name(rule: int | None) -> str:
-    """Return the automatic Brent/VIX regime label for a rule number."""
+    """Return the regime label for a rule number."""
     return {
-        1: "CRISIS",
+        1: "CRISIS HALT",
         2: "CAUTION",
-        3: "CLEAR",
+        3: "SOFT CAUTION",
+        4: "CLEAR",
         None: "NORMAL",
     }[rule]
 
 
 def _derive_effective_regime(automatic_rule: int | None, geopolitical_state: GeopoliticalState) -> str:
-    """Apply the geopolitical gate without changing the Brent/VIX score math."""
-    automatic_regime = _rule_name(automatic_rule)
-    if geopolitical_state == "NONE" or automatic_regime in {"CRISIS", "CAUTION"}:
-        return automatic_regime
-    return "SOFT CAUTION"
+    """Return the effective regime label.
+
+    Geopolitical state is now integrated into rule determination — each rule
+    fires only when both market conditions AND the required geo state are met.
+    The effective regime is therefore always the automatic regime label.
+    The geopolitical_state parameter is retained for API compatibility.
+    """
+    return _rule_name(automatic_rule)
 
 
 def _build_determination_text(
@@ -244,18 +287,18 @@ def _build_determination_text(
     geopolitical_state: GeopoliticalState,
     brent_consecutive_below_95_count: int,
 ) -> str:
-    """Build a short explanation of the automatic and gated regime output."""
-    if geopolitical_state == "NONE" or effective_regime == automatic_regime:
+    """Build a short explanation of how the regime was determined."""
+    geo_label = geopolitical_state.replace("_", " ")
+    if automatic_regime == "NORMAL":
         return (
-            f"Automatic regime {automatic_regime} from Brent/VIX data. "
-            f"Brent streak below $95: {brent_consecutive_below_95_count}. "
-            "No geopolitical gate applied."
+            f"No regime rule fired. Brent streak below $95: "
+            f"{brent_consecutive_below_95_count}. "
+            f"Geopolitical state: {geo_label}."
         )
     return (
-        f"Automatic regime {automatic_regime} from Brent/VIX data. "
+        f"{automatic_regime} regime triggered. "
         f"Brent streak below $95: {brent_consecutive_below_95_count}. "
-        f"Geopolitical flag {geopolitical_state.replace('_', ' ')} adds a secondary gate, "
-        f"so the displayed regime is {effective_regime}."
+        f"Geopolitical state required: {geo_label}."
     )
 
 
@@ -290,6 +333,11 @@ def _compute_regime_output(
         min_pct = _RULE3_MIN_CASH_PCT
         max_pct = _RULE3_MAX_CASH_PCT
         text = _OUTPUT_RULE3
+    elif rule == 4:
+        delta = _RULE4_SCORE_DELTA
+        min_pct = _RULE4_MIN_CASH_PCT
+        max_pct = _RULE4_MAX_CASH_PCT
+        text = _OUTPUT_RULE4
     else:
         # No regime rule triggered — score and cash guidance unchanged.
         adjusted = base_score
@@ -440,6 +488,7 @@ class RegimeModifierService:
                 brent_price=brent_price,
                 vix_value=vix_value,
                 brent_consecutive_below_95_count=brent_consecutive_below_95_count,
+                geopolitical_state=geopolitical_state,
             )
         else:
             rule = None
@@ -457,6 +506,7 @@ class RegimeModifierService:
             1: _RULE1_SCORE_DELTA,
             2: _RULE2_SCORE_DELTA,
             3: _RULE3_SCORE_DELTA,
+            4: _RULE4_SCORE_DELTA,
             None: 0,
         }
         automatic_regime = _rule_name(rule)

@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-export const geopoliticalStateSchema = z.enum(['NONE', 'DE_ESCALATING', 'ACTIVE']);
+export const geopoliticalStateSchema = z.enum([
+  'NONE',
+  'RESOLVED',
+  'DE_ESCALATING',
+  'ACTIVE_RISK',
+  'ESCALATING',
+]);
 export type GeopoliticalState = z.infer<typeof geopoliticalStateSchema>;
 
 // ---------------------------------------------------------------------------
@@ -30,10 +36,15 @@ export const regimeModifierResponseSchema = z.object({
   adjusted_score: z.number().int().min(0).max(100),
 
   /**
-   * Which rule fired: 1 = Crisis, 2 = Caution, 3 = Clear.
+   * Which rule fired: 1 = Crisis Halt, 2 = Caution, 3 = Soft Caution, 4 = Clear.
    * null when normal market conditions — no rule triggered.
    */
-  rule_triggered: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(),
+  rule_triggered: z.union([
+    z.literal(1),
+    z.literal(2),
+    z.literal(3),
+    z.literal(4),
+  ]).nullable(),
 
   /** Human-readable name of the triggered rule, e.g. CRISIS | CAUTION | CLEAR | NORMAL. */
   rule: z.string(),
@@ -41,7 +52,7 @@ export const regimeModifierResponseSchema = z.object({
   /** Displayed regime after applying the geopolitical gate. */
   effective_regime: z.string(),
 
-  /** Score delta applied by the triggered rule: -10, -5, +5, or 0. */
+  /** Score delta applied by the triggered rule: -10, -5, -3, +5, or 0. */
   modifier: z.number().int(),
 
   /** Minimum required cash as a fraction of position value (0.35 = 35%) */

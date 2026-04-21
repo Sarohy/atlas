@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 
-GeopoliticalState = Literal["NONE", "DE_ESCALATING", "ACTIVE"]
+GeopoliticalState = Literal["NONE", "RESOLVED", "DE_ESCALATING", "ACTIVE_RISK", "ESCALATING"]
 
 
 class RegimeModifierResponse(BaseModel):

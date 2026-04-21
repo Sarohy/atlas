@@ -2452,6 +2452,17 @@
   letter-spacing: -0.02em;
 }
 
+/* Action label variant — used for text strings, not numeric scores */
+.atlas-regime-action-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: clamp(0.9rem, 2.2vw, 1.25rem);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  word-break: break-word;
+}
+
 .atlas-regime-score-num--base {
   font-size: 1.5rem;
   opacity: 0.55;
@@ -2472,6 +2483,12 @@
 .atlas-regime-score-num.is-red {
   color: #ef4444;
 }
+
+.atlas-regime-action-label.is-green  { color: #22c55e; }
+.atlas-regime-action-label.is-cyan   { color: #22d3ee; }
+.atlas-regime-action-label.is-yellow { color: #eab308; }
+.atlas-regime-action-label.is-purple { color: #a78bfa; }
+.atlas-regime-action-label.is-red    { color: #ef4444; }
 
 .atlas-regime-arrow {
   color: #334155;

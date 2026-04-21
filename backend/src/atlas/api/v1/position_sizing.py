@@ -1,13 +1,16 @@
-"""API route for Framework 3 — Position Sizing.
+"""API route for Framework 3 — Score Action Map.
 
-GET /api/v1/position-sizing/{ticker}[?base_score=n]
+GET /api/v1/position-sizing/{ticker}[?base_score=n&concentration_cap_active=false]
 
-Maps a Framework 1 conviction score to a human-readable position action using
-the Framework 3 band rules (Factor_Mapping_Guide §Framework3).
+Maps a Framework 1 conviction score to a position-sizing action using
+the Framework 3 Score Action Map v7.3.4.
 
-When ``base_score`` is supplied the Framework 1 recompute is skipped entirely,
+When ``base_score`` is supplied the Framework 1 recompute is skipped,
 ensuring Framework 3 is always in sync with the score the UI already holds.
 When omitted, the Framework 1 score is computed fresh.
+
+``concentration_cap_active`` is read from the Framework 14 concentration-cap
+result supplied by the caller; defaults to False when not provided.
 
 Returns 503 when POLYGON_API_KEY is not configured (required for Framework 1).
 """
@@ -28,22 +31,23 @@ router = APIRouter(prefix="/position-sizing", tags=["position-sizing"])
 async def get_position_sizing(
     ticker: str,
     base_score: int | None = None,
+    concentration_cap_active: bool = False,
 ) -> PositionSizingResponse:
-    """Return a Framework 3 position-sizing recommendation for ``ticker``.
+    """Return a Framework 3 Score Action Map result for ``ticker``.
 
     Pass ``?base_score=<n>`` to reuse the Framework 1 score already held by
     the UI — this avoids a second independent computation and guarantees
     Framework 3 stays in sync with Framework 1.
 
-    When ``base_score`` is omitted, Framework 1 is recomputed from scratch.
+    Pass ``?concentration_cap_active=true`` when Framework 14 has flagged a
+    concentration cap for this position; Tier 1 adds will be blocked.
 
-    Score-to-action bands (Factor_Mapping_Guide §Framework3):
-      > 90        MAXIMUM POSITION      — Add on every dip
-      80 – 90     HOLD FULL             — Eligible for adds
-      70 – 79     HOLD                  — No new adds
-      60 – 69     REDUCE 25-50%         — Reduce 25-50%
-      55 – 59     REDUCE AGGRESSIVELY   — Reduce aggressively
-      < 55        EXIT                  — Exit immediately
+    Score-to-action bands (v7.3.4):
+      >= 85       TIER_1         - Core position, LEAPS eligible
+      78 - 84     TIER_2_GREY    - Grey zone, 3-model consensus required
+      70 - 77     TIER_2         - GTC adds permitted
+      55 - 69     TIER_3         - Small position only
+      < 55        WATCHLIST      - Exit rules active (see Framework 16)
 
     Returns 503 when POLYGON_API_KEY is not configured.
     """
@@ -79,4 +83,5 @@ async def get_position_sizing(
     return compute_position_sizing(
         ticker=normalised,
         conviction_score=conviction_score,
+        concentration_cap_active=concentration_cap_active,
     )

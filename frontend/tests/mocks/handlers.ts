@@ -464,8 +464,15 @@ export const handlers = [
     return HttpResponse.json({
       ticker,
       conviction_score: 79,
-      action: 'HOLD',
-      instruction: 'Hold position — no new adds.',
+      tier: 'TIER_2',
+      action: 'GTC ADDS PERMITTED',
+      grey_zone: false,
+      consensus_required: false,
+      trigger_exit_rules: false,
+      adds_permitted: true,
+      leaps_eligible: false,
+      display_message: 'GTC adds permitted.',
+      consensus_confirmed: false,
     });
   }),
 

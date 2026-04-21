@@ -60,11 +60,12 @@ export function FrameworksPanelsSection() {
   const activeTicker =
     selectedTicker !== EMPTY_TICKER ? selectedTicker : (tickers[0] ?? EMPTY_TICKER);
 
-  // Hoist the Framework 1 score so Framework 3 can consume the same value
-  // instead of re-fetching independently (TanStack Query deduplicates the
-  // network request — the panel's own hook hits the cache).
-  const { data: frameworkScoreData } = useFrameworkScore(activeTicker);
-  const frameworkFinalScore = frameworkScoreData?.final_score;
+  // Hoist the Framework 1 score so Framework 3 can consume the same value.
+  // We gate F3 on f1DisplayScore (the regime-adjusted score the investor sees)
+  // so F3 bands are always evaluated against the exact number shown in F1.
+  // The raw frameworkScoreData is still fetched here so FrameworkScorePanel's
+  // own hook hits the TanStack Query cache instead of making a second request.
+  useFrameworkScore(activeTicker);
 
   // Hoist the Framework 2 regime rule so Framework 4 uses the same value
   // the investor is seeing in the regime panel — no second independent fetch
@@ -141,7 +142,11 @@ export function FrameworksPanelsSection() {
       </div>
 
       <div className="atlas-frameworks-secondary-row">
-        <RegimeGuidancePanel ticker={activeTicker} baseScore={frameworkFinalScore} />
+        <RegimeGuidancePanel
+          ticker={activeTicker}
+          baseScore={f1DisplayScore}
+          enabled={f1DisplayScore !== undefined}
+        />
         <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
         <CashFloorPanel ticker={activeTicker} />
         <ConvictionActionPanel ticker={activeTicker} adjustedScore={f1DisplayScore} />

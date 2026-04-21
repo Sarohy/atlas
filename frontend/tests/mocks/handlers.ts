@@ -478,16 +478,71 @@ export const handlers = [
 
   // ── Tranche Sizing ───────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/tranche-sizing/:ticker`, ({ params, request }) => {
-    const ticker = String(params['ticker'] ?? 'AAPL');
+    const rawTicker = String(params['ticker'] ?? 'AAPL');
+    const ticker = rawTicker.toUpperCase();
     const url = new URL(request.url);
     const initialCatalyst = url.searchParams.get('initial_catalyst') ?? 'no';
     const regimeRule = (url.searchParams.get('regime_rule') ?? 'NORMAL').toUpperCase();
     const iranResolution = url.searchParams.get('iran_resolution');
+    const positionWeightOverride = url.searchParams.get('position_weight_override');
+    const signalsCountOverride = url.searchParams.get('signals_count_override');
+
+    // Determine position weight: override > known caps > default 0
+    const CAP_WEIGHTS: Record<string, number> = { MU: 0.136, TSM: 0.117, COHR: 0.095 };
+    const positionWeight =
+      positionWeightOverride !== null
+        ? parseFloat(positionWeightOverride)
+        : (CAP_WEIGHTS[ticker] ?? 0.0);
+
+    const capActive = positionWeight >= 0.08;
+
+    if (capActive) {
+      const emptySignals = Array.from({ length: 5 }, (_, i) => ({
+        signal_index: i + 1,
+        name: `Signal ${i + 1}`,
+        confirmed: false,
+      }));
+      return HttpResponse.json({
+        ticker,
+        cap_active: true,
+        tranche_display: false,
+        position_weight: positionWeight,
+        message: 'Adds blocked by concentration cap - tranche sizing N/A',
+        and_gate_active: false,
+        and_gate_passed: false,
+        signals_confirmed: 0,
+        signals_detail: emptySignals,
+        t1: null,
+        t2: null,
+        t3: null,
+        t4: null,
+      });
+    }
+
+    // Determine AND gate
+    const andGateActive = regimeRule === 'CLEAR';
+    const signalsCount =
+      signalsCountOverride !== null ? parseInt(signalsCountOverride, 10) : 0;
+    const andGatePassed = andGateActive && signalsCount >= 3;
+    const signals = Array.from({ length: 5 }, (_, i) => ({
+      signal_index: i + 1,
+      name: `Signal ${i + 1}`,
+      confirmed: i < signalsCount,
+    }));
+
     return HttpResponse.json({
-      ticker: ticker.toUpperCase(),
+      ticker,
+      cap_active: false,
+      tranche_display: true,
+      position_weight: positionWeight,
+      message: null,
+      and_gate_active: andGateActive,
+      and_gate_passed: andGatePassed,
+      signals_confirmed: andGateActive ? signalsCount : 0,
+      signals_detail: signals,
       t1: initialCatalyst === 'yes' ? '10-15% of available cash' : 'Blocked',
       t2: regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
-      t3: regimeRule === 'CLEAR' ? '30-40% of available cash' : 'Blocked',
+      t3: andGatePassed ? '30-40% of available cash' : 'Blocked',
       t4: iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
     });
   }),

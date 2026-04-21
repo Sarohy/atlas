@@ -2578,6 +2578,155 @@
   gap: 10px;
 }
 
+/* Concentration cap amber suppression box */
+.atlas-tranche-cap-box {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 4px 4px 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-tranche-cap-title {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.atlas-tranche-cap-message {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  color: #fde68a;
+  line-height: 1.4;
+}
+
+.atlas-tranche-cap-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.atlas-tranche-cap-key {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #92400e;
+  letter-spacing: 0.03em;
+}
+
+.atlas-tranche-cap-val {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+/* AND gate section */
+.atlas-tranche-and-gate {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-tranche-and-gate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #111827;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.atlas-tranche-and-gate-title {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-tranche-and-gate-status {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.atlas-tranche-and-gate-status.is-passed {
+  color: #22c55e;
+}
+
+.atlas-tranche-and-gate-status.is-blocked {
+  color: #f59e0b;
+}
+
+.atlas-tranche-and-gate-count {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #4b6070;
+  letter-spacing: 0.03em;
+}
+
+.atlas-tranche-signal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-tranche-signal-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.atlas-tranche-signal-dot.is-confirmed {
+  background: #22c55e;
+}
+
+.atlas-tranche-signal-dot.is-pending {
+  background: #334155;
+}
+
+.atlas-tranche-signal-name {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  color: #4b6070;
+  line-height: 1.3;
+}
+
+.atlas-tranche-signal-name.is-confirmed {
+  color: #94a3b8;
+}
+
+/* T3 waiting notice */
+.atlas-tranche-t3-waiting {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 3px;
+  padding: 4px 7px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #f59e0b;
+  letter-spacing: 0.03em;
+}
+
 /* Active tranche value — orange (entry-phase signal). */
 .atlas-regime-cash-value.is-active {
   color: #fb923c;

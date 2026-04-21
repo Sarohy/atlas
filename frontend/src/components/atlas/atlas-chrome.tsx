@@ -20,6 +20,8 @@ import type {
   PortfolioValueTone,
 } from '@/types/portfolio';
 
+const COMING_SOON_ACTIONS_MESSAGE = 'Coming soon...';
+
 // ─── Format helpers ───────────────────────────────────────────────────────────
 
 /** Format a raw dollar value as $X.XXM (millions, 2 d.p.). */
@@ -373,7 +375,6 @@ function ClusterSummarySection({
 }
 
 export function AtlasActionsRail({
-  actions,
   title,
 }: {
   actions: PortfolioScreenData['actions'];
@@ -388,19 +389,7 @@ export function AtlasActionsRail({
     <aside className="atlas-portfolio-side atlas-portfolio-side--right">
       <section className="atlas-portfolio-side-section">
         <h2 className="atlas-portfolio-side-title">{title}</h2>
-        <div>
-          {actions.map((action) => (
-            <article className="atlas-portfolio-action" key={`${action.title}-${action.metadata}`}>
-              <span className={cn('atlas-portfolio-action-dot', `is-${action.tone}`)} />
-              <div className="atlas-portfolio-action-copy">
-                <p className="atlas-portfolio-action-text">
-                  <strong>{action.title}</strong> {action.description}
-                </p>
-                <p className="atlas-portfolio-action-meta">{action.metadata}</p>
-              </div>
-            </article>
-          ))}
-        </div>
+        <p className="atlas-portfolio-actions-placeholder">{COMING_SOON_ACTIONS_MESSAGE}</p>
       </section>
       <section className="atlas-portfolio-side-section">
         <h2 className="atlas-portfolio-side-title">Portfolio Summary</h2>

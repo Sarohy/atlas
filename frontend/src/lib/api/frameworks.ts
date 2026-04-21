@@ -17,6 +17,7 @@ const HERO_SUBTITLE =
   'Rulebook status across regime, oil, concentration, and geopolitical gates. Each block is isolated so we can hydrate from one endpoint or many.';
 const SCENARIO_TITLE = 'Scenario Router';
 const SIGNALS_TITLE = 'Live Diplomatic Signals';
+const DEFERRED_OVERVIEW_VALUE = 'Comming soon...';
 
 const OVERVIEW_CARDS: readonly FrameworkOverviewCard[] = [
   {
@@ -28,22 +29,22 @@ const OVERVIEW_CARDS: readonly FrameworkOverviewCard[] = [
     value: 'No',
   },
   {
-    detail: 'Brent $97 · spiking today +5%',
+    detail: '',
     label: 'Oil Map',
     tone: 'orange',
-    value: 'YLW/ORNG',
+    value: DEFERRED_OVERVIEW_VALUE,
   },
   {
-    detail: 'Saturday deadline · 36 hours',
+    detail: '',
     label: 'Geopolitical',
     tone: 'red',
-    value: 'IRAN DAY 27',
+    value: DEFERRED_OVERVIEW_VALUE,
   },
   {
-    detail: 'Near green light',
+    detail: '',
     label: 'Capitulation',
     tone: 'cyan',
-    value: '3 / 5',
+    value: DEFERRED_OVERVIEW_VALUE,
   },
 ] as const;
 

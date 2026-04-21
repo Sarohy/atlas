@@ -56,7 +56,7 @@ function OverviewCard({ card }: { card: FrameworkOverviewCard }) {
     <article className={cn('atlas-frameworks-overview-card', `is-${card.tone}`)}>
       <p className="atlas-frameworks-overview-label">{card.label}</p>
       <p className={cn('atlas-frameworks-overview-value', `is-${card.tone}`)}>{card.value}</p>
-      <p className="atlas-frameworks-overview-detail">{card.detail}</p>
+      {card.detail ? <p className="atlas-frameworks-overview-detail">{card.detail}</p> : null}
     </article>
   );
 }

@@ -144,6 +144,10 @@ class PtUpsideIndicator(BaseModel):
         None,
         description="Score adjustment applied by the price vs target band.",
     )
+    upside_color: str | None = Field(
+        default=None,
+        description="Semantic colour token: GREEN | LIGHT_GREEN | NEUTRAL | AMBER | RED",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,6 @@ import type {
   PtUpsideIndicator,
   RecentUpgradesIndicator,
 } from '@/lib/schemas/analyst';
-
 // ---------------------------------------------------------------------------
 // Named constants
 // ---------------------------------------------------------------------------
@@ -18,13 +17,15 @@ import type {
 /** Number of score bar segments representing the full 0-100 scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Map F3 grade string to CSS tone class name. */
+/** Map consensus label string to CSS tone class name. */
 const GRADE_TONE: Record<string, string> = {
   'STRONG BUY': 'is-green',
   BUY: 'is-cyan',
   NEUTRAL: 'is-yellow',
   WEAK: 'is-orange',
   AVOID: 'is-red',
+  HOLD: 'is-yellow',
+  SELL: 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -114,7 +115,10 @@ function EmptyState({ ticker }: { ticker: string }) {
 // ---------------------------------------------------------------------------
 
 function AnalystContent({ data }: { data: AnalystResponse }) {
-  const gradeTone = GRADE_TONE[data.f3_grade] ?? 'is-yellow';
+  // Use consensus label (e.g. "BUY") for header display — NOT f3_grade which is
+  // derived from the numeric score alone and can disagree with the consensus label.
+  const consensusLabel = data.consensus_rating.label;
+  const gradeTone = GRADE_TONE[consensusLabel] ?? 'is-yellow';
 
   return (
     <div className="atlas-f3-content" data-testid="f3-content">
@@ -135,7 +139,7 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
             className={cn('atlas-frameworks-pill atlas-f3-grade-pill', gradeTone)}
             data-testid="f3-grade"
           >
-            {data.f3_grade}
+            {consensusLabel}
           </span>
           {data.override_applied && (
             <span className="atlas-f3-override-chip" data-testid="f3-override-chip">
@@ -360,19 +364,23 @@ function RecentUpgradesCard({ recent }: { recent: RecentUpgradesIndicator }) {
 }
 
 function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
+  // Derive CSS class from the band token or band string — never from the sign
+  // of upside_pct. A negative upside (price above target) in the neutral zone
+  // must show grey, not red.
+  const upside_cls = upsideBandClass(pt.price_vs_target_band, pt.upside_color);
   return (
     <IndicatorCard label="PT Upside" modifier={pt.adjustment}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Upside</dt>
-          <dd className={upsideTone(pt.upside_pct)}>
+          <dd className={upside_cls}>
             {pt.upside_pct !== null ? formatPct(pt.upside_pct) : 'No data found'}
           </dd>
         </div>
         {pt.price_vs_target_band != null && (
           <div className="atlas-f3-dl-row">
             <dt>Band</dt>
-            <dd className="atlas-f3-pt-band">{pt.price_vs_target_band}</dd>
+            <dd className={cn('atlas-f3-pt-band', upside_cls)}>{pt.price_vs_target_band}</dd>
           </div>
         )}
         {pt.current_price !== null && (
@@ -413,13 +421,38 @@ function consensusTone(label: string): string {
   return '';
 }
 
-function upsideTone(upside: number | null): string {
-  if (upside === null) return '';
-  if (upside > 30) return 'is-green';
-  if (upside >= 15) return 'is-cyan';
-  if (upside >= 5) return 'is-yellow';
-  if (upside >= 0) return 'is-orange';
-  return 'is-red';
+/**
+ * Map band token or band display string to a CSS class.
+ *
+ * Priority 1 — `upside_color` token from the API (e.g. 'NEUTRAL', 'GREEN').
+ * Priority 2 — `price_vs_target_band` display string from the API
+ *              (e.g. 'At target — neutral (0)').
+ *
+ * NEVER derives class from the sign of upside_pct.
+ * A negative upside inside the neutral band must return 'atlas-f3-upside-neutral'
+ * (grey), not any red class.
+ *
+ * CSS classes are defined in frameworks.css under the
+ * '/* Upside band colour classes *\/' block.
+ */
+function upsideBandClass(
+  band: string | null | undefined,
+  upsideColor?: string | null,
+): string {
+  // Priority 1: explicit upside_color token from the API
+  if (upsideColor === 'GREEN') return 'atlas-f3-upside-green';
+  if (upsideColor === 'LIGHT_GREEN') return 'atlas-f3-upside-light-green';
+  if (upsideColor === 'NEUTRAL') return 'atlas-f3-upside-neutral';
+  if (upsideColor === 'AMBER') return 'atlas-f3-upside-amber';
+  if (upsideColor === 'RED') return 'atlas-f3-upside-red';
+  // Priority 2: derive from the band display string
+  if (!band) return 'atlas-f3-upside-neutral';
+  if (band.startsWith('20%+ below')) return 'atlas-f3-upside-green';
+  if (band.startsWith('10-20% below')) return 'atlas-f3-upside-light-green';
+  if (band.startsWith('At target')) return 'atlas-f3-upside-neutral';
+  if (band.startsWith('10-20% above')) return 'atlas-f3-upside-amber';
+  if (band.startsWith('20%+ above')) return 'atlas-f3-upside-red';
+  return 'atlas-f3-upside-neutral';
 }
 
 function ptDirectionTone(label: string): string {

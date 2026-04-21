@@ -16,7 +16,6 @@ F3 v7.3.4 scoring (base-score + modifier approach):
 
 High consensus override: Buy/SB + >=9 analysts + 0 sells + raised/maintained PT → min 78
 Hard cap: pvt > +20% → f3_final = min(f3_before, 45)
-Half penalty: pvt in (10%,20%] AND consensus NOT deteriorating → -7 instead of -15
 """
 
 from __future__ import annotations
@@ -57,11 +56,8 @@ _BASE_SELL: Final[int] = 30
 # Hard cap applied when price is >20% above consensus target
 _HARD_CAP_ABOVE_20: Final[int] = 45
 
-# Full penalty when price is 10-20% above target
+# Flat penalty when price is 10-20% above target — always applied, no reduction
 _ABOVE_10_FULL_PENALTY: Final[int] = -15
-
-# Half penalty divisor — int(-15 / 2) = -7 (truncate toward zero)
-_ABOVE_10_HALF_PENALTY: Final[int] = -7
 
 # High consensus override minimum score
 _HIGH_CONSENSUS_MIN: Final[int] = 78
@@ -212,17 +208,6 @@ def _upgrade_downgrade_modifier(net_upgrades: int) -> int:
     return -10
 
 
-def _is_deteriorating(*, net_upgrades: int, pt_direction: str) -> bool:
-    """Return True when consensus is weakening (net downgrades OR PT cuts).
-
-    Used to decide between full penalty (-15) and half penalty (-7) when
-    price is 10-20% above the consensus target.
-    """
-    has_net_downgrades = net_upgrades < 0
-    has_pt_cuts = pt_direction.strip().upper() in ("SINGLE_CUT", "MULTIPLE_CUTS")
-    return has_net_downgrades or has_pt_cuts
-
-
 def _price_vs_target(current_price: float, analyst_target: float) -> float:
     """Priority 5 — compute price vs target ratio.
 
@@ -260,17 +245,61 @@ def _grade_from_total(total: int) -> str:
     return "AVOID"
 
 
-def _consensus_label(buy_pct: float | None) -> str:
-    """Map buy percentage to consensus label for display and scoring."""
-    if buy_pct is None:
-        return "NO DATA"
-    if buy_pct > 80:
-        return "STRONG BUY"
-    if buy_pct >= 60:
-        return "BUY"
-    if buy_pct >= 40:
-        return "HOLD"
-    return "SELL"
+def classify_consensus(
+    strong_buy_count: int,
+    buy_count: int,
+    hold_count: int,
+    sell_count: int,
+    strong_sell_count: int,
+) -> tuple[str, int]:
+    """Classify consensus using a weighted average of the full SB/B/H/S/SS distribution.
+
+    Weights: Strong Buy=5, Buy=4, Hold=3, Sell=2, Strong Sell=1.
+
+    weighted_avg thresholds → (label, base_score):
+      >= 4.5 → STRONG BUY / 90
+      >= 3.5 → BUY / 78
+      >= 2.5 → HOLD / 55
+      <  2.5 → SELL / 30
+      total == 0 → NO COVERAGE / 55 (neutral fallback)
+    """
+    total = strong_buy_count + buy_count + hold_count + sell_count + strong_sell_count
+    if total == 0:
+        return "NO COVERAGE", _BASE_HOLD
+    weighted = (
+        strong_buy_count * 5
+        + buy_count * 4
+        + hold_count * 3
+        + sell_count * 2
+        + strong_sell_count * 1
+    ) / total
+    if weighted >= 4.5:
+        return "STRONG BUY", _BASE_STRONG_BUY
+    if weighted >= 3.5:
+        return "BUY", _BASE_BUY
+    if weighted >= 2.5:
+        return "HOLD", _BASE_HOLD
+    return "SELL", _BASE_SELL
+
+
+def _upside_color(pvt: float) -> str:
+    """Map price-vs-target ratio to a semantic colour token.
+
+    pvt < -0.20  → GREEN       (20%+ below target — significant upside)
+    pvt < -0.10  → LIGHT_GREEN (10-20% below target)
+    pvt <= +0.10 → NEUTRAL     (within ±10% — neutral zone)
+    pvt <= +0.20 → AMBER       (10-20% above target — caution)
+    pvt >  +0.20 → RED         (20%+ above target — overextended)
+    """
+    if pvt < -0.20:
+        return "GREEN"
+    if pvt < -0.10:
+        return "LIGHT_GREEN"
+    if pvt <= 0.10:
+        return "NEUTRAL"
+    if pvt <= 0.20:
+        return "AMBER"
+    return "RED"
 
 
 # ---------------------------------------------------------------------------
@@ -331,10 +360,6 @@ def score_f3(
     # Priority 5 — price vs target adjustment
     pvt = _price_vs_target(current_price, analyst_target)
     band_label = _price_vs_target_band(pvt)
-    deteriorating = _is_deteriorating(
-        net_upgrades=net_upgrades_30d,
-        pt_direction=pt_revision_direction,
-    )
 
     if pvt < -0.20:
         # 20%+ below target → +10
@@ -349,10 +374,8 @@ def score_f3(
         adjustment = 0
         f3_after = f3_before
     elif pvt <= 0.20:
-        # 10-20% above target
-        # Part 4: full penalty only when BOTH above target AND consensus deteriorating.
-        # If consensus is NOT deteriorating → half penalty (-7 instead of -15).
-        adjustment = _ABOVE_10_FULL_PENALTY if deteriorating else _ABOVE_10_HALF_PENALTY
+        # 10-20% above target → flat -15 always (spec v7.3.4)
+        adjustment = _ABOVE_10_FULL_PENALTY
         f3_after = f3_before + adjustment
     else:
         # 20%+ above target → hard cap at 45
@@ -402,7 +425,6 @@ def score_f3(
         "price_vs_target": pvt,
         "price_vs_target_band_label": band_label,
         "price_vs_target_adjustment": adjustment,
-        "deteriorating": deteriorating,
     }
 
     return FactorScore(
@@ -470,9 +492,9 @@ def _build_analyst_response(
 
     if has_coverage and current_price and consensus_pt and current_price > 0 and consensus_pt > 0:
         sell_count = sell + strong_sell
-        consensus_label = _consensus_label(buy_pct)
-        # Use "HOLD" if no data / neutral label
-        if consensus_label == "NO DATA":
+        consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
+        # Use "HOLD" when no distribution data (zero total analysts)
+        if consensus_label == "NO COVERAGE":
             consensus_label = "HOLD"
 
         fs = score_f3(
@@ -495,8 +517,8 @@ def _build_analyst_response(
     elif has_coverage and (not current_price or not consensus_pt):
         # Coverage exists but no price data — score without price adjustment
         sell_count = sell + strong_sell
-        consensus_label = _consensus_label(buy_pct)
-        if consensus_label == "NO DATA":
+        consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
+        if consensus_label == "NO COVERAGE":
             consensus_label = "HOLD"
         count = effective_count
         pt_mod = _pt_revision_modifier(
@@ -534,6 +556,7 @@ def _build_analyst_response(
         pvt_band = _BAND_NEUTRAL
 
     # Build sub-indicators
+    cr_label, cr_base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
     consensus_indicator = ConsensusRatingIndicator(
         strong_buy_count=strong_buy,
         buy_count=buy,
@@ -542,10 +565,8 @@ def _build_analyst_response(
         strong_sell_count=strong_sell,
         total_analysts=total_analysts,
         buy_pct=buy_pct,
-        label=_consensus_label(buy_pct),
-        base_score=_base_score_from_consensus(_consensus_label(buy_pct))
-        if buy_pct is not None
-        else None,
+        label=cr_label,
+        base_score=cr_base if has_coverage and total_analysts > 0 else None,
     )
 
     coverage_indicator = AnalystCoverageIndicator(
@@ -578,6 +599,7 @@ def _build_analyst_response(
         price_vs_target=pvt,
         price_vs_target_band=pvt_band,
         adjustment=pvt_adj,
+        upside_color=_upside_color(pvt) if pvt is not None else None,
     )
 
     grade = _grade_from_total(f3_score) if f3_score is not None else "NO DATA"

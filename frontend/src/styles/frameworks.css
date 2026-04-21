@@ -1182,6 +1182,30 @@
   color: var(--atlas-portfolio-red);
 }
 
+/* Upside band colour classes — applied by upsideBandClass() in f3-analyst-panel.tsx.
+   Maps the price-vs-target band position to a semantic colour.
+   NEUTRAL (grey) is the explicit default; never derive colour from upside_pct sign. */
+.atlas-f3-dl-row dd.atlas-f3-upside-neutral,
+.atlas-f3-pt-band.atlas-f3-upside-neutral {
+  color: #8b949e;
+}
+.atlas-f3-dl-row dd.atlas-f3-upside-green,
+.atlas-f3-pt-band.atlas-f3-upside-green {
+  color: #39d353;
+}
+.atlas-f3-dl-row dd.atlas-f3-upside-light-green,
+.atlas-f3-pt-band.atlas-f3-upside-light-green {
+  color: rgba(57, 211, 83, 0.7);
+}
+.atlas-f3-dl-row dd.atlas-f3-upside-amber,
+.atlas-f3-pt-band.atlas-f3-upside-amber {
+  color: #f0a500;
+}
+.atlas-f3-dl-row dd.atlas-f3-upside-red,
+.atlas-f3-pt-band.atlas-f3-upside-red {
+  color: #f85149;
+}
+
 /* Consensus stacked bar */
 
 .atlas-f3-consensus-bar {

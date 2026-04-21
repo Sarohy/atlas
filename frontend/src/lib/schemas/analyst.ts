@@ -60,6 +60,8 @@ export const ptUpsideIndicatorSchema = z.object({
   price_vs_target_band: z.string().nullable().optional(),
   /** Score adjustment applied by the price vs target band. */
   adjustment: z.number().int().nullable().optional(),
+  /** Semantic colour token from the backend: GREEN | LIGHT_GREEN | NEUTRAL | AMBER | RED */
+  upside_color: z.string().nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------

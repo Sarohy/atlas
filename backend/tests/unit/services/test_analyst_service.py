@@ -9,7 +9,6 @@ F3 v7.3.4 uses a base-score + modifier approach:
 
 High consensus override: Buy/SB + ≥9 analysts + 0 sells + raised/maintained PT → min 78
 Hard cap: when pvt > +20%, f3_final = min(f3_before, 45)
-Half penalty: when pvt in (10%, 20%] AND consensus NOT deteriorating → apply -7 not -15
 """
 
 from __future__ import annotations
@@ -24,12 +23,13 @@ from atlas.services.analyst_service import (
     _base_score_from_consensus,
     _build_analyst_response,
     _grade_from_total,
-    _is_deteriorating,
     _price_vs_target,
     _price_vs_target_band,
     _pt_revision_direction_label,
     _pt_revision_modifier,
     _upgrade_downgrade_modifier,
+    _upside_color,
+    classify_consensus,
     score_f3,
     AnalystService,
 )
@@ -184,29 +184,6 @@ class TestUpgradeDowngradeModifier:
 
 
 # ---------------------------------------------------------------------------
-# _is_deteriorating
-# ---------------------------------------------------------------------------
-
-
-class TestIsDeterioriating:
-    """Consensus deteriorating iff net downgrades OR PT cuts present."""
-
-    def test_net_downgrades_is_deteriorating(self) -> None:
-        assert _is_deteriorating(net_upgrades=-1, pt_direction="NO_CHANGE") is True
-
-    def test_pt_cuts_is_deteriorating(self) -> None:
-        assert _is_deteriorating(net_upgrades=0, pt_direction="SINGLE_CUT") is True
-        assert _is_deteriorating(net_upgrades=2, pt_direction="MULTIPLE_CUTS") is True
-
-    def test_positive_upgrades_and_no_cuts_not_deteriorating(self) -> None:
-        assert _is_deteriorating(net_upgrades=2, pt_direction="NO_CHANGE") is False
-        assert _is_deteriorating(net_upgrades=0, pt_direction="NO_CHANGE") is False
-
-    def test_raises_not_deteriorating(self) -> None:
-        assert _is_deteriorating(net_upgrades=3, pt_direction="MULTIPLE_RAISES") is False
-
-
-# ---------------------------------------------------------------------------
 # _price_vs_target
 # ---------------------------------------------------------------------------
 
@@ -315,7 +292,7 @@ class TestHighConsensusOverride:
 
     def test_override_lifts_score_to_78(self) -> None:
         # Buy(78) + count=9(0) + NO_CHANGE(0) + 0 upgrades(0) = 78,
-        # pvt ~+0.1387 (14% above, not deteriorating) -> half penalty -7 -> 71 < 78.
+        # pvt ~+0.1387 (14% above) -> flat -15 -> 63 < 78.
         # Override: Buy + 9 + 0 sells + NO_CHANGE (maintained) -> min 78.
         result = score_f3(
             consensus_rating="Buy",
@@ -376,6 +353,101 @@ class TestHighConsensusOverride:
             sell_count=0,
         )
         assert result.override_applied is False
+
+
+# ---------------------------------------------------------------------------
+# classify_consensus
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyConsensus:
+    """Spec test cases: weighted-average consensus classifier.
+
+    Weights: SB=5, B=4, H=3, S=2, SS=1
+    Thresholds: >=4.5 → STRONG BUY/90 | >=3.5 → BUY/78 | >=2.5 → HOLD/55 | else → SELL/30
+    """
+
+    def test_zero_total_returns_no_coverage(self) -> None:
+        label, score = classify_consensus(0, 0, 0, 0, 0)
+        assert label == "NO COVERAGE"
+        assert score == 55
+
+    def test_spec_case_1_buy_not_strong_buy(self) -> None:
+        # SB=0, B=55, H=11, S=2, SS=0 — buy_pct=80.9% but weighted=3.779 → BUY
+        # This is the primary bug-fix test: old code returned "STRONG BUY" for this data
+        label, score = classify_consensus(0, 55, 11, 2, 0)
+        weighted = (0 * 5 + 55 * 4 + 11 * 3 + 2 * 2 + 0 * 1) / 68
+        assert weighted < 4.5, "Precondition: weighted avg must be < 4.5 for BUY"
+        assert weighted >= 3.5, "Precondition: weighted avg must be >= 3.5 for BUY"
+        assert label == "BUY"
+        assert score == 78
+
+    def test_spec_case_2_strong_buy(self) -> None:
+        # SB=40, B=15, H=3, S=0, SS=0 — weighted = (200+60+9)/58 = 4.638 → STRONG BUY
+        label, score = classify_consensus(40, 15, 3, 0, 0)
+        assert label == "STRONG BUY"
+        assert score == 90
+
+    def test_spec_case_3_sell_overextended(self) -> None:
+        # SB=5, B=20, H=10, S=3, SS=0 — weighted=(25+80+30+6)/38=141/38=3.711 → BUY
+        # (Price is above target so F3 gets hard-capped, but consensus is BUY)
+        label, score = classify_consensus(5, 20, 10, 3, 0)
+        assert label == "BUY"
+        assert score == 78
+
+    def test_spec_case_4_hold(self) -> None:
+        # SB=0, B=5, H=20, S=5, SS=0 — weighted=(0+20+60+10)/30=90/30=3.0 → HOLD
+        label, score = classify_consensus(0, 5, 20, 5, 0)
+        assert label == "HOLD"
+        assert score == 55
+
+    def test_strong_buy_at_threshold(self) -> None:
+        # All Strong Buy: weighted = 5.0 >= 4.5 → STRONG BUY
+        label, score = classify_consensus(10, 0, 0, 0, 0)
+        assert label == "STRONG BUY"
+        assert score == 90
+
+    def test_sell_below_threshold(self) -> None:
+        # Mostly Sell/SS: weighted = (0+0+0+4+1)/5 = 1.0 → SELL
+        label, score = classify_consensus(0, 0, 0, 4, 1)
+        assert label == "SELL"
+        assert score == 30
+
+
+# ---------------------------------------------------------------------------
+# _upside_color
+# ---------------------------------------------------------------------------
+
+
+class TestUpsideColor:
+    """Price-vs-target ratio → colour token."""
+
+    def test_below_20_pct_returns_green(self) -> None:
+        assert _upside_color(-0.25) == "GREEN"
+        assert _upside_color(-0.30) == "GREEN"
+
+    def test_at_negative_20_boundary_returns_light_green(self) -> None:
+        # -0.20 is NOT < -0.20, so it falls to LIGHT_GREEN
+        assert _upside_color(-0.20) == "LIGHT_GREEN"
+
+    def test_10_to_20_below_returns_light_green(self) -> None:
+        assert _upside_color(-0.15) == "LIGHT_GREEN"
+        assert _upside_color(-0.10001) == "LIGHT_GREEN"
+
+    def test_neutral_zone_returns_neutral(self) -> None:
+        # pvt in (-0.10, +0.10]
+        assert _upside_color(-0.10) == "NEUTRAL"
+        assert _upside_color(0.0) == "NEUTRAL"
+        assert _upside_color(0.0536) == "NEUTRAL"  # spec case 1 bug data
+        assert _upside_color(0.10) == "NEUTRAL"
+
+    def test_10_to_20_above_returns_amber(self) -> None:
+        assert _upside_color(0.15) == "AMBER"
+        assert _upside_color(0.20) == "AMBER"
+
+    def test_above_20_pct_returns_red(self) -> None:
+        assert _upside_color(0.25) == "RED"
+        assert _upside_color(0.50) == "RED"
 
 
 class TestScoreF3:
@@ -451,7 +523,10 @@ class TestScoreF3:
         assert result.raw_score == 40
         assert result.override_applied is False
 
-    def test_6_ten_to_twenty_above_strong_consensus_half_penalty(self) -> None:
+    def test_6_ten_to_twenty_above_flat_penalty(self) -> None:
+        # Buy(78) + count=20(+5) + SINGLE_RAISE(+3) + net=2(+3) = 89
+        # pvt ~11.3% above target → flat -15 → 74 < 78
+        # Override fires: Buy + 20 analysts + 0 sells + SINGLE_RAISE → min 78
         result = score_f3(
             consensus_rating="Buy",
             analyst_count=20,
@@ -462,8 +537,9 @@ class TestScoreF3:
             sell_count=0,
         )
         assert result.breakdown["f3_before_price_adjustment"] == 89
-        assert result.breakdown["price_vs_target_adjustment"] == -7
-        assert result.raw_score == 82
+        assert result.breakdown["price_vs_target_adjustment"] == -15
+        assert result.raw_score == 78
+        assert result.override_applied is True
 
     def test_score_clamped_at_100(self) -> None:
         # Strong Buy(90) + >30(+8) + multiple_raises(+5) + >2 upgrades(+5) = 108 -> 100
@@ -627,6 +703,43 @@ class TestBuildAnalystResponse:
                 assert grade == "BUY"
             elif score >= 40:
                 assert grade == "NEUTRAL"
+
+    def test_upside_color_present_when_price_data_available(self) -> None:
+        # pvt = (451.62 - 428.65) / 428.65 = +0.0536 → NEUTRAL zone → upside_color = NEUTRAL
+        response = _build_analyst_response(
+            ticker="BUGFIX",
+            strong_buy=0,
+            buy=55,
+            hold=11,
+            sell=2,
+            strong_sell=0,
+            num_analysts=68,
+            consensus_pt=428.65,
+            current_price=451.62,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
+        )
+        assert response.pt_upside.upside_color == "NEUTRAL"
+
+    def test_spec_case_1_correct_score_and_label(self) -> None:
+        # Bug 1 + Bug 2 fix: SB=0, B=55, H=11, S=2, SS=0 → BUY (not STRONG BUY)
+        # f3 = 78 (BUY base) + 8 (>30 analysts) + 0 + 0 + 0 (neutral adj) = 86
+        response = _build_analyst_response(
+            ticker="BUGFIX",
+            strong_buy=0,
+            buy=55,
+            hold=11,
+            sell=2,
+            strong_sell=0,
+            num_analysts=68,
+            consensus_pt=428.65,
+            current_price=451.62,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
+        )
+        assert response.consensus_rating.label == "BUY"
+        assert response.consensus_rating.base_score == 78
+        assert response.f3_score == 86
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,7 @@ async def get_tranche_sizing(
     iran_resolution: str | None = None,
     position_weight_override: float | None = None,
     signals_count_override: int | None = None,
+    t1_fired_override: bool | None = None,
 ) -> TrancheSizingResponse:
     """Return a Framework 4 tranche-sizing recommendation for ``ticker``.
 
@@ -107,4 +108,5 @@ async def get_tranche_sizing(
         iran_resolution=iran_resolution,
         position_weight=effective_weight,
         signals_count_override=signals_count_override,
+        t1_fired_override=t1_fired_override,
     )

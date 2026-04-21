@@ -19,6 +19,7 @@ import { CashFloorPanel } from './cash-floor-panel';
 import { ConvictionActionPanel } from './conviction-action-panel';
 import { Framework7Card } from './framework7-card';
 import { Framework8Card } from './framework8-card';
+import { Framework14Card } from './framework14-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -155,6 +156,7 @@ export function FrameworksPanelsSection() {
       <div className="atlas-frameworks-secondary-row">
         <Framework7Card ticker={activeTicker} adjustedScore={f1DisplayScore} />
         <Framework8Card ticker={activeTicker} />
+        <Framework14Card ticker={activeTicker} />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

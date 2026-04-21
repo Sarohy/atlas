@@ -92,6 +92,29 @@ _SIGNAL_NAMES: Final[tuple[str, ...]] = (
 _AND_GATE_SIGNAL_STATES: dict[str, list[bool]] = {}
 
 # ---------------------------------------------------------------------------
+# In-memory T1 persistence stub (swap for Redis in production).
+# Key pattern: f4_t1_fired:{TICKER}
+# Default: False when key is absent — never assume T1 is fired.
+# ---------------------------------------------------------------------------
+
+_t1_fired_store: dict[str, bool] = {}
+
+
+def _get_t1_fired(ticker: str) -> bool:
+    """Read T1 fired state from the in-memory stub. Returns False by default."""
+    return _t1_fired_store.get(f"f4_t1_fired:{ticker.upper()}", False)
+
+
+def _set_t1_fired(ticker: str, value: bool) -> None:
+    """Write T1 fired state to the in-memory stub."""
+    _t1_fired_store[f"f4_t1_fired:{ticker.upper()}"] = value
+
+
+def reset_t1_fired_store() -> None:
+    """Clear the T1 fired store. Call between tests to prevent state leakage."""
+    _t1_fired_store.clear()
+
+# ---------------------------------------------------------------------------
 # Framework 14 interface (read-only from Framework 4's perspective)
 # ---------------------------------------------------------------------------
 
@@ -217,8 +240,9 @@ def compute_tranche_sizing(
     iran_resolution: str | None = None,
     position_weight: float = 0.0,
     signals_count_override: int | None = None,
+    t1_fired_override: bool | None = None,
 ) -> TrancheSizingResponse:
-    """Compute the Framework 4 tranche-sizing result (v7.3.4).
+    """Compute the Framework 4 tranche-sizing result (v7.4).
 
     Parameters
     ----------
@@ -240,8 +264,16 @@ def compute_tranche_sizing(
         Override the count of confirmed AND gate signals. When provided, the
         first N signals are treated as confirmed and the remainder as pending.
         When ``None``, reads from the Framework 29 in-memory stub.
+    t1_fired_override:
+        Override the T1 fired state from the persistence store. When provided,
+        the store is not consulted or modified. Intended for testing only.
     """
     normalised = ticker.strip().upper()
+
+    # Persist T1 fired state when catalyst is confirmed and no override is in use.
+    # Persistence happens before the cap check so confirmations survive cap suppression.
+    if t1_fired_override is None and initial_catalyst.strip().lower() == "yes":
+        _set_t1_fired(normalised, True)
 
     # Step 1: Check concentration cap (Framework 14).
     cap_active = position_weight >= _CONCENTRATION_CAP_THRESHOLD
@@ -262,6 +294,7 @@ def compute_tranche_sizing(
             t2=None,
             t3=None,
             t4=None,
+            t1_fired=False,
         )
 
     # Step 2: Determine AND gate state (Framework 29).
@@ -284,11 +317,24 @@ def compute_tranche_sizing(
         signal_details = _build_signal_details([False] * 5)
         signals_confirmed = 0
 
-    # Step 3: Calculate tranche values.
-    t1 = _compute_t1(initial_catalyst)
-    t2 = _compute_t2(regime_rule)
-    t3 = _compute_t3(regime_rule, and_gate_passed)
-    t4 = _compute_t4(iran_resolution)
+    # Step 3: Determine T1 fired state, then apply sequential gate.
+    # The override takes precedence over the persistence store (testing only).
+    t1_fired = (
+        t1_fired_override if t1_fired_override is not None else _get_t1_fired(normalised)
+    )
+
+    # T1 is always derived from the fired state (not re-evaluated from catalyst).
+    t1 = _T1_VALUE if t1_fired else _BLOCKED
+
+    # Sequential gate: T2/T3/T4 are blocked until T1 fires.
+    if t1_fired:
+        t2 = _compute_t2(regime_rule)
+        t3 = _compute_t3(regime_rule, and_gate_passed)
+        t4 = _compute_t4(iran_resolution)
+    else:
+        t2 = _BLOCKED
+        t3 = _BLOCKED
+        t4 = _BLOCKED
 
     return TrancheSizingResponse(
         ticker=normalised,
@@ -304,4 +350,5 @@ def compute_tranche_sizing(
         t2=t2,
         t3=t3,
         t4=t4,
+        t1_fired=t1_fired,
     )

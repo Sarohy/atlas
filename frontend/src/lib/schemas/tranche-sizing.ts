@@ -52,6 +52,9 @@ export const trancheSizingResponseSchema = z.object({
   t3: z.string().nullable(),
   /** T4 - Remaining cash to floor when Iran confirmed, Blocked, or null when suppressed. */
   t4: z.string().nullable(),
+
+  /** True when T1 has fired for this ticker. T2/T3/T4 are blocked until T1 fires. */
+  t1_fired: z.boolean(),
 });
 
 // ---------------------------------------------------------------------------

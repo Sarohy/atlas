@@ -1,6 +1,6 @@
 """Shared pytest fixtures for the ATLAS test suite."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -17,3 +17,13 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
         base_url="http://test",
     ) as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def reset_tranche_stores() -> Generator[None, None, None]:
+    """Reset Framework 4 in-memory state between tests to prevent pollution."""
+    from atlas.services.tranche_sizing_service import reset_t1_fired_store
+
+    reset_t1_fired_store()
+    yield
+    reset_t1_fired_store()

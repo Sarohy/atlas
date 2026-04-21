@@ -11,6 +11,7 @@ from atlas.api.v1 import (
     earnings,
     framework7,
     framework8,
+    framework14,
     framework_score,
     fundamental,
     health,
@@ -42,6 +43,7 @@ router.include_router(fundamental.router)
 router.include_router(framework_score.router)
 router.include_router(framework7.router)
 router.include_router(framework8.router)
+router.include_router(framework14.router)
 router.include_router(position_sizing.router)
 router.include_router(tranche_sizing.router)
 router.include_router(regime_modifier.router)

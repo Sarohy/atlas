@@ -512,6 +512,7 @@ export const handlers = [
         and_gate_passed: false,
         signals_confirmed: 0,
         signals_detail: emptySignals,
+        t1_fired: false,
         t1: null,
         t2: null,
         t3: null,
@@ -530,6 +531,9 @@ export const handlers = [
       confirmed: i < signalsCount,
     }));
 
+    // Sequential gate: T2/T3/T4 blocked until T1 fires.
+    const t1Fired = initialCatalyst === 'yes';
+
     return HttpResponse.json({
       ticker,
       cap_active: false,
@@ -540,10 +544,12 @@ export const handlers = [
       and_gate_passed: andGatePassed,
       signals_confirmed: andGateActive ? signalsCount : 0,
       signals_detail: signals,
-      t1: initialCatalyst === 'yes' ? '10-15% of available cash' : 'Blocked',
-      t2: regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
-      t3: andGatePassed ? '30-40% of available cash' : 'Blocked',
-      t4: iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
+      t1_fired: t1Fired,
+      t1: t1Fired ? '10-15% of available cash' : 'Blocked',
+      t2: t1Fired && regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
+      t3: t1Fired && andGatePassed ? '30-40% of available cash' : 'Blocked',
+      t4:
+        t1Fired && iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
     });
   }),
 
@@ -605,6 +611,37 @@ export const handlers = [
       action_tone: 'tone-yellow',
       f5_blocked: false,
       flags: [],
+    });
+  }),
+
+  // ── Framework 14 — Position Sizing Rules ─────────────────────────────────
+  http.get(`${BASE}/api/v1/framework14/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker']).toUpperCase();
+    return HttpResponse.json({
+      ticker,
+      position_weight_pct: 13.6,
+      nav_dollars: 23900000,
+      position_dollars: 3250400,
+      sizing_tier: 'CORE_ANCHOR',
+      target_weight_min: 0.03,
+      target_weight_max: 0.05,
+      concentration_status: 'GRANDFATHERED',
+      cap_active: true,
+      soft_cap_breached: true,
+      hard_review_triggered: true,
+      grandfathered: true,
+      grandfathered_expires_at: 0.17,
+      grandfathered_expiry_near: false,
+      score_display_cap: 85,
+      cluster: 'AI Memory',
+      cluster_weight_pct: 25.3,
+      cluster_status: 'RED_ZONE',
+      cluster_yellow_threshold: 0.22,
+      cluster_red_threshold: 0.25,
+      adds_permitted: false,
+      trim_recommended: true,
+      message:
+        `${ticker} is grandfathered above the 8% soft cap. No new adds. Monitor expiry threshold.`,
     });
   }),
 ];

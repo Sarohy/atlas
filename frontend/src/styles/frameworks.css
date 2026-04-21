@@ -2200,12 +2200,14 @@
 
 .atlas-regime-panels-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   align-items: stretch;
 }
 
 .atlas-frameworks-secondary-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   align-items: stretch;
   margin-top: 14px;
@@ -2218,12 +2220,24 @@
 }
 
 .atlas-regime-panel {
-  flex: 1;
+  flex: 1 1 calc(50% - 7px);
   min-width: 0;
+}
+
+/* Tranche panel needs more horizontal room (4 labels, value + reason column). */
+.atlas-tranche-panel {
+  flex: 1 1 calc(50% - 7px);
 }
 
 /* Removed: max-width cap was only needed when secondary row held one panel.
    With F3 and F4 both present each panel naturally takes 50% via flex: 1. */
+
+@media (max-width: 900px) {
+  .atlas-regime-panel,
+  .atlas-tranche-panel {
+    flex-basis: 100%;
+  }
+}
 
 /* ── War zone toggle button (lives in the panel header) ── */
 
@@ -2534,6 +2548,7 @@
   font-size: 0.55rem;
   color: #4b6070;
   letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 .atlas-regime-cash-value {
@@ -2732,9 +2747,30 @@
   color: #fb923c;
 }
 
+/* Waiting tranche value — amber (T1 not yet fired). */
+.atlas-regime-cash-value.is-waiting {
+  color: #f59e0b;
+}
+
 /* Blocked tranche value — very dim so it recedes visually. */
 .atlas-regime-cash-value.is-blocked {
   color: #334155;
+}
+
+/* Right-side wrapper that stacks the value chip and seq-reason below it. */
+.atlas-tranche-value-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+/* "Requires T1 first" annotation — tiny, dim, monospace. */
+.atlas-tranche-seq-reason {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #334155;
+  letter-spacing: 0.02em;
 }
 
 /* ==========================================================================
@@ -3516,4 +3552,374 @@
 .atlas-f8-filter-arrow {
   font-size: 0.5rem;
   color: #2d3f54;
+}
+
+/* ============================================================
+   Framework 14 — Position Sizing Rules
+   ============================================================ */
+
+.atlas-f14-panel {
+  min-width: 320px;
+}
+
+/* ── Header ── */
+
+.atlas-f14-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.atlas-f14-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Status chip ── */
+
+.atlas-f14-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f14-chip.is-f14-grey {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.atlas-f14-chip.is-f14-amber {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.atlas-f14-chip.is-f14-red {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.atlas-f14-chip.is-f14-blue {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.13);
+  border: 1px solid rgba(59, 130, 246, 0.38);
+}
+
+/* ── Alert stack ── */
+
+.atlas-f14-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.atlas-f14-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 0.58rem;
+  line-height: 1.45;
+}
+
+.atlas-f14-alert.is-f14-amber {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #fde68a;
+}
+
+.atlas-f14-alert.is-f14-red {
+  background: rgba(239, 68, 68, 0.07);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.atlas-f14-alert.is-f14-orange {
+  background: rgba(249, 115, 22, 0.08);
+  border-color: rgba(249, 115, 22, 0.3);
+  color: #fdba74;
+}
+
+.atlas-f14-alert-icon {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+}
+
+/* ── 4-stat row ── */
+
+.atlas-f14-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.atlas-f14-stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 5px;
+  padding: 7px 9px;
+}
+
+.atlas-f14-stat-label {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f14-stat-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #7fa8c0;
+}
+
+.atlas-f14-stat-value.is-f14-amber { color: #fbbf24; }
+.atlas-f14-stat-value.is-f14-red   { color: #fca5a5; }
+.atlas-f14-stat-value.is-f14-blue  { color: #93c5fd; }
+.atlas-f14-stat-value.is-f14-green { color: #86efac; }
+
+/* ── Concentration status panel ── */
+
+.atlas-f14-conc-panel {
+  padding: 10px 12px;
+  border-radius: 5px;
+  border: 1px solid #1e2d40;
+  background: #0b1623;
+  margin-bottom: 12px;
+}
+
+.atlas-f14-conc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.atlas-f14-conc-title {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f14-conc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.atlas-f14-conc-label {
+  font-size: 0.55rem;
+  color: #4b6070;
+}
+
+.atlas-f14-conc-badge {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.atlas-f14-conc-badge.is-yes {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.atlas-f14-conc-badge.is-no {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.atlas-f14-conc-badge.is-neutral {
+  color: #7fa8c0;
+  background: rgba(127, 168, 192, 0.1);
+}
+
+/* ── Weight bar ── */
+
+.atlas-f14-weight-bar-section {
+  margin-bottom: 12px;
+}
+
+.atlas-f14-weight-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.atlas-f14-weight-bar-label {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f14-weight-bar-pct {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #7fa8c0;
+}
+
+.atlas-f14-weight-bar-track {
+  position: relative;
+  height: 6px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.atlas-f14-weight-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+  background: #3d8baf;
+}
+
+.atlas-f14-weight-bar-fill.is-f14-amber { background: #d97706; }
+.atlas-f14-weight-bar-fill.is-f14-red   { background: #dc2626; }
+.atlas-f14-weight-bar-fill.is-f14-blue  { background: #2563eb; }
+
+/* ── Cluster panel ── */
+
+.atlas-f14-cluster-panel {
+  padding: 10px 12px;
+  border-radius: 5px;
+  border: 1px solid #1e2d40;
+  background: #0b1623;
+  margin-bottom: 12px;
+}
+
+.atlas-f14-cluster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.atlas-f14-cluster-title {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f14-cluster-name {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #7fa8c0;
+  margin-bottom: 6px;
+}
+
+.atlas-f14-cluster-status-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.atlas-f14-cluster-status-chip.is-f14-normal {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.atlas-f14-cluster-status-chip.is-f14-yellow {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.atlas-f14-cluster-status-chip.is-f14-red {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.atlas-f14-cluster-bar-track {
+  position: relative;
+  height: 6px;
+  background: #071220;
+  border: 1px solid #1e2d40;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.atlas-f14-cluster-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+  background: #3d8baf;
+}
+
+.atlas-f14-cluster-bar-fill.is-f14-yellow { background: #b45309; }
+.atlas-f14-cluster-bar-fill.is-f14-red    { background: #dc2626; }
+
+/* ── Sizing guidance box ── */
+
+.atlas-f14-guidance-box {
+  padding: 9px 12px;
+  border-radius: 5px;
+  border: 1px solid #1e2d40;
+  background: #0b1623;
+}
+
+.atlas-f14-guidance-title {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.atlas-f14-guidance-tier {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #7fa8c0;
+  margin-bottom: 4px;
+}
+
+.atlas-f14-guidance-range {
+  font-size: 0.57rem;
+  color: #4b6070;
+  margin-bottom: 6px;
+}
+
+.atlas-f14-guidance-msg {
+  font-size: 0.58rem;
+  line-height: 1.55;
+  color: #5a7a94;
 }

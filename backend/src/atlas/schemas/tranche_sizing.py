@@ -87,3 +87,12 @@ class TrancheSizingResponse(BaseModel):
             "'Blocked' when gate not met, None when cap suppressed."
         ),
     )
+
+    # Sequential gate state
+    t1_fired: bool = Field(
+        default=False,
+        description=(
+            "True when T1 has fired for this ticker. "
+            "T2/T3/T4 are blocked by the sequential gate until T1 fires."
+        ),
+    )

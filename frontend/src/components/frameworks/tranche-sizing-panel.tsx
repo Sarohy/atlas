@@ -18,10 +18,10 @@ const CAP_THRESHOLD_PCT = '8%';
 
 /** Display label for each tranche key. */
 const TRANCHE_LABELS: Record<keyof Pick<TrancheSizingResponse, 't1' | 't2' | 't3' | 't4'>, string> = {
-  t1: 'T1 · Initial Catalyst',
-  t2: 'T2 · Regime CAUTION',
-  t3: 'T3 · CLEAR + AND Gate',
-  t4: 'T4 · Iran Resolution',
+  t1: 'T1 · Catalyst',
+  t2: 'T2 · Caution',
+  t3: 'T3 · Clear+Gate',
+  t4: 'T4 · Iran',
 };
 
 // ---------------------------------------------------------------------------
@@ -277,6 +277,8 @@ function TrancheContent({ data, regimeRule }: TrancheContentProps) {
             const value = data[key];
             const label = TRANCHE_LABELS[key];
             const isActive = value !== null && value !== BLOCKED;
+            const isWaiting = key === 't1' && !data.t1_fired;
+            const isBlockedByT1 = key !== 't1' && !data.t1_fired;
 
             return (
               <div
@@ -285,15 +287,25 @@ function TrancheContent({ data, regimeRule }: TrancheContentProps) {
                 key={key}
               >
                 <span className="atlas-regime-cash-label">{label}</span>
-                <span
-                  className={cn(
-                    'atlas-regime-cash-value',
-                    isActive ? 'is-active' : 'is-blocked',
+                <div className="atlas-tranche-value-group">
+                  <span
+                    className={cn(
+                      'atlas-regime-cash-value',
+                      isActive ? 'is-active' : isWaiting ? 'is-waiting' : 'is-blocked',
+                    )}
+                    data-testid={`tranche-value-${key}`}
+                  >
+                    {isWaiting ? 'Waiting' : (value ?? 'N/A')}
+                  </span>
+                  {isBlockedByT1 && (
+                    <span
+                      className="atlas-tranche-seq-reason"
+                      data-testid={`tranche-seq-reason-${key}`}
+                    >
+                      Requires T1 first
+                    </span>
                   )}
-                  data-testid={`tranche-value-${key}`}
-                >
-                  {value ?? 'N/A'}
-                </span>
+                </div>
               </div>
             );
           })}

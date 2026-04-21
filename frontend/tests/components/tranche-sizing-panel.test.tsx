@@ -91,11 +91,11 @@ describe('TrancheSizingPanel', () => {
     expect(screen.getByTestId('tranche-row-t4')).toBeInTheDocument();
   });
 
-  it('shows Blocked for T1 when catalyst is NO (default)', async () => {
+  it('shows Waiting for T1 when catalyst is NO (default)', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('tranche-content'));
 
-    expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent('Blocked');
+    expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent('Waiting');
   });
 
   it('shows T1 active after toggling catalyst to YES', async () => {
@@ -112,13 +112,19 @@ describe('TrancheSizingPanel', () => {
     });
   });
 
-  it('T2 active when regimeRule is CAUTION', async () => {
+  it('T2 active when regimeRule is CAUTION after T1 confirmed', async () => {
+    const user = userEvent.setup();
     renderPanel('AAPL', 'CAUTION');
     await waitFor(() => screen.getByTestId('tranche-content'));
 
-    expect(screen.getByTestId('tranche-value-t2')).toHaveTextContent(
-      '20-25% of available cash',
-    );
+    // T1 must fire first before T2 becomes eligible
+    await user.click(screen.getByTestId('tranche-catalyst-toggle'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tranche-value-t2')).toHaveTextContent(
+        '20-25% of available cash',
+      );
+    });
   });
 
   it('T2 blocked when regimeRule is NORMAL', async () => {
@@ -136,11 +142,14 @@ describe('TrancheSizingPanel', () => {
     expect(screen.getByTestId('tranche-value-t3')).toHaveTextContent('Blocked');
   });
 
-  it('T4 active after toggling Iran resolution to confirmed', async () => {
+  it('T4 active after toggling Iran resolution to confirmed and T1 to yes', async () => {
     const user = userEvent.setup();
     renderPanel();
     await waitFor(() => screen.getByTestId('tranche-content'));
 
+    // T1 must fire first
+    await user.click(screen.getByTestId('tranche-catalyst-toggle'));
+    // Then confirm Iran resolution
     await user.click(screen.getByTestId('tranche-iran-toggle'));
 
     await waitFor(() => {
@@ -163,6 +172,41 @@ describe('TrancheSizingPanel', () => {
 
     expect(screen.queryByTestId('regime-brent')).not.toBeInTheDocument();
     expect(screen.queryByTestId('regime-vix')).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tests — sequential gate display (T1 not fired → WAITING / Requires T1 first)
+  // ---------------------------------------------------------------------------
+
+  it('T1 row shows Waiting chip when catalyst is NO (T1 not fired)', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('tranche-content'));
+
+    expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent('Waiting');
+  });
+
+  it('T2 shows Requires T1 first reason when T1 not fired', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('tranche-content'));
+
+    expect(screen.getByTestId('tranche-seq-reason-t2')).toBeInTheDocument();
+    expect(screen.getByTestId('tranche-seq-reason-t2')).toHaveTextContent(
+      'Requires T1 first',
+    );
+  });
+
+  it('T2/T3/T4 seq reason not shown after T1 fires', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => screen.getByTestId('tranche-content'));
+
+    await user.click(screen.getByTestId('tranche-catalyst-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('tranche-seq-reason-t2')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('tranche-seq-reason-t3')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('tranche-seq-reason-t4')).not.toBeInTheDocument();
+    });
   });
 
   // ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import pytest
 
+from atlas.schemas.tranche_sizing import TrancheSizingResponse
 from atlas.services.tranche_sizing_service import (
     _AND_GATE_THRESHOLD,
     _BLOCKED,
@@ -42,8 +43,6 @@ from atlas.services.tranche_sizing_service import (
     compute_tranche_sizing,
     get_and_gate_signals,
 )
-from atlas.schemas.tranche_sizing import TrancheSizingResponse
-
 
 # ---------------------------------------------------------------------------
 # Named constants — sanity checks
@@ -52,7 +51,7 @@ from atlas.schemas.tranche_sizing import TrancheSizingResponse
 
 class TestConstants:
     def test_concentration_cap_threshold_is_8_pct(self) -> None:
-        assert _CONCENTRATION_CAP_THRESHOLD == pytest.approx(0.08)
+        assert pytest.approx(0.08) == _CONCENTRATION_CAP_THRESHOLD
 
     def test_and_gate_threshold_is_3(self) -> None:
         assert _AND_GATE_THRESHOLD == 3
@@ -358,13 +357,14 @@ class TestAndGateLogic:
         assert result.signals_confirmed == 2
 
     def test_t3_eligible_when_clear_and_gate_passes(self) -> None:
-        """Test 2: CLEAR + 3/5 -> T3 eligible."""
+        """Test 2: CLEAR + 3/5 + T1 fired -> T3 eligible."""
         result = compute_tranche_sizing(
             ticker="MRVL",
             initial_catalyst="no",
             regime_rule="CLEAR",
             position_weight=0.034,
             signals_count_override=3,
+            t1_fired_override=True,
         )
         assert result.t3 == _T3_VALUE
 
@@ -547,6 +547,7 @@ class TestResponseShape:
             initial_catalyst="no",
             regime_rule="CAUTION",
             position_weight=0.03,
+            t1_fired_override=True,
         )
         assert result.t2 == _T2_VALUE
 
@@ -557,6 +558,7 @@ class TestResponseShape:
             regime_rule="NORMAL",
             iran_resolution="confirmed",
             position_weight=0.03,
+            t1_fired_override=True,
         )
         assert result.t4 == _T4_VALUE
 
@@ -568,3 +570,89 @@ class TestResponseShape:
         )
         assert result.t2 == _BLOCKED
         assert result.t3 == _BLOCKED
+
+
+# ---------------------------------------------------------------------------
+# compute_tranche_sizing — sequential gate (T1 must fire before T2/T3/T4)
+# ---------------------------------------------------------------------------
+
+
+class TestSequentialGate:
+    """Tests for the T1 sequential gate: T2/T3/T4 are blocked until T1 fires.
+
+    Bug being fixed: T2 was eligible when regime=CAUTION even with T1 not fired.
+    Spec reference: Framework 4 v7.4 — T1 must fire before T2/T3/T4 can deploy.
+    """
+
+    def test_t2_blocked_when_t1_not_fired_in_caution_regime(self) -> None:
+        """Test 1: CAUTION regime with T1 not fired — T2 must be BLOCKED."""
+        result = compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="no",
+            regime_rule="CAUTION",
+            position_weight=0.034,
+            t1_fired_override=False,
+        )
+        assert result.t2 == _BLOCKED
+        assert result.t1_fired is False
+
+    def test_t2_eligible_when_t1_fired_and_caution_regime(self) -> None:
+        """Test 2: T2 becomes eligible once T1 has fired and regime is CAUTION."""
+        result = compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="no",
+            regime_rule="CAUTION",
+            position_weight=0.034,
+            t1_fired_override=True,
+        )
+        assert result.t2 == _T2_VALUE
+        assert result.t1_fired is True
+
+    def test_all_gated_blocked_when_t1_not_fired_clear_regime_and_gate_passes(self) -> None:
+        """Test 3: CLEAR + AND gate 3/5 — all T2/T3/T4 still BLOCKED if T1 not fired."""
+        result = compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="no",
+            regime_rule="CLEAR",
+            position_weight=0.034,
+            signals_count_override=3,
+            t1_fired_override=False,
+        )
+        assert result.t2 == _BLOCKED
+        assert result.t3 == _BLOCKED
+        assert result.t4 == _BLOCKED
+        assert result.t1_fired is False
+
+    def test_t1_fires_and_persists_when_catalyst_yes(self) -> None:
+        """Setting initial_catalyst='yes' persists T1 to the store."""
+        # First call fires T1
+        compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="yes",
+            regime_rule="CAUTION",
+            position_weight=0.034,
+        )
+        # Second call with catalyst='no' still sees T1 as fired (from store)
+        result = compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="no",
+            regime_rule="CAUTION",
+            position_weight=0.034,
+        )
+        assert result.t1_fired is True
+        assert result.t2 == _T2_VALUE
+
+    def test_and_gate_still_computed_when_t1_not_fired(self) -> None:
+        """AND gate state is still computed even when T1 has not fired."""
+        result = compute_tranche_sizing(
+            ticker="MU",
+            initial_catalyst="no",
+            regime_rule="CLEAR",
+            position_weight=0.034,
+            signals_count_override=3,
+            t1_fired_override=False,
+        )
+        assert result.and_gate_active is True
+        assert result.and_gate_passed is True
+        assert result.signals_confirmed == 3
+

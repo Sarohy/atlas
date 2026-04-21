@@ -16,7 +16,6 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-
 # ---------------------------------------------------------------------------
 # Validation - required params
 # ---------------------------------------------------------------------------
@@ -59,6 +58,7 @@ async def test_response_contains_all_v734_fields(client: AsyncClient) -> None:
         "t2",
         "t3",
         "t4",
+        "t1_fired",
     }
     assert required.issubset(set(data.keys()))
 
@@ -110,6 +110,7 @@ async def test_t2_active_when_regime_caution(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
         "?initial_catalyst=no&regime_rule=CAUTION&position_weight_override=0.03"
+        "&t1_fired_override=true"
     )
     assert response.status_code == 200
     assert response.json()["t2"] == "20-25% of available cash"
@@ -149,11 +150,12 @@ async def test_t3_blocked_when_clear_but_no_gate_override(client: AsyncClient) -
 
 
 async def test_t3_active_when_clear_and_gate_passes(client: AsyncClient) -> None:
-    """Test 2: CLEAR + 3/5 signals -> T3 eligible."""
+    """Test 2: CLEAR + 3/5 signals + T1 fired -> T3 eligible."""
     response = await client.get(
         "/api/v1/tranche-sizing/MRVL"
         "?initial_catalyst=no&regime_rule=CLEAR"
         "&position_weight_override=0.034&signals_count_override=3"
+        "&t1_fired_override=true"
     )
     assert response.status_code == 200
     data = response.json()
@@ -194,6 +196,7 @@ async def test_t4_active_when_iran_confirmed(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
         "?initial_catalyst=no&iran_resolution=confirmed&position_weight_override=0.03"
+        "&t1_fired_override=true"
     )
     assert response.status_code == 200
     assert response.json()["t4"] == "Remaining cash to floor"
@@ -220,6 +223,7 @@ async def test_t4_case_insensitive(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
         "?initial_catalyst=no&iran_resolution=CONFIRMED&position_weight_override=0.03"
+        "&t1_fired_override=true"
     )
     assert response.status_code == 200
     assert response.json()["t4"] == "Remaining cash to floor"
@@ -341,7 +345,7 @@ async def test_no_override_uses_db_weight_for_unknown_ticker(client: AsyncClient
     assert data["position_weight"] == pytest.approx(0.0)
 
 
-
+async def test_legacy_catalyst_caution_iran_t1_t2_t4_active(client: AsyncClient) -> None:
     """Catalyst yes + CAUTION + confirmed - T1, T2, T4 active; T3 blocked."""
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
@@ -354,3 +358,56 @@ async def test_no_override_uses_db_weight_for_unknown_ticker(client: AsyncClient
     assert data["t2"] == "20-25% of available cash"
     assert data["t3"] == "Blocked"
     assert data["t4"] == "Remaining cash to floor"
+
+
+# ---------------------------------------------------------------------------
+# Sequential gate: T2/T3/T4 blocked until T1 fires (v7.4 fix)
+# ---------------------------------------------------------------------------
+
+
+async def test_sequential_gate_t2_blocked_when_t1_not_fired(client: AsyncClient) -> None:
+    """Test 1: CAUTION regime, T1 not fired - T2 must be BLOCKED."""
+    response = await client.get(
+        "/api/v1/tranche-sizing/MU"
+        "?initial_catalyst=no&regime_rule=CAUTION"
+        "&position_weight_override=0.034&t1_fired_override=false"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["t2"] == "Blocked"
+    assert data["t1_fired"] is False
+
+
+async def test_sequential_gate_t2_eligible_when_t1_fired(client: AsyncClient) -> None:
+    """Test 2: CAUTION regime, T1 fired via store - T2 becomes eligible."""
+    response = await client.get(
+        "/api/v1/tranche-sizing/MU"
+        "?initial_catalyst=no&regime_rule=CAUTION"
+        "&position_weight_override=0.034&t1_fired_override=true"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["t2"] == "20-25% of available cash"
+    assert data["t1_fired"] is True
+
+
+async def test_sequential_gate_all_blocked_clear_and_gate_t1_not_fired(
+    client: AsyncClient,
+) -> None:
+    """Test 3: CLEAR + AND gate 3/5 - T2/T3/T4 still BLOCKED when T1 not fired."""
+    response = await client.get(
+        "/api/v1/tranche-sizing/MU"
+        "?initial_catalyst=no&regime_rule=CLEAR"
+        "&position_weight_override=0.034&signals_count_override=3"
+        "&t1_fired_override=false"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["t2"] == "Blocked"
+    assert data["t3"] == "Blocked"
+    assert data["t4"] == "Blocked"
+    assert data["t1_fired"] is False
+    # AND gate is still computed even when T1 not fired
+    assert data["and_gate_active"] is True
+    assert data["and_gate_passed"] is True
+    assert data["signals_confirmed"] == 3

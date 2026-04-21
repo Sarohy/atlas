@@ -3140,3 +3140,214 @@
   font-size: 11px;
   margin: 0;
 }
+
+/* ==========================================================================
+   Framework 8 — Insider Activity Flag
+   ========================================================================== */
+
+/* ── Panel shell ── */
+
+.atlas-f8-panel {
+  min-width: 320px;
+}
+
+/* ── Header ── */
+
+.atlas-f8-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.atlas-f8-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Status chip ── */
+
+.atlas-f8-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f8-chip.is-f8-red {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.atlas-f8-chip.is-f8-green {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.atlas-f8-chip.is-f8-purple {
+  color: #d8b4fe;
+  background: rgba(147, 51, 234, 0.14);
+  border: 1px solid rgba(147, 51, 234, 0.4);
+}
+
+/* ── Stat row ── */
+
+.atlas-f8-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.atlas-f8-stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 5px;
+  padding: 7px 9px;
+}
+
+.atlas-f8-stat-label {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f8-stat-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #7fa8c0;
+}
+
+/* tone overrides on stat values */
+
+.atlas-f8-stat-value.is-f8-red    { color: #fca5a5; }
+.atlas-f8-stat-value.is-f8-green  { color: #86efac; }
+.atlas-f8-stat-value.is-f8-purple { color: #d8b4fe; }
+.atlas-f8-stat-value.is-f8-orange { color: #fb923c; }
+.atlas-f8-stat-value.is-f8-amber  { color: #fbbf24; }
+
+/* ── Main action text ── */
+
+.atlas-f8-action-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 10px 0;
+  margin-bottom: 12px;
+}
+
+.atlas-f8-action-text.is-f8-red    { color: #f87171; }
+.atlas-f8-action-text.is-f8-green  { color: #4ade80; }
+.atlas-f8-action-text.is-f8-purple { color: #c084fc; }
+
+/* ── Rule / info boxes ── */
+
+.atlas-f8-rule-box {
+  border-radius: 5px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  border: 1px solid transparent;
+}
+
+.atlas-f8-rule-box.is-f8-red {
+  background: rgba(239, 68, 68, 0.07);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.atlas-f8-rule-box.is-f8-green {
+  background: rgba(34, 197, 94, 0.07);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.atlas-f8-rule-box.is-f8-purple {
+  background: rgba(147, 51, 234, 0.08);
+  border-color: rgba(147, 51, 234, 0.3);
+}
+
+.atlas-f8-rule-box.is-f8-orange {
+  background: rgba(249, 115, 22, 0.08);
+  border-color: rgba(249, 115, 22, 0.3);
+}
+
+.atlas-f8-rule-box.is-f8-amber {
+  background: rgba(251, 191, 36, 0.07);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.atlas-f8-rule-text {
+  font-size: 0.6rem;
+  line-height: 1.6;
+  color: #7fa8c0;
+  margin: 0;
+}
+
+.atlas-f8-rule-text strong {
+  color: #a8c5d8;
+  font-weight: 600;
+}
+
+.atlas-f8-rule-box.is-f8-red    .atlas-f8-rule-text { color: #fca5a5; }
+.atlas-f8-rule-box.is-f8-green  .atlas-f8-rule-text { color: #86efac; }
+.atlas-f8-rule-box.is-f8-purple .atlas-f8-rule-text { color: #d8b4fe; }
+.atlas-f8-rule-box.is-f8-orange .atlas-f8-rule-text { color: #fdba74; }
+.atlas-f8-rule-box.is-f8-amber  .atlas-f8-rule-text { color: #fde68a; }
+
+.atlas-f8-rule-box.is-f8-red    .atlas-f8-rule-text strong { color: #fecaca; }
+.atlas-f8-rule-box.is-f8-purple .atlas-f8-rule-text strong { color: #e9d5ff; }
+.atlas-f8-rule-box.is-f8-orange .atlas-f8-rule-text strong { color: #fed7aa; }
+.atlas-f8-rule-box.is-f8-amber  .atlas-f8-rule-text strong { color: #fef3c7; }
+
+/* ── Three-filter pipeline legend ── */
+
+.atlas-f8-filter-legend {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.atlas-f8-filter-step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.atlas-f8-filter-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: #3d8baf;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.atlas-f8-filter-desc {
+  font-size: 0.52rem;
+  color: #4b6070;
+  white-space: nowrap;
+}
+
+.atlas-f8-filter-arrow {
+  font-size: 0.5rem;
+  color: #2d3f54;
+}

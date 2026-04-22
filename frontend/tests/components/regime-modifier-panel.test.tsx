@@ -13,7 +13,7 @@ function renderPanel(ticker = 'AAPL') {
   return render(
     <RegimeModifierPanel
       ticker={ticker}
-      geopoliticalState="ACTIVE"
+      geopoliticalState="ACTIVE_RISK"
       onGeopoliticalStateChange={vi.fn()}
     />,
   );
@@ -90,7 +90,7 @@ describe('RegimeModifierPanel', () => {
     mockLoadedRegime();
     renderPanel();
 
-    expect(screen.getByTestId('regime-geopolitical-state')).toHaveTextContent('ACTIVE');
+    expect(screen.getByTestId('regime-geopolitical-state')).toHaveTextContent('ACTIVE RISK');
   });
 
   it('renders the three-state geopolitical toggle inside Framework 2', () => {
@@ -99,7 +99,7 @@ describe('RegimeModifierPanel', () => {
 
     expect(screen.getByRole('button', { name: 'None' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'De-escalating' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Active' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active risk' })).toBeInTheDocument();
   });
 
   it('shows the clear determination summary', () => {
@@ -107,7 +107,7 @@ describe('RegimeModifierPanel', () => {
     renderPanel();
 
     expect(screen.getByTestId('regime-determination')).toHaveTextContent(
-      'Geopolitical flag ACTIVE adds a secondary gate',
+      'Geopolitical flag ACTIVE RISK adds a secondary gate',
     );
   });
 
@@ -137,9 +137,9 @@ function mockLoadedRegime() {
       brent_consecutive_below_95_count: 2,
       brent_price: 97.5,
       determination_text:
-        'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. Geopolitical flag ACTIVE adds a secondary gate, so the displayed regime is SOFT CAUTION.',
+        'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. Geopolitical flag ACTIVE RISK adds a secondary gate, so the displayed regime is SOFT CAUTION.',
       effective_regime: 'SOFT CAUTION',
-      geopolitical_state: 'ACTIVE',
+      geopolitical_state: 'ACTIVE_RISK',
       rule: 'CAUTION',
       vix_value: 27.3,
     },

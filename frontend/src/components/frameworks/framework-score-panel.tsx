@@ -228,7 +228,7 @@ function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreR
           </span>
 
           <div className="atlas-fws-score-summary">
-            <span className="atlas-fws-score-summary-label">Framework score before regime</span>
+            <span className="atlas-fws-score-summary-label">Pre-regime score</span>
             <span className="atlas-fws-score-summary-value" data-testid="fws-base-score-summary">
               {data.final_score}/100
             </span>

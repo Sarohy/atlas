@@ -1,21 +1,25 @@
-"""Pydantic schemas for the F2 Earnings Quality endpoint.
+"""Pydantic schemas for the F2 Earnings Quality endpoint — v7.3.4 flat structure.
 
-Schema field names mirror the Factor_Mapping_Guide §F2 rework:
-  - All indicators carry ``raw_score`` (0-100 pre-weight) and ``score`` (weighted contribution).
-  - ``GuidanceIndicator`` now uses a fixed fallback label/value rather than transcript NLP.
-  - ``BacklogBtbIndicator`` uses a categorical ``backlog_label`` string.
-  - ``MarginTrajectoryIndicator`` exposes ``margin_change_pts`` in percentage points.
-  - Max-score values reflect the internal weights (30/20/20/15/15).
+EarningsResponse (= F2Result) is a single flat model with all sub-factor fields.
+Sub-factors:
+  sf1  Revenue Growth YoY       30%  — decimal input, banded 0-100
+  sf2  Gross Margin Trend       20%  — bps YoY change, banded 0-100
+  sf3  EPS Beat Consistency     20%  — 4Q window; excluded when pre-profitability
+  sf4  Guidance Reliability     15%  — 4Q track record; DATA_GAP default = 10
+  sf5  Forward Visibility       15%  — transcript NLP label, scored 0/30/60/80/100
+
+framework_score_service.py accesses: .data_available, .f2_score, .f2_grade
 """
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 # ---------------------------------------------------------------------------
-# F2 grade literals
+# F2 grade literals (kept for backward-compat — also used by earnings_service)
 # ---------------------------------------------------------------------------
 
 
@@ -30,151 +34,95 @@ class F2Grade:
 
 
 # ---------------------------------------------------------------------------
-# Sub-indicator schemas
-# ---------------------------------------------------------------------------
-
-
-class RevenueGrowthIndicator(BaseModel):
-    """Year-over-year revenue growth and its contribution to the F2 score.
-
-    Weight: 30%  →  max 30 pts contribution.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    yoy_pct: float | None = Field(
-        None,
-        description="YoY quarterly revenue growth (%). Null when data is unavailable.",
-    )
-    raw_score: int | None = Field(
-        None, ge=0, le=100, description="Raw 0-100 score before weighting. Null when AV data is unavailable."
-    )
-    score: int | None = Field(None, ge=0, description="Weighted F2 contribution. Null when excluded via weight rescaling.")
-    max_score: int = Field(default=30)
-
-
-class EpsBeatsIndicator(BaseModel):
-    """EPS-vs-consensus beat count over the last 3 reported quarters.
-
-    Weight: 20%  →  max 20 pts contribution.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    beats_in_3: int | None = Field(
-        None,
-        description="Number of the last 3 quarters where reported EPS beat estimated EPS (0-3).",
-    )
-    quarters_checked: int | None = Field(
-        None,
-        description="How many of the last 3 quarters had sufficient EPS data.",
-    )
-    raw_score: int = Field(
-        ge=0, le=100, description="Raw 0-100 score before weighting."
-    )
-    score: int = Field(ge=0, description="Weighted F2 contribution.")
-    max_score: int = Field(default=20)
-
-
-class GuidanceIndicator(BaseModel):
-    """Fallback guidance signal used in F2.
-
-    Weight: 20%  →  represented as a fixed 10 pt contribution with the label
-    ``NO_DATA_AVAILABLE``.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    guidance_label: str = Field(
-        description="Fixed guidance classification: NO_DATA_AVAILABLE."
-    )
-    transcript_quarter: str | None = Field(
-        None,
-        description="Always null because transcript-driven guidance analysis is disabled.",
-    )
-    raw_score: int | None = Field(
-        default=None, ge=0, le=100, description="Fixed raw fallback score (50)."
-    )
-    score: int | None = Field(default=None, ge=0, description="Fixed weighted F2 contribution (10).")
-    max_score: int = Field(default=20)
-
-
-class BacklogBtbIndicator(BaseModel):
-    """Backlog / forward visibility derived from the earnings-call transcript.
-
-    Weight: 15%  →  max 15 pts contribution.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    backlog_label: str = Field(
-        description=(
-            "Backlog classification: EXPLICIT_MULTI_QUARTER | STRONG | LIMITED | NO_COMMENTARY"
-        )
-    )
-    raw_score: int = Field(
-        ge=0, le=100, description="Raw 0-100 score before weighting."
-    )
-    score: int = Field(ge=0, description="Weighted F2 contribution.")
-    max_score: int = Field(default=15)
-
-
-class MarginTrajectoryIndicator(BaseModel):
-    """Gross-margin trend derived from the last 3 reported quarterly income statements.
-
-    Weight: 15%  →  max 15 pts contribution.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    gross_margins: list[float] = Field(
-        default_factory=list,
-        description="Gross-margin (%) values for the last 3 quarters (oldest first).",
-    )
-    margin_change_pts: float | None = Field(
-        None,
-        description=(
-            "Gross-margin change in percentage points (most recent minus oldest in window). "
-            "Positive = expanding, negative = contracting. Null when insufficient data."
-        ),
-    )
-    raw_score: int = Field(
-        ge=0, le=100, description="Raw 0-100 score before weighting."
-    )
-    score: int = Field(ge=0, description="Weighted F2 contribution.")
-    max_score: int = Field(default=15)
-
-
-# ---------------------------------------------------------------------------
-# Top-level response schema
+# Flat top-level response schema — v7.3.4
 # ---------------------------------------------------------------------------
 
 
 class EarningsResponse(BaseModel):
-    """Complete F2 Earnings Quality analysis for a single ticker."""
+    """Complete F2 Earnings Quality result for a single ticker (v7.3.4 flat layout)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     ticker: str = Field(description="Ticker symbol (upper-case).")
-    revenue_growth: RevenueGrowthIndicator
-    eps_beats: EpsBeatsIndicator
-    guidance: GuidanceIndicator
-    margin_trajectory: MarginTrajectoryIndicator
-    backlog_btb: BacklogBtbIndicator
-    f2_score: int = Field(ge=0, le=100, description="Composite F2 Earnings Quality score (0-100).")
-    f2_grade: str = Field(
-        description="F2 grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID"
+
+    # Sub-factor 1 — Revenue Growth YoY (weight 30%)
+    sf1_revenue_growth_pct: float | None = Field(
+        None, description="YoY revenue growth as percentage (e.g. 29.0 for +29%)."
+    )
+    sf1_score: float = Field(ge=0, le=100, description="sf1 raw 0-100 score.")
+
+    # Sub-factor 2 — Gross Margin Trend (weight 20%)
+    sf2_gross_margin_trend_bps: float | None = Field(
+        None, description="YoY gross margin change in basis points (positive = expanding)."
+    )
+    sf2_score: float = Field(ge=0, le=100, description="sf2 raw 0-100 score.")
+
+    # Sub-factor 3 — EPS Beat Consistency 4Q (weight 20%; excluded when pre-profit)
+    sf3_eps_beats: int | None = Field(
+        None, description="Number of EPS beats in last 4Q (None when excluded)."
+    )
+    sf3_quarters_available: int = Field(
+        ge=0, description="Quarters of EPS data available (max 4)."
+    )
+    sf3_score: float | None = Field(
+        None, ge=0, le=100,
+        description="sf3 raw 0-100 score; None when excluded (pre-profitability)."
+    )
+    sf3_excluded: bool = Field(
+        default=False, description="True when sf3 is excluded due to pre-profitability."
+    )
+
+    # Sub-factor 4 — Guidance Reliability 4Q (weight 15%)
+    sf4_guidance_delivered: int | None = Field(
+        None, description="Number of quarters guidance was delivered/met (0-4). None = DATA_GAP."
+    )
+    sf4_score: float = Field(ge=0, le=100, description="sf4 raw 0-100 score (10 when DATA_GAP).")
+    sf4_data_gap: bool = Field(
+        default=False,
+        description="True when Bloomberg guidance data is unavailable; sf4 defaults to 10."
+    )
+
+    # Sub-factor 5 — Forward Visibility (weight 15%)
+    sf5_forward_visibility_label: str = Field(
+        description="Forward visibility label: SPECIFIC_RAISED | SPECIFIC_MAINTAINED | DIRECTIONAL | VAGUE_NONE | WITHDRAWN_REDUCED."
+    )
+    sf5_score: float = Field(ge=0, le=100, description="sf5 score (0/30/60/80/100).")
+
+    # F2 composite
+    f2_raw: float = Field(ge=0, le=100, description="Weighted composite F2 score (0-100 float).")
+    f2_contribution: float = Field(description="f2_raw × 0.25 — F2's contribution to overall conviction score.")
+    f2_score: int = Field(ge=0, le=100, description="f2_raw rounded to integer for display.")
+    f2_grade: str = Field(description="Grade: STRONG BUY | BUY | NEUTRAL | WEAK | AVOID.")
+
+    # Flags
+    pre_profit_status: bool = Field(default=False, description="True when net_income_ttm < 0.")
+    pre_profit_reweighted: bool = Field(
+        default=False, description="True when pre-profit re-weighting was applied (sf3 excluded)."
+    )
+    data_gap_applied: bool = Field(
+        default=False, description="True when DATA_GAP default was applied to sf4."
+    )
+    guidance_concern: bool = Field(
+        default=False, description="True when both sf4_score == 0 and sf5_score == 0."
+    )
+    exit_flag: bool = Field(
+        default=False,
+        description="True when revenue_growth < 0 and price is >20% above analyst target."
+    )
+    limited_history: bool = Field(
+        default=False, description="True when fewer than 4Q of EPS data were available."
+    )
+    ipo_limited_history: bool = Field(
+        default=False, description="True when eps_quarters_available < 4 (IPO / young company)."
     )
     data_available: bool = Field(
         default=True,
-        description="False when Alpha Vantage returned no data (rate-limited); scores are fallback-only.",
+        description="False when all data sources returned no data."
     )
     is_pre_profitability: bool = Field(
         default=False,
-        description=(
-            "True when the ticker is classified as a pre-profitability growth name "
-            "(negative EPS + revenue growth >20% YoY). When True, growth-trajectory "
-            "sub-factors (revenue + guidance) are weighted at 60% and profitability "
-            "sub-factors (EPS beat + margin + backlog) at 40%."
-        ),
+        description="Alias for pre_profit_status (for backward compat with framework_score_service)."
     )
+
+    # Full breakdown dict for transparency
+    breakdown: dict[str, Any] = Field(default_factory=dict, description="Detailed per-sub-factor breakdown.")

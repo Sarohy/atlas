@@ -29,6 +29,7 @@ All tranches return None when cap_active is True.
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Final
 
@@ -38,6 +39,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from atlas.models.portfolio_config import PORTFOLIO_CONFIG_ROW_ID, PortfolioConfig
 from atlas.models.ticker import Ticker
 from atlas.schemas.tranche_sizing import SignalDetail, TrancheSizingResponse
+from atlas.services.framework13_service import is_beta_capped
+from atlas.services.regime_modifier_service import get_geo_flag_current
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Output constants
@@ -58,6 +63,9 @@ _CONCENTRATION_CAP_THRESHOLD: Final[float] = 0.08
 
 # AND gate: 3 of 5 capitulation signals required per Framework 29.
 _AND_GATE_THRESHOLD: Final[int] = 3
+
+# T2 Brent gate: T2 unlocks when Brent crude is below $110.
+_T2_BRENT_THRESHOLD: Final[float] = 110.0
 
 # ---------------------------------------------------------------------------
 # Regime rule sentinels
@@ -113,6 +121,73 @@ def _set_t1_fired(ticker: str, value: bool) -> None:
 def reset_t1_fired_store() -> None:
     """Clear the T1 fired store. Call between tests to prevent state leakage."""
     _t1_fired_store.clear()
+
+
+# ---------------------------------------------------------------------------
+# In-memory T2 persistence stub (swap for Redis in production).
+# T2 is auto-triggered by price condition (Framework 17).
+# Key pattern: f4_t2_fired:{TICKER}
+# ---------------------------------------------------------------------------
+
+_t2_fired_store: dict[str, bool] = {}
+
+
+def _get_t2_fired(ticker: str) -> bool:
+    """Read T2 fired state from the in-memory stub. Returns False by default."""
+    return _t2_fired_store.get(f"f4_t2_fired:{ticker.upper()}", False)
+
+
+def _set_t2_fired(ticker: str, value: bool) -> None:
+    """Write T2 fired state to the in-memory stub."""
+    _t2_fired_store[f"f4_t2_fired:{ticker.upper()}"] = value
+
+
+def fire_t2_tranche(ticker: str) -> None:
+    """Confirm the T2 deployment order for a ticker.
+
+    Called by the POST /tranche-sizing/{ticker}/confirm-t2 endpoint when the
+    operator confirms the auto-triggered T2 modal (Framework 17).
+    """
+    _set_t2_fired(ticker.strip().upper(), True)
+
+
+def reset_t2_fired_store() -> None:
+    """Clear the T2 fired store. Call between tests to prevent state leakage."""
+    _t2_fired_store.clear()
+
+
+# ---------------------------------------------------------------------------
+# In-memory T3 persistence stub (swap for Redis in production).
+# T3 is auto-triggered by CLEAR regime + AND gate condition (Framework 17).
+# Key pattern: f4_t3_fired:{TICKER}
+# ---------------------------------------------------------------------------
+
+_t3_fired_store: dict[str, bool] = {}
+
+
+def _get_t3_fired(ticker: str) -> bool:
+    """Read T3 fired state from the in-memory stub. Returns False by default."""
+    return _t3_fired_store.get(f"f4_t3_fired:{ticker.upper()}", False)
+
+
+def _set_t3_fired(ticker: str, value: bool) -> None:
+    """Write T3 fired state to the in-memory stub."""
+    _t3_fired_store[f"f4_t3_fired:{ticker.upper()}"] = value
+
+
+def fire_t3_tranche(ticker: str) -> None:
+    """Confirm the T3 deployment order for a ticker.
+
+    Called by the POST /tranche-sizing/{ticker}/confirm-t3 endpoint when the
+    operator confirms the auto-triggered T3 modal (Framework 17).
+    """
+    _set_t3_fired(ticker.strip().upper(), True)
+
+
+def reset_t3_fired_store() -> None:
+    """Clear the T3 fired store. Call between tests to prevent state leakage."""
+    _t3_fired_store.clear()
+
 
 # ---------------------------------------------------------------------------
 # Framework 14 interface (read-only from Framework 4's perspective)
@@ -183,12 +258,14 @@ def _compute_t1(initial_catalyst: str) -> str:
     return _T1_VALUE if initial_catalyst.strip().lower() == "yes" else _BLOCKED
 
 
-def _compute_t2(regime_rule: str) -> str:
-    """Return T2 value when the Framework 2 regime is CAUTION.
+def _compute_t2(brent_price: float | None) -> str:
+    """Return T2 value when Brent crude is below $110 (T2 Brent gate).
 
     Pure function - no I/O, no side effects.
     """
-    return _T2_VALUE if regime_rule.strip().upper() == _REGIME_CAUTION else _BLOCKED
+    if brent_price is None:
+        return _BLOCKED
+    return _T2_VALUE if brent_price < _T2_BRENT_THRESHOLD else _BLOCKED
 
 
 def _compute_t3(regime_rule: str, and_gate_passed: bool) -> str:
@@ -241,6 +318,9 @@ def compute_tranche_sizing(
     position_weight: float = 0.0,
     signals_count_override: int | None = None,
     t1_fired_override: bool | None = None,
+    brent_consecutive_below_95_count: int = 0,
+    geopolitical_state: str = "NONE",
+    brent_price: float | None = None,
 ) -> TrancheSizingResponse:
     """Compute the Framework 4 tranche-sizing result (v7.4).
 
@@ -263,10 +343,20 @@ def compute_tranche_sizing(
     signals_count_override:
         Override the count of confirmed AND gate signals. When provided, the
         first N signals are treated as confirmed and the remainder as pending.
-        When ``None``, reads from the Framework 29 in-memory stub.
+        When ``None``, reads from the Framework 29 in-memory stub and
+        auto-detects signals 2 and 5 from live data.
     t1_fired_override:
         Override the T1 fired state from the persistence store. When provided,
         the store is not consulted or modified. Intended for testing only.
+    brent_consecutive_below_95_count:
+        Number of consecutive Brent closes below $95. Used to auto-detect
+        signal 2 of the AND gate (>= 2 closes confirms the signal).
+    geopolitical_state:
+        Current geopolitical state string (e.g. ``"RESOLVED"``). Used to
+        auto-detect signal 5 of the AND gate.
+    brent_price:
+        Current Brent crude price in USD per barrel. T2 unlocks when
+        ``brent_price < 110`` and T1 has already fired.
     """
     normalised = ticker.strip().upper()
 
@@ -295,9 +385,47 @@ def compute_tranche_sizing(
             t3=None,
             t4=None,
             t1_fired=False,
+            t2_fired=False,
+            t2_pending=False,
+            t3_fired=False,
+            t3_pending=False,
         )
 
-    # Step 2: Determine AND gate state (Framework 29).
+    # Step 2: Check Framework 13 beta cap.
+    beta_check = is_beta_capped(normalised, position_weight)
+    if beta_check["cap_active"]:
+        beta_val: float = beta_check["beta"]  # type: ignore[assignment]
+        cap_limit_pct: float = beta_check["cap_limit_pct"]  # type: ignore[assignment]
+        effective_exp: float = beta_check["effective_exposure"]  # type: ignore[assignment]
+        beta_msg = (
+            f"Adds blocked by beta cap — tranche sizing N/A\n"
+            f"Beta: {beta_val} | Max: {cap_limit_pct:.1f}% NAV\n"
+            f"Effective exposure: {effective_exp:.2f}%"
+        )
+        return TrancheSizingResponse(
+            ticker=normalised,
+            cap_active=False,
+            beta_cap_active=True,
+            beta_cap_reason=str(beta_check["cap_reason"]),
+            tranche_display=False,
+            position_weight=position_weight,
+            message=beta_msg,
+            and_gate_active=False,
+            and_gate_passed=False,
+            signals_confirmed=0,
+            signals_detail=_build_signal_details([False] * 5),
+            t1=None,
+            t2=None,
+            t3=None,
+            t4=None,
+            t1_fired=False,
+            t2_fired=False,
+            t2_pending=False,
+            t3_fired=False,
+            t3_pending=False,
+        )
+
+    # Step 3: Determine AND gate state (Framework 29).
     regime_normalised = regime_rule.strip().upper()
     and_gate_active = regime_normalised == _REGIME_CLEAR
 
@@ -307,6 +435,28 @@ def compute_tranche_sizing(
             signals: list[bool] = [i < count for i in range(5)]
         else:
             signals = get_and_gate_signals(normalised)
+            # Auto-detect signal 2: Brent second consecutive close below $95
+            signals[1] = brent_consecutive_below_95_count >= 2
+            # Auto-detect signal 5: geopolitical flag = RESOLVED.
+            # Priority: query param → in-memory store written by Framework 2.
+            # Bytes are already decoded (string param); strip + uppercase guard.
+            geo_upper = geopolitical_state.strip().upper()
+            if geo_upper == "NONE":
+                # Fall back to the shared store set by Framework 2's regime eval.
+                stored = get_geo_flag_current()
+                if stored != "NONE":
+                    geo_upper = stored
+            signals[4] = geo_upper == "RESOLVED"
+            logger.debug(
+                "signal_5_detection",
+                extra={
+                    "geo_param": geopolitical_state,
+                    "geo_normalised": geo_upper,
+                    "signal_5_confirmed": signals[4],
+                    "brent_consecutive": brent_consecutive_below_95_count,
+                    "signal_2_confirmed": signals[1],
+                },
+            )
             count = sum(1 for s in signals if s)
 
         and_gate_passed = count >= _AND_GATE_THRESHOLD
@@ -319,22 +469,30 @@ def compute_tranche_sizing(
 
     # Step 3: Determine T1 fired state, then apply sequential gate.
     # The override takes precedence over the persistence store (testing only).
-    t1_fired = (
-        t1_fired_override if t1_fired_override is not None else _get_t1_fired(normalised)
-    )
+    t1_fired = t1_fired_override if t1_fired_override is not None else _get_t1_fired(normalised)
 
     # T1 is always derived from the fired state (not re-evaluated from catalyst).
     t1 = _T1_VALUE if t1_fired else _BLOCKED
 
     # Sequential gate: T2/T3/T4 are blocked until T1 fires.
     if t1_fired:
-        t2 = _compute_t2(regime_rule)
+        t2 = _compute_t2(brent_price)
         t3 = _compute_t3(regime_rule, and_gate_passed)
         t4 = _compute_t4(iran_resolution)
     else:
         t2 = _BLOCKED
         t3 = _BLOCKED
         t4 = _BLOCKED
+
+    # Step 4: Determine T2/T3 auto-trigger pending and fired states (Framework 17).
+    # T2 and T3 are auto-triggered — the operator confirms the order, not the trigger.
+    t2_fired = _get_t2_fired(normalised)
+    t2_conditions_met = t2 == _T2_VALUE
+    t2_pending = t2_conditions_met and not t2_fired
+
+    t3_fired = _get_t3_fired(normalised)
+    t3_conditions_met = t3 == _T3_VALUE
+    t3_pending = t3_conditions_met and not t3_fired
 
     return TrancheSizingResponse(
         ticker=normalised,
@@ -351,4 +509,9 @@ def compute_tranche_sizing(
         t3=t3,
         t4=t4,
         t1_fired=t1_fired,
+        t2_fired=t2_fired,
+        t2_pending=t2_pending,
+        t3_fired=t3_fired,
+        t3_pending=t3_pending,
+        catalyst_confirmed=t1_fired,
     )

@@ -36,14 +36,26 @@ class TrancheSizingResponse(BaseModel):
         description="True when position weight >= 8% NAV (concentration cap active)."
     )
     tranche_display: bool = Field(
-        description="False when concentration cap suppresses all tranche rows."
+        description=(
+            "False when any cap (F14 concentration or F13 beta) suppresses all tranche rows."
+        )
     )
     position_weight: float = Field(
         description="Current position weight as a fraction of NAV (e.g. 0.136 = 13.6%)."
     )
     message: str | None = Field(
         default=None,
-        description="Human-readable status message; set when cap is active.",
+        description="Human-readable status message; set when a cap is active.",
+    )
+
+    # Beta cap (Framework 13)
+    beta_cap_active: bool = Field(
+        default=False,
+        description="True when Framework 13 beta cap is active for this position.",
+    )
+    beta_cap_reason: str | None = Field(
+        default=None,
+        description="Human-readable reason when beta_cap_active is True.",
     )
 
     # AND gate (Framework 29 stub)
@@ -94,5 +106,49 @@ class TrancheSizingResponse(BaseModel):
         description=(
             "True when T1 has fired for this ticker. "
             "T2/T3/T4 are blocked by the sequential gate until T1 fires."
+        ),
+    )
+
+    # T2 confirmation state (Framework 17 — auto-triggered by price condition)
+    t2_fired: bool = Field(
+        default=False,
+        description=(
+            "True when the operator has confirmed the T2 deployment order. "
+            "Set via POST /tranche-sizing/{ticker}/confirm-t2."
+        ),
+    )
+    t2_pending: bool = Field(
+        default=False,
+        description=(
+            "True when T2 conditions are met (T1 fired + Brent < $110) but the "
+            "operator has not yet confirmed the deployment order. "
+            "Signals the UI to surface the auto-trigger confirmation modal."
+        ),
+    )
+
+    # T3 confirmation state (Framework 17 — auto-triggered by AND gate)
+    t3_fired: bool = Field(
+        default=False,
+        description=(
+            "True when the operator has confirmed the T3 deployment order. "
+            "Set via POST /tranche-sizing/{ticker}/confirm-t3."
+        ),
+    )
+    t3_pending: bool = Field(
+        default=False,
+        description=(
+            "True when T3 conditions are met (CLEAR regime + AND gate passed) but the "
+            "operator has not yet confirmed the deployment order. "
+            "Signals the UI to surface the auto-trigger confirmation modal."
+        ),
+    )
+
+    # Single source of truth for CATALYST display (same value as t1_fired).
+    # Both the CATALYST header and T1 row in the UI must read this field.
+    catalyst_confirmed: bool = Field(
+        default=False,
+        description=(
+            "True when T1 has fired for this ticker. "
+            "Mirrors t1_fired — single source of truth for the CATALYST header display."
         ),
     )

@@ -2383,6 +2383,7 @@
 /* Tranche panel needs more horizontal room (4 labels, value + reason column). */
 .atlas-tranche-panel {
   flex: 1 1 calc(50% - 7px);
+  position: relative; /* contains the Framework 17 auto-trigger modal backdrop */
 }
 
 /* Removed: max-width cap was only needed when secondary row held one panel.
@@ -2926,6 +2927,151 @@
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.44rem;
   color: #334155;
+  letter-spacing: 0.02em;
+}
+
+/* T1 FIRED chip — green badge shown once T1 has fired. */
+.atlas-tranche-fired-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+/* T2 ELIGIBLE chip — kept for reference; superseded by auto-trigger modal. */
+.atlas-tranche-eligible-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+/* CONFIRMING chip — amber badge shown while auto-trigger modal is open. */
+.atlas-tranche-pending-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Auto-trigger confirmation modal (Framework 17). */
+.atlas-tranche-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.80);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  z-index: 10;
+}
+
+.atlas-tranche-modal {
+  background: #0d1117;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+  padding: 16px 20px;
+  width: min(320px, 90%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.atlas-tranche-modal-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f59e0b;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.atlas-tranche-modal-trigger {
+  font-size: 0.62rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.atlas-tranche-modal-amount {
+  font-size: 0.65rem;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.atlas-tranche-modal-amount strong {
+  color: #f8fafc;
+}
+
+.atlas-tranche-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.atlas-tranche-modal-confirm {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.atlas-tranche-modal-confirm:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.atlas-tranche-modal-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.atlas-tranche-modal-override {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.atlas-tranche-modal-override:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.atlas-tranche-modal-override:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Secondary size-range text displayed below the FIRED chip for T1. */
+.atlas-tranche-size-range {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #475569;
   letter-spacing: 0.02em;
 }
 
@@ -4083,4 +4229,202 @@
   font-size: 0.58rem;
   line-height: 1.55;
   color: #5a7a94;
+}
+
+/* ============================================================
+   Framework 13 — Beta-Adjusted Portfolio Management
+   ============================================================ */
+
+.atlas-f13-panel {
+  min-width: 300px;
+}
+
+/* ── Header ── */
+
+.atlas-f13-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid #1c2d3e;
+}
+
+.atlas-f13-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Status chip ── */
+
+.atlas-f13-chip {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.atlas-f13-chip.is-f13-grey     { background: #1e2e3f; color: #6b8a9a; }
+.atlas-f13-chip.is-f13-amber    { background: #2d2010; color: #fbbf24; }
+.atlas-f13-chip.is-f13-red      { background: #2d1010; color: #fca5a5; }
+.atlas-f13-chip.is-f13-critical { background: #3d1010; color: #ff6b6b; border: 1px solid #7f2020; }
+
+/* ── Stats row ── */
+
+.atlas-f13-stats-row {
+  display: flex;
+  gap: 0;
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid #1c2d3e;
+}
+
+.atlas-f13-stat-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.atlas-f13-stat-cell + .atlas-f13-stat-cell {
+  border-left: 1px solid #1c2d3e;
+  padding-left: 10px;
+}
+
+.atlas-f13-stat-label {
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #3a5570;
+}
+
+.atlas-f13-stat-value {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #c8d8e8;
+  font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+}
+
+.atlas-f13-stat-value.is-f13-amber   { color: #fbbf24; }
+.atlas-f13-stat-value.is-f13-red     { color: #fca5a5; }
+.atlas-f13-stat-value.is-f13-green   { color: #86efac; }
+
+/* ── Beta bar ── */
+
+.atlas-f13-bar-section {
+  padding: 8px 14px 4px;
+  border-bottom: 1px solid #1c2d3e;
+}
+
+.atlas-f13-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.atlas-f13-bar-label {
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #3a5570;
+}
+
+.atlas-f13-bar-pct {
+  font-size: 0.55rem;
+  color: #5a7a94;
+  font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+}
+
+.atlas-f13-bar-track {
+  position: relative;
+  height: 6px;
+  background: #0f1f2e;
+  border-radius: 3px;
+  overflow: visible;
+}
+
+.atlas-f13-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #2a4d6e;
+  transition: width 0.3s ease;
+}
+
+.atlas-f13-bar-fill.is-f13-red {
+  background: #7f2020;
+}
+
+.atlas-f13-bar-cap-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: #fbbf24;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+/* ── Exposure note ── */
+
+.atlas-f13-exposure-note {
+  padding: 6px 14px;
+  font-size: 0.55rem;
+  color: #5a7a94;
+  line-height: 1.5;
+  border-bottom: 1px solid #1c2d3e;
+}
+
+/* ── Sizing tier ── */
+
+.atlas-f13-tier-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 14px;
+  border-bottom: 1px solid #1c2d3e;
+}
+
+.atlas-f13-tier-label {
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #3a5570;
+}
+
+.atlas-f13-tier-value {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: #c8d8e8;
+}
+
+/* ── Alerts ── */
+
+.atlas-f13-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 14px 8px;
+}
+
+.atlas-f13-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  font-size: 0.55rem;
+  line-height: 1.45;
+}
+
+.atlas-f13-alert.is-f13-red   { background: #1a0a0a; color: #fca5a5; }
+.atlas-f13-alert.is-f13-amber { background: #1a1000; color: #fbbf24; }
+.atlas-f13-alert.is-f13-muted { background: #0f1c28; color: #5a7a94; }
+
+.atlas-f13-alert-icon {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  margin-top: 1px;
 }

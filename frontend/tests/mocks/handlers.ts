@@ -487,6 +487,10 @@ export const handlers = [
     const iranResolution = url.searchParams.get('iran_resolution');
     const positionWeightOverride = url.searchParams.get('position_weight_override');
     const signalsCountOverride = url.searchParams.get('signals_count_override');
+    const brentConsecutive = parseInt(url.searchParams.get('brent_consecutive_below_95_count') ?? '0', 10);
+    const geoState = (url.searchParams.get('geopolitical_state') ?? 'NONE').toUpperCase();
+    const brentPriceParam = url.searchParams.get('brent_price');
+    const brentPrice = brentPriceParam !== null ? parseFloat(brentPriceParam) : null;
 
     // Determine position weight: override > known caps > default 0
     const CAP_WEIGHTS: Record<string, number> = { MU: 0.136, TSM: 0.117, COHR: 0.095 };
@@ -514,6 +518,10 @@ export const handlers = [
         signals_confirmed: 0,
         signals_detail: emptySignals,
         t1_fired: false,
+        t2_fired: false,
+        t2_pending: false,
+        t3_fired: false,
+        t3_pending: false,
         t1: null,
         t2: null,
         t3: null,
@@ -523,8 +531,13 @@ export const handlers = [
 
     // Determine AND gate
     const andGateActive = regimeRule === 'CLEAR';
-    const signalsCount =
-      signalsCountOverride !== null ? parseInt(signalsCountOverride, 10) : 0;
+    let signalsCount = signalsCountOverride !== null ? parseInt(signalsCountOverride, 10) : 0;
+    if (signalsCountOverride === null) {
+      // Auto-detect signal 2 (Brent consecutive) and signal 5 (geo RESOLVED)
+      const sig2 = brentConsecutive >= 2 ? 1 : 0;
+      const sig5 = geoState === 'RESOLVED' ? 1 : 0;
+      signalsCount = sig2 + sig5;
+    }
     const andGatePassed = andGateActive && signalsCount >= 3;
     const signals = Array.from({ length: 5 }, (_, i) => ({
       signal_index: i + 1,
@@ -534,6 +547,10 @@ export const handlers = [
 
     // Sequential gate: T2/T3/T4 blocked until T1 fires.
     const t1Fired = initialCatalyst === 'yes';
+    const t2Value = t1Fired && brentPrice !== null && brentPrice < 110 ? '20-25% of available cash' : 'Blocked';
+    const t3Value = t1Fired && andGatePassed ? '30-40% of available cash' : 'Blocked';
+    const t2Conditions = t2Value !== 'Blocked';
+    const t3Conditions = t3Value !== 'Blocked';
 
     return HttpResponse.json({
       ticker,
@@ -546,12 +563,27 @@ export const handlers = [
       signals_confirmed: andGateActive ? signalsCount : 0,
       signals_detail: signals,
       t1_fired: t1Fired,
+      t2_fired: false,
+      t2_pending: t2Conditions,
+      t3_fired: false,
+      t3_pending: t3Conditions,
+      catalyst_confirmed: t1Fired,
       t1: t1Fired ? '10-15% of available cash' : 'Blocked',
-      t2: t1Fired && regimeRule === 'CAUTION' ? '20-25% of available cash' : 'Blocked',
-      t3: t1Fired && andGatePassed ? '30-40% of available cash' : 'Blocked',
+      t2: t2Value,
+      t3: t3Value,
       t4:
         t1Fired && iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
     });
+  }),
+
+  // ── Tranche sizing confirm T2 ─────────────────────────────────────────────
+  http.post(`${BASE}/api/v1/tranche-sizing/:ticker/confirm-t2`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ── Tranche sizing confirm T3 ─────────────────────────────────────────────
+  http.post(`${BASE}/api/v1/tranche-sizing/:ticker/confirm-t3`, () => {
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ── Framework Score ───────────────────────────────────────────────────────
@@ -643,6 +675,73 @@ export const handlers = [
       trim_recommended: true,
       message:
         `${ticker} is grandfathered above the 8% soft cap. No new adds. Monitor expiry threshold.`,
+    });
+  }),
+
+  // ── Framework 13 — Beta-Adjusted Portfolio Management ────────────────────
+  http.get(`${BASE}/api/v1/framework13/portfolio/beta`, () => {
+    return HttpResponse.json({
+      weighted_avg_beta: 1.82,
+      effective_beta: 1.62,
+      cash_percentage: 0.11,
+      target_beta: 1.75,
+      beta_status: 'NORMAL',
+      warning_level: 'NONE',
+      warning_message: null,
+      position_betas: [
+        { ticker: 'AAOI', weight: 0.005, beta: 4.03, contribution: 0.02015, source: 'CONFIRMED' },
+        { ticker: 'MU',   weight: 0.030, beta: 1.65, contribution: 0.0495, source: 'CONFIRMED' },
+      ],
+    });
+  }),
+
+  http.get(`${BASE}/api/v1/framework13/:ticker`, ({ params, request }) => {
+    const ticker = String(params['ticker'] ?? '').toUpperCase();
+    const url = new URL(request.url);
+    const positionWeight = parseFloat(url.searchParams.get('position_weight_override') ?? '0.01');
+
+    // Hardcoded confirmed beta table — mirrors backend service
+    const CONFIRMED_BETAS: Record<string, number> = {
+      AAOI: 4.03, CRDO: 2.67, UCTT: 2.00, MRVL: 1.98, VICR: 1.95,
+      TTMI: 1.95, NBIS: 1.90, SNDK: 1.85, LITE: 1.80, COHR: 1.75,
+      AEHR: 1.75, MU: 1.65, CIEN: 1.55, TSM: 1.30, FN: 2.70,
+      TSEM: 0.82, NEM: 0.55,
+    };
+
+    const isChina = ticker === 'GCT';
+    const beta = CONFIRMED_BETAS[ticker] ?? 1.0;
+    const betaSource = CONFIRMED_BETAS[ticker] !== undefined ? 'CONFIRMED' : 'DEFAULT';
+
+    let capLimitPct: number;
+    let sizingTier: string;
+    if (isChina) { capLimitPct = 0.25; sizingTier = 'CHINA_RISK'; }
+    else if (beta >= 3.0) { capLimitPct = 1.0; sizingTier = 'AAOI_TYPE_HIGH_BETA'; }
+    else if (beta >= 2.0) { capLimitPct = 1.0; sizingTier = 'VERY_HIGH_BETA'; }
+    else if (beta >= 1.5) { capLimitPct = 2.5; sizingTier = 'HIGH_BETA'; }
+    else if (beta >= 1.0) { capLimitPct = 5.0; sizingTier = 'MODERATE_BETA'; }
+    else { capLimitPct = 5.0; sizingTier = 'LOW_BETA'; }
+
+    const betaCapActive = positionWeight >= capLimitPct / 100;
+    const effectiveExposurePct = parseFloat((positionWeight * beta * 100).toFixed(2));
+
+    return HttpResponse.json({
+      ticker,
+      beta,
+      beta_source: betaSource,
+      position_weight_pct: parseFloat((positionWeight * 100).toFixed(2)),
+      position_dollars: 0,
+      effective_exposure_pct: effectiveExposurePct,
+      effective_exposure_note:
+        `${(positionWeight * 100).toFixed(1)}% position × beta ${beta} = ${effectiveExposurePct.toFixed(2)}% effective exposure`,
+      beta_cap_active: betaCapActive,
+      beta_cap_limit_pct: capLimitPct,
+      beta_cap_reason: betaCapActive ? `Beta ${beta} — cap at ${capLimitPct}%` : null,
+      sizing_tier: sizingTier,
+      max_weight_pct: capLimitPct,
+      adds_permitted: !betaCapActive,
+      warning_level: betaCapActive ? 'RED' : 'NONE',
+      warning_message: betaCapActive ? `Beta cap active — max ${capLimitPct}% NAV` : null,
+      beta_source_flag: betaSource === 'DEFAULT',
     });
   }),
 ];

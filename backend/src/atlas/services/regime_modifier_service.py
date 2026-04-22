@@ -455,6 +455,43 @@ def _compute_regime_output(
 
 
 # ---------------------------------------------------------------------------
+# In-memory geo flag store (swap for Redis in production).
+# Key: geo_flag:current — shared between Framework 2 (writes) and
+# Framework 4 (reads) so signal 5 detection is self-contained on the backend.
+# Default: "NONE" when no state has been recorded.
+# ---------------------------------------------------------------------------
+
+_geo_flag_current: str = "NONE"
+
+
+def get_geo_flag_current() -> str:
+    """Read the current geopolitical flag from the in-memory store.
+
+    Returns ``"NONE"`` by default when no flag has been set.
+    Pure read — no side effects.
+    """
+    return _geo_flag_current
+
+
+def set_geo_flag_current(state: str) -> None:
+    """Write the current geopolitical flag to the in-memory store.
+
+    Called by the regime modifier endpoint whenever a request is processed.
+    """
+    global _geo_flag_current
+    _geo_flag_current = state.strip().upper()
+
+
+def reset_geo_flag_current() -> None:
+    """Reset the geo flag store to ``"NONE"``.
+
+    Call between tests to prevent state leakage.
+    """
+    global _geo_flag_current
+    _geo_flag_current = "NONE"
+
+
+# ---------------------------------------------------------------------------
 # Service class — orchestrates Polygon fetches + FW score + rule application
 # ---------------------------------------------------------------------------
 
@@ -619,6 +656,10 @@ class RegimeModifierService:
         trigger_logic = _get_trigger_logic(rule)
         modifier_reason = _get_modifier_reason(rule, geopolitical_state)
         cash_floor_pct = _get_cash_floor(rule)
+
+        # Persist the geo flag so Framework 4 can read it without needing
+        # the frontend to re-send the value on the tranche-sizing request.
+        set_geo_flag_current(str(geopolitical_state))
 
         return RegimeModifierResponse(
             ticker=ticker,

@@ -33,6 +33,12 @@ export const trancheSizingResponseSchema = z.object({
   /** Human-readable status message; present when cap is active. */
   message: z.string().nullable(),
 
+  // Beta cap (Framework 13)
+  /** True when Framework 13 beta cap is active for this position. */
+  beta_cap_active: z.boolean().default(false),
+  /** Human-readable reason when beta cap is active. */
+  beta_cap_reason: z.string().nullable().default(null),
+
   // AND gate (Framework 29)
   /** True when regime is CLEAR - AND gate applies to T3 and large decisions. */
   and_gate_active: z.boolean(),
@@ -55,6 +61,22 @@ export const trancheSizingResponseSchema = z.object({
 
   /** True when T1 has fired for this ticker. T2/T3/T4 are blocked until T1 fires. */
   t1_fired: z.boolean(),
+
+  /** True when operator has confirmed the T2 deployment order (Framework 17). */
+  t2_fired: z.boolean(),
+  /** True when T2 conditions are met (T1 fired + Brent < $110) but not yet confirmed. */
+  t2_pending: z.boolean(),
+
+  /** True when operator has confirmed the T3 deployment order (Framework 17). */
+  t3_fired: z.boolean(),
+  /** True when T3 conditions are met (CLEAR + AND gate) but not yet confirmed. */
+  t3_pending: z.boolean(),
+
+  /**
+   * Single source of truth for CATALYST header display.
+   * Same value as t1_fired — both the header and T1 row must read this field.
+   */
+  catalyst_confirmed: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------

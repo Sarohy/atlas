@@ -40,7 +40,7 @@ async def test_invalid_initial_catalyst_returns_422(client: AsyncClient) -> None
 
 async def test_response_contains_all_v734_fields(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     data = response.json()
@@ -65,7 +65,7 @@ async def test_response_contains_all_v734_fields(client: AsyncClient) -> None:
 
 async def test_signals_detail_has_5_entries(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     data = response.json()
@@ -79,7 +79,7 @@ async def test_signals_detail_has_5_entries(client: AsyncClient) -> None:
 
 async def test_t1_active_when_catalyst_yes(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=yes&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=yes&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t1"] == "10-15% of available cash"
@@ -87,7 +87,7 @@ async def test_t1_active_when_catalyst_yes(client: AsyncClient) -> None:
 
 async def test_t1_blocked_when_catalyst_no(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t1"] == "Blocked"
@@ -95,7 +95,7 @@ async def test_t1_blocked_when_catalyst_no(client: AsyncClient) -> None:
 
 async def test_t1_case_insensitive(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=YES&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=YES&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t1"] == "10-15% of available cash"
@@ -106,11 +106,12 @@ async def test_t1_case_insensitive(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_t2_active_when_regime_caution(client: AsyncClient) -> None:
+async def test_t2_active_when_brent_below_110_and_t1_fired(client: AsyncClient) -> None:
+    """T2 unlocks when Brent < $110 and T1 has fired (v7.4 Brent gate)."""
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&regime_rule=CAUTION&position_weight_override=0.03"
-        "&t1_fired_override=true"
+        "?initial_catalyst=no&position_weight_override=0.005"
+        "&t1_fired_override=true&brent_price=92.4"
     )
     assert response.status_code == 200
     assert response.json()["t2"] == "20-25% of available cash"
@@ -119,7 +120,7 @@ async def test_t2_active_when_regime_caution(client: AsyncClient) -> None:
 async def test_t2_blocked_when_regime_clear(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&regime_rule=CLEAR&position_weight_override=0.03"
+        "?initial_catalyst=no&regime_rule=CLEAR&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t2"] == "Blocked"
@@ -128,7 +129,7 @@ async def test_t2_blocked_when_regime_clear(client: AsyncClient) -> None:
 async def test_t2_blocked_when_regime_not_provided(client: AsyncClient) -> None:
     """Omitting regime_rule defaults to NORMAL - T2 must remain Blocked."""
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t2"] == "Blocked"
@@ -143,7 +144,7 @@ async def test_t3_blocked_when_clear_but_no_gate_override(client: AsyncClient) -
     """CLEAR alone is not enough in v7.3.4 - AND gate must pass (no override = 0/5)."""
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&regime_rule=CLEAR&position_weight_override=0.03"
+        "?initial_catalyst=no&regime_rule=CLEAR&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t3"] == "Blocked"
@@ -154,7 +155,7 @@ async def test_t3_active_when_clear_and_gate_passes(client: AsyncClient) -> None
     response = await client.get(
         "/api/v1/tranche-sizing/MRVL"
         "?initial_catalyst=no&regime_rule=CLEAR"
-        "&position_weight_override=0.034&signals_count_override=3"
+        "&position_weight_override=0.005&signals_count_override=3"
         "&t1_fired_override=true"
     )
     assert response.status_code == 200
@@ -169,7 +170,7 @@ async def test_t3_blocked_when_clear_but_only_2_of_5(client: AsyncClient) -> Non
     response = await client.get(
         "/api/v1/tranche-sizing/LITE"
         "?initial_catalyst=no&regime_rule=CLEAR"
-        "&position_weight_override=0.051&signals_count_override=2"
+        "&position_weight_override=0.015&signals_count_override=2"
     )
     assert response.status_code == 200
     data = response.json()
@@ -181,7 +182,7 @@ async def test_t3_blocked_when_clear_but_only_2_of_5(client: AsyncClient) -> Non
 async def test_t3_blocked_when_regime_caution(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&regime_rule=CAUTION&position_weight_override=0.03"
+        "?initial_catalyst=no&regime_rule=CAUTION&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t3"] == "Blocked"
@@ -195,7 +196,7 @@ async def test_t3_blocked_when_regime_caution(client: AsyncClient) -> None:
 async def test_t4_active_when_iran_confirmed(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&iran_resolution=confirmed&position_weight_override=0.03"
+        "?initial_catalyst=no&iran_resolution=confirmed&position_weight_override=0.005"
         "&t1_fired_override=true"
     )
     assert response.status_code == 200
@@ -204,7 +205,7 @@ async def test_t4_active_when_iran_confirmed(client: AsyncClient) -> None:
 
 async def test_t4_blocked_when_iran_not_provided(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/AAOI?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t4"] == "Blocked"
@@ -213,7 +214,7 @@ async def test_t4_blocked_when_iran_not_provided(client: AsyncClient) -> None:
 async def test_t4_blocked_when_iran_pending(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&iran_resolution=pending&position_weight_override=0.03"
+        "?initial_catalyst=no&iran_resolution=pending&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["t4"] == "Blocked"
@@ -222,7 +223,7 @@ async def test_t4_blocked_when_iran_pending(client: AsyncClient) -> None:
 async def test_t4_case_insensitive(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=no&iran_resolution=CONFIRMED&position_weight_override=0.03"
+        "?initial_catalyst=no&iran_resolution=CONFIRMED&position_weight_override=0.005"
         "&t1_fired_override=true"
     )
     assert response.status_code == 200
@@ -248,7 +249,12 @@ async def test_cap_active_at_exactly_8_pct(client: AsyncClient) -> None:
 
 
 async def test_cap_inactive_at_7_9_pct(client: AsyncClient) -> None:
-    """Test 7: 7.9% NAV does not trigger cap."""
+    """Test 7: 7.9% NAV is below the 8% concentration cap threshold (cap_active=False).
+
+    Note: At 7.9% NAV, the F13 beta cap fires for AAOI (beta 4.03, 1% cap limit),
+    so tranche_display is False and beta_cap_active is True.
+    This test verifies the concentration cap boundary only.
+    """
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
         "?initial_catalyst=yes&regime_rule=CLEAR"
@@ -256,8 +262,9 @@ async def test_cap_inactive_at_7_9_pct(client: AsyncClient) -> None:
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["cap_active"] is False
-    assert data["tranche_display"] is True
+    assert data["cap_active"] is False          # below 8% concentration cap
+    assert data["beta_cap_active"] is True       # but above 1% F13 beta cap for AAOI
+    assert data["tranche_display"] is False      # beta cap suppresses tranches
 
 
 async def test_cap_suppresses_all_tranches_to_null(client: AsyncClient) -> None:
@@ -294,7 +301,7 @@ async def test_and_gate_active_when_clear_regime(client: AsyncClient) -> None:
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
         "?initial_catalyst=no&regime_rule=CLEAR"
-        "&position_weight_override=0.03&signals_count_override=0"
+        "&position_weight_override=0.005&signals_count_override=0"
     )
     assert response.status_code == 200
     assert response.json()["and_gate_active"] is True
@@ -318,7 +325,7 @@ async def test_and_gate_inactive_when_caution_regime(client: AsyncClient) -> Non
 
 async def test_ticker_normalised_to_uppercase(client: AsyncClient) -> None:
     response = await client.get(
-        "/api/v1/tranche-sizing/aaoi?initial_catalyst=no&position_weight_override=0.03"
+        "/api/v1/tranche-sizing/aaoi?initial_catalyst=no&position_weight_override=0.005"
     )
     assert response.status_code == 200
     assert response.json()["ticker"] == "AAOI"
@@ -345,12 +352,12 @@ async def test_no_override_uses_db_weight_for_unknown_ticker(client: AsyncClient
     assert data["position_weight"] == pytest.approx(0.0)
 
 
-async def test_legacy_catalyst_caution_iran_t1_t2_t4_active(client: AsyncClient) -> None:
-    """Catalyst yes + CAUTION + confirmed - T1, T2, T4 active; T3 blocked."""
+async def test_legacy_catalyst_brent_iran_t1_t2_t4_active(client: AsyncClient) -> None:
+    """Catalyst yes + Brent $92 + confirmed - T1, T2, T4 active; T3 blocked."""
     response = await client.get(
         "/api/v1/tranche-sizing/AAOI"
-        "?initial_catalyst=yes&regime_rule=CAUTION"
-        "&iran_resolution=confirmed&position_weight_override=0.03"
+        "?initial_catalyst=yes"
+        "&iran_resolution=confirmed&position_weight_override=0.005&brent_price=92.0"
     )
     assert response.status_code == 200
     data = response.json()
@@ -370,7 +377,7 @@ async def test_sequential_gate_t2_blocked_when_t1_not_fired(client: AsyncClient)
     response = await client.get(
         "/api/v1/tranche-sizing/MU"
         "?initial_catalyst=no&regime_rule=CAUTION"
-        "&position_weight_override=0.034&t1_fired_override=false"
+        "&position_weight_override=0.005&t1_fired_override=false"
     )
     assert response.status_code == 200
     data = response.json()
@@ -379,11 +386,11 @@ async def test_sequential_gate_t2_blocked_when_t1_not_fired(client: AsyncClient)
 
 
 async def test_sequential_gate_t2_eligible_when_t1_fired(client: AsyncClient) -> None:
-    """Test 2: CAUTION regime, T1 fired via store - T2 becomes eligible."""
+    """Test 2: Brent $92 + T1 fired via store - T2 becomes eligible."""
     response = await client.get(
         "/api/v1/tranche-sizing/MU"
-        "?initial_catalyst=no&regime_rule=CAUTION"
-        "&position_weight_override=0.034&t1_fired_override=true"
+        "?initial_catalyst=no"
+        "&position_weight_override=0.005&t1_fired_override=true&brent_price=92.0"
     )
     assert response.status_code == 200
     data = response.json()
@@ -398,7 +405,7 @@ async def test_sequential_gate_all_blocked_clear_and_gate_t1_not_fired(
     response = await client.get(
         "/api/v1/tranche-sizing/MU"
         "?initial_catalyst=no&regime_rule=CLEAR"
-        "&position_weight_override=0.034&signals_count_override=3"
+        "&position_weight_override=0.005&signals_count_override=3"
         "&t1_fired_override=false"
     )
     assert response.status_code == 200

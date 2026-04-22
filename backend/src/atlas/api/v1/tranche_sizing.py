@@ -47,7 +47,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.db.session import get_db_session
 from atlas.schemas.tranche_sizing import TrancheSizingResponse
-from atlas.services.tranche_sizing_service import compute_tranche_sizing, get_position_weight
+from atlas.services.tranche_sizing_service import (
+    compute_tranche_sizing,
+    fire_t2_tranche,
+    fire_t3_tranche,
+    get_position_weight,
+)
 
 router = APIRouter(prefix="/tranche-sizing", tags=["tranche-sizing"])
 
@@ -68,6 +73,9 @@ async def get_tranche_sizing(
     position_weight_override: float | None = None,
     signals_count_override: int | None = None,
     t1_fired_override: bool | None = None,
+    brent_consecutive_below_95_count: int = 0,
+    geopolitical_state: str | None = None,
+    brent_price: float | None = None,
 ) -> TrancheSizingResponse:
     """Return a Framework 4 tranche-sizing recommendation for ``ticker``.
 
@@ -83,6 +91,11 @@ async def get_tranche_sizing(
 
     Pass ``signals_count_override`` to test AND gate scenarios (e.g. 3 to
     simulate 3/5 signals confirmed).
+
+    Pass ``brent_consecutive_below_95_count`` and ``geopolitical_state`` to
+    auto-detect AND gate signals 2 and 5 from live data.
+
+    Pass ``brent_price`` to drive the T2 Brent gate (T2 unlocks when < $110).
 
     Returns 422 when ``initial_catalyst`` is not ``"yes"`` or ``"no"``.
     """
@@ -109,4 +122,39 @@ async def get_tranche_sizing(
         position_weight=effective_weight,
         signals_count_override=signals_count_override,
         t1_fired_override=t1_fired_override,
+        brent_consecutive_below_95_count=brent_consecutive_below_95_count,
+        geopolitical_state=geopolitical_state or "NONE",
+        brent_price=brent_price,
     )
+
+
+@router.post("/{ticker}/confirm-t2", status_code=204)
+async def confirm_t2(ticker: str) -> None:
+    """Confirm the operator has accepted the auto-triggered T2 deployment order.
+
+    Called when the operator clicks [Confirm] in the Framework 17 T2 modal.
+    Persists T2 fired state for the ticker so subsequent GET requests return
+    ``t2_fired=true`` and ``t2_pending=false``.
+
+    Returns 204 No Content on success.
+    """
+    normalised = ticker.strip().upper()
+    if not normalised:
+        raise HTTPException(status_code=422, detail="Ticker symbol must not be empty.")
+    fire_t2_tranche(normalised)
+
+
+@router.post("/{ticker}/confirm-t3", status_code=204)
+async def confirm_t3(ticker: str) -> None:
+    """Confirm the operator has accepted the auto-triggered T3 deployment order.
+
+    Called when the operator clicks [Confirm] in the Framework 17 T3 modal.
+    Persists T3 fired state for the ticker so subsequent GET requests return
+    ``t3_fired=true`` and ``t3_pending=false``.
+
+    Returns 204 No Content on success.
+    """
+    normalised = ticker.strip().upper()
+    if not normalised:
+        raise HTTPException(status_code=422, detail="Ticker symbol must not be empty.")
+    fire_t3_tranche(normalised)

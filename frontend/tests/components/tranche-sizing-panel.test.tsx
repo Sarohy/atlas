@@ -16,10 +16,23 @@ function createWrapper() {
   };
 }
 
-function renderPanel(ticker = 'AAPL', regimeRule = 'NORMAL') {
-  return render(<TrancheSizingPanel ticker={ticker} regimeRule={regimeRule} />, {
-    wrapper: createWrapper(),
-  });
+function renderPanel(
+  ticker = 'AAPL',
+  regimeRule = 'NORMAL',
+  brentPrice: number | null = null,
+  brentConsecutiveBelow95Count = 0,
+  geopoliticalState = 'NONE',
+) {
+  return render(
+    <TrancheSizingPanel
+      ticker={ticker}
+      regimeRule={regimeRule}
+      brentPrice={brentPrice}
+      brentConsecutiveBelow95Count={brentConsecutiveBelow95Count}
+      geopoliticalState={geopoliticalState}
+    />,
+    { wrapper: createWrapper() },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -63,8 +76,12 @@ describe('TrancheSizingPanel', () => {
 
     const toggle = screen.getByTestId('tranche-catalyst-toggle');
     await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveTextContent('CATALYST: YES');
+    // catalystActive is driven by data.catalyst_confirmed (API source of truth).
+    // Wait for the re-fetch (initial_catalyst=yes) to respond with catalyst_confirmed=true.
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      expect(toggle).toHaveTextContent('CATALYST: YES');
+    });
   });
 
   it('Iran toggle changes label when clicked', async () => {
@@ -98,7 +115,7 @@ describe('TrancheSizingPanel', () => {
     expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent('Waiting');
   });
 
-  it('shows T1 active after toggling catalyst to YES', async () => {
+  it('shows FIRED chip for T1 after toggling catalyst to YES', async () => {
     const user = userEvent.setup();
     renderPanel();
     await waitFor(() => screen.getByTestId('tranche-content'));
@@ -106,24 +123,51 @@ describe('TrancheSizingPanel', () => {
     await user.click(screen.getByTestId('tranche-catalyst-toggle'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent(
+      expect(screen.getByTestId('tranche-value-t1')).toHaveTextContent('FIRED');
+      expect(screen.getByTestId('tranche-size-t1')).toHaveTextContent(
         '10-15% of available cash',
       );
     });
   });
 
-  it('T2 active when regimeRule is CAUTION after T1 confirmed', async () => {
+  it('T2 shows CONFIRMING chip and auto-trigger modal when brentPrice < 110 and T1 fired', async () => {
     const user = userEvent.setup();
-    renderPanel('AAPL', 'CAUTION');
+    renderPanel('AAPL', 'NORMAL', 92.4);
     await waitFor(() => screen.getByTestId('tranche-content'));
 
-    // T1 must fire first before T2 becomes eligible
+    // T1 must fire first before T2 conditions are met
     await user.click(screen.getByTestId('tranche-catalyst-toggle'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('tranche-value-t2')).toHaveTextContent(
-        '20-25% of available cash',
-      );
+      // CONFIRMING chip in the row
+      expect(screen.getByTestId('tranche-value-t2')).toHaveTextContent('CONFIRMING');
+      // Auto-trigger modal visible
+      expect(screen.getByTestId('tranche-confirm-modal-t2')).toBeInTheDocument();
+    });
+  });
+
+  it('T2 auto-trigger modal shows Confirm and Override buttons', async () => {
+    const user = userEvent.setup();
+    renderPanel('AAPL', 'NORMAL', 92.4);
+    await waitFor(() => screen.getByTestId('tranche-content'));
+    await user.click(screen.getByTestId('tranche-catalyst-toggle'));
+
+    await waitFor(() => screen.getByTestId('tranche-confirm-modal-t2'));
+    expect(screen.getByTestId('tranche-confirm-btn-t2')).toBeInTheDocument();
+    expect(screen.getByTestId('tranche-override-btn-t2')).toBeInTheDocument();
+  });
+
+  it('T2 modal dismissed when Override is clicked', async () => {
+    const user = userEvent.setup();
+    renderPanel('AAPL', 'NORMAL', 92.4);
+    await waitFor(() => screen.getByTestId('tranche-content'));
+    await user.click(screen.getByTestId('tranche-catalyst-toggle'));
+
+    await waitFor(() => screen.getByTestId('tranche-confirm-modal-t2'));
+    await user.click(screen.getByTestId('tranche-override-btn-t2'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('tranche-confirm-modal-t2')).not.toBeInTheDocument();
     });
   });
 

@@ -19,6 +19,7 @@ import { CashFloorPanel } from './cash-floor-panel';
 import { ConvictionActionPanel } from './conviction-action-panel';
 import { Framework7Card } from './framework7-card';
 import { Framework8Card } from './framework8-card';
+import { Framework13Card } from './framework13-card';
 import { Framework14Card } from './framework14-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
@@ -148,7 +149,13 @@ export function FrameworksPanelsSection() {
           baseScore={f1DisplayScore}
           enabled={f1DisplayScore !== undefined}
         />
-        <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
+        <TrancheSizingPanel
+          ticker={activeTicker}
+          regimeRule={regimeRule}
+          brentPrice={regimeData?.brent_price ?? null}
+          brentConsecutiveBelow95Count={regimeData?.brent_consecutive_below_95_count ?? 0}
+          geopoliticalState={geopoliticalState}
+        />
       </div>
 
       <div className="atlas-frameworks-secondary-row">
@@ -160,6 +167,7 @@ export function FrameworksPanelsSection() {
         <Framework7Card ticker={activeTicker} adjustedScore={f1DisplayScore} />
         <Framework8Card ticker={activeTicker} />
         <Framework14Card ticker={activeTicker} />
+        <Framework13Card ticker={activeTicker} />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

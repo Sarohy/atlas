@@ -136,8 +136,8 @@ function EarningsContent({ data }: { data: EarningsResponse }) {
         </div>
       </div>
 
-      {/* Flag badges — column layout prevents badge text from merging */}
-      <div className="atlas-f2-flags" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+      {/* Flag badge chips */}
+      <div className="atlas-f2-flags">
         {data.pre_profit_status && (
           <span className="atlas-f2-flag is-amber" data-testid="f2-flag-pre-profit">
             Pre-Profitability

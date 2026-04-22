@@ -956,6 +956,130 @@
   }
 }
 
+/* Flag badge chips */
+
+.atlas-f2-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f2-flag {
+  display: inline-block;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.atlas-f2-flag.is-amber {
+  background: #2d1f00;
+  border: 1px solid #f0a50040;
+  color: #f0a500;
+}
+
+.atlas-f2-flag.is-red {
+  background: #2d0b0b;
+  border: 1px solid #f8514940;
+  color: #f85149;
+}
+
+.atlas-f2-flag.is-muted {
+  background: #1a1a1a;
+  border: 1px solid #33383f;
+  color: #484f58;
+}
+
+/* Composite footer rows */
+
+.atlas-f2-composite {
+  border-top: 1px solid #1e2d40;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.atlas-f2-composite-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 6px;
+}
+
+.atlas-f2-composite-label {
+  color: #4b6070;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+}
+
+.atlas-f2-composite-raw {
+  color: #e0e0e0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.atlas-f2-composite-contrib {
+  color: #39d353;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.atlas-f2-excluded-note {
+  color: #484f58;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  margin: 4px 0 0;
+}
+
+.atlas-f2-note {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  margin: 4px 0 0;
+}
+
+.atlas-f2-note.is-muted {
+  color: #484f58;
+}
+
+.atlas-f2-indicator-weight {
+  color: #4b6070;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+}
+
+/* Degraded banner */
+
+.atlas-f2-degraded-banner {
+  align-items: flex-start;
+  background: #1c1208;
+  border: 1px solid #f0a50030;
+  border-radius: 4px;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.atlas-f2-degraded-icon {
+  color: #f0a500;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.atlas-f2-degraded-msg {
+  color: #c7a55a;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  line-height: 1.5;
+}
+
 /* ==========================================================================
    F3 Analyst Conviction Panel
    ========================================================================== */

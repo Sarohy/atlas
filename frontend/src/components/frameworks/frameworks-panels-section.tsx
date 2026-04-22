@@ -149,6 +149,9 @@ export function FrameworksPanelsSection() {
           enabled={f1DisplayScore !== undefined}
         />
         <TrancheSizingPanel ticker={activeTicker} regimeRule={regimeRule} />
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
         <CashFloorPanel ticker={activeTicker} />
         <ConvictionActionPanel ticker={activeTicker} adjustedScore={f1DisplayScore} />
       </div>
@@ -199,8 +202,10 @@ export function FrameworksPanelsSection() {
           <div className="atlas-frameworks-details-grid">
             <F1MomentumPanel ticker={activeTicker} />
             <F2EarningsPanel ticker={activeTicker} />
-            <F3AnalystPanel ticker={activeTicker} />
-            <F4OptionsPanel ticker={activeTicker} />
+            <div className="atlas-frameworks-details-row">
+              <F3AnalystPanel ticker={activeTicker} />
+              <F4OptionsPanel ticker={activeTicker} />
+            </div>
             <F5FundamentalPanel ticker={activeTicker} />
           </div>
         </div>

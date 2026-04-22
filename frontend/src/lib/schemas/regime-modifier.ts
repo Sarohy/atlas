@@ -72,6 +72,29 @@ export const regimeModifierResponseSchema = z.object({
 
   /** Explanation of how the regime was determined. */
   determination_text: z.string(),
+
+  // ── Enriched condition display (Section 14 spec v2.1) ─────────────────
+
+  /** Brent price with zone label, e.g. '$97.50 — $95-110 (CAUTION trigger)'. */
+  brent_condition: z.string().default(''),
+
+  /** VIX level with zone label, e.g. '17.48 — Below 22 (SOFT CAUTION zone)'. */
+  vix_condition: z.string().default(''),
+
+  /** Active geopolitical flag value, e.g. 'ACTIVE_RISK'. */
+  geo_condition: z.string().default(''),
+
+  /** Whether this regime uses OR or AND logic. */
+  trigger_logic: z.string().default(''),
+
+  /** Explanation of the modifier applied, e.g. 'CAUTION + Escalating geo → −7'. */
+  modifier_reason: z.string().default(''),
+
+  /** True only when regime=CAUTION and geo=ESCALATING (−7 modifier). */
+  special_case_active: z.boolean().default(false),
+
+  /** Minimum portfolio cash floor fraction per Section 14.1 (0.08 = 8%). */
+  cash_floor_pct: z.number().default(0.2),
 });
 
 // ---------------------------------------------------------------------------

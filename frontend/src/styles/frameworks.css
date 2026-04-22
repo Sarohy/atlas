@@ -273,6 +273,12 @@
   padding: 18px;
 }
 
+.atlas-frameworks-details-row {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+
 .atlas-frameworks-ticker-bar {
   display: flex;
   align-items: center;
@@ -1085,7 +1091,8 @@
    ========================================================================== */
 
 .atlas-f3-panel {
-  margin-top: 14px;
+  flex: 1;
+  min-width: 0;
 }
 
 .atlas-f3-panel-header {
@@ -1368,7 +1375,8 @@
    ========================================================================== */
 
 .atlas-f4-panel {
-  margin-top: 14px;
+  flex: 1;
+  min-width: 0;
 }
 
 .atlas-f4-panel-header {
@@ -2362,13 +2370,13 @@
 }
 
 .atlas-fws-panel--half-width {
-  flex: 1;
+  flex: 1 1 calc(40% - 7px);
   width: auto;
   align-self: auto;
 }
 
 .atlas-regime-panel {
-  flex: 1 1 calc(50% - 7px);
+  flex: 1 1 calc(60% - 7px);
   min-width: 0;
 }
 
@@ -2925,6 +2933,11 @@
    Framework 5 — Cash Floor Panel  (.atlas-cash-floor-*)
    Reuses .atlas-regime-* structural classes.
    ========================================================================== */
+
+.atlas-regime-guidance-panel {
+  flex: 1 1 calc(50% - 7px);
+  min-width: 0;
+}
 
 .atlas-cash-floor-panel {
   flex: 1;

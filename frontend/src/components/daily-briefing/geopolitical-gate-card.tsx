@@ -6,8 +6,10 @@ import { cn } from '@/lib/utils';
 
 const OPTIONS: ReadonlyArray<{ label: string; value: GeopoliticalState }> = [
   { label: 'None', value: 'NONE' },
+  { label: 'Resolved', value: 'RESOLVED' },
   { label: 'De-escalating', value: 'DE_ESCALATING' },
-  { label: 'Active', value: 'ACTIVE' },
+  { label: 'Active risk', value: 'ACTIVE_RISK' },
+  { label: 'Escalating', value: 'ESCALATING' },
 ];
 
 export function GeopoliticalGateCard() {
@@ -18,7 +20,7 @@ export function GeopoliticalGateCard() {
     <section className="atlas-briefing-block" data-testid="briefing-geopolitical-gate">
       <h2 className="atlas-briefing-question">Framework 2 Geopolitical Gate</h2>
       <p className="atlas-briefing-callout">
-        Brent and VIX stay fully automatic. This three-state flag is the only manual input and
+        Brent and VIX stay fully automatic. This five-state flag is the only manual input and
         carries forward from the prior briefing until you change it.
       </p>
       <div className="atlas-briefing-geopolitical-toggle" role="group" aria-label="Geopolitical state">

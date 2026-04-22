@@ -27,7 +27,7 @@ vi.mock('@/lib/hooks/use-regime-modifier', () => ({
 
 vi.mock('@/lib/stores/geopolitical-store', () => ({
   useGeopoliticalStore: (selector: (state: { geopoliticalState: string }) => string) =>
-    selector({ geopoliticalState: 'ACTIVE' }),
+    selector({ geopoliticalState: 'ACTIVE_RISK' }),
 }));
 
 describe('FrameworkRegimeOverviewCard', () => {

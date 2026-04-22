@@ -73,5 +73,35 @@ class RegimeModifierResponse(BaseModel):
         description="Regime cash-management instruction (multi-line for crisis rules).",
     )
     determination_text: str = Field(
-        description="Human-readable summary of the Brent/VIX calculation and geopolitical gate.",
+        description="Human-readable summary of the Brent/VIX calculation and modifier.",
+    )
+
+    # ── Enriched condition display (Section 14 spec v2.1) ─────────────────
+    brent_condition: str = Field(
+        description="Brent price with zone label, e.g. '$97.50 — $95-110 (CAUTION trigger)'.",
+        default="",
+    )
+    vix_condition: str = Field(
+        description="VIX level with zone label, e.g. '17.48 — Below 22 (SOFT CAUTION zone)'.",
+        default="",
+    )
+    geo_condition: str = Field(
+        description="Active geopolitical flag value, e.g. 'ACTIVE_RISK'.",
+        default="",
+    )
+    trigger_logic: str = Field(
+        description="Whether this regime uses OR or AND logic: 'OR — either Brent or VIX triggers'.",
+        default="",
+    )
+    modifier_reason: str = Field(
+        description="Explanation of the modifier applied, e.g. 'CAUTION + Escalating geo → −7'.",
+        default="",
+    )
+    special_case_active: bool = Field(
+        description="True only when regime=CAUTION and geo=ESCALATING (−7 modifier).",
+        default=False,
+    )
+    cash_floor_pct: float = Field(
+        description="Minimum portfolio cash floor fraction per Section 14.1 (0.08 = 8%).",
+        default=0.20,
     )

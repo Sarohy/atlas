@@ -58,6 +58,8 @@ describe('Daily briefing page', () => {
     expect(screen.getByText('Framework 2 Geopolitical Gate')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'None' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'De-escalating' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Active' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active risk' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resolved' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Escalating' })).toBeInTheDocument();
   });
 });

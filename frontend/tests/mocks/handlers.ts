@@ -426,9 +426,11 @@ export const handlers = [
   http.get(`${BASE}/api/v1/regime-modifier/:ticker`, ({ params, request }) => {
     const ticker = String(params['ticker'] ?? 'AAPL');
     const url = new URL(request.url);
-    const geopoliticalState = (url.searchParams.get('geopolitical_state') ?? 'ACTIVE').toUpperCase();
+    const geopoliticalState = (url.searchParams.get('geopolitical_state') ?? 'ACTIVE_RISK').toUpperCase();
     const ruleTriggered = 2;
     const baseScore = 79;
+    const specialCaseActive = geopoliticalState === 'ESCALATING';
+    const modifier = specialCaseActive ? -7 : -5;
     return HttpResponse.json({
       ticker,
       geopolitical_state: geopoliticalState,
@@ -436,19 +438,24 @@ export const handlers = [
       vix_value: 27.3,
       brent_consecutive_below_95_count: 2,
       base_score: baseScore,
-      adjusted_score: baseScore - 5,
+      adjusted_score: baseScore + modifier,
       rule_triggered: ruleTriggered,
       rule: 'CAUTION',
-      effective_regime: geopoliticalState === 'NONE' ? 'CAUTION' : 'SOFT CAUTION',
+      effective_regime: 'CAUTION',
+      modifier,
       min_cash_pct: 0.25,
       max_cash_pct: 0.35,
       min_cash_usd: 25000,
       max_cash_usd: 35000,
-      output_text: 'must stay in cash',
-      determination_text:
-        geopoliticalState === 'NONE'
-          ? 'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. No geopolitical gate applied.'
-          : 'Automatic regime CAUTION from Brent/VIX data. Brent streak below $95: 2. Geopolitical flag ACTIVE adds a secondary gate, so the displayed regime is SOFT CAUTION.',
+      output_text: specialCaseActive ? 'must stay in cash\nGEO PENALTY ACTIVE: CAUTION + ESCALATING' : 'must stay in cash',
+      determination_text: `CAUTION regime from Brent/VIX data. Brent streak below $95: 2. Geo flag: ${geopoliticalState}. Modifier: ${modifier}.`,
+      brent_condition: '$97.50 — $95-110 (CAUTION trigger)',
+      vix_condition: '27.30 — 24-35 (CAUTION trigger)',
+      geo_condition: geopoliticalState,
+      trigger_logic: 'OR — either Brent or VIX triggers',
+      modifier_reason: specialCaseActive ? 'CAUTION + Escalating geo → −7' : `CAUTION + ${geopoliticalState} → −5`,
+      special_case_active: specialCaseActive,
+      cash_floor_pct: 0.20,
     });
   }),
 

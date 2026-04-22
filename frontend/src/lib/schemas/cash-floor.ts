@@ -8,8 +8,8 @@ export const cashFloorResponseSchema = z.object({
   /** Ticker symbol (upper-case). */
   ticker: z.string(),
 
-  /** Framework 2 rule that fired: 1=CRISIS, 2=CAUTION, 3=CLEAR. null = NORMAL. */
-  rule_triggered: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(),
+  /** Framework 2 rule that fired: 1=CRISIS HALT, 2=CAUTION, 3=SOFT CAUTION, 4=CLEAR. null = no rule. */
+  rule_triggered: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullable(),
 
   /** Brent crude price in USD per barrel at evaluation time. */
   brent_price: z.number().nullable(),

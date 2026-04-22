@@ -56,6 +56,13 @@ export function RegimeModifierPanel({
             geopoliticalState={regime.geopolitical_state}
             rule={regime.rule}
             vixValue={regime.vix_value}
+            brentCondition={regime.brent_condition ?? ''}
+            vixCondition={regime.vix_condition ?? ''}
+            triggerLogic={regime.trigger_logic ?? ''}
+            modifierReason={regime.modifier_reason ?? ''}
+            modifier={regime.modifier}
+            specialCaseActive={regime.special_case_active ?? false}
+            cashFloorPct={regime.cash_floor_pct ?? 0.2}
           />
         )}
         {!isLoading && !isError && !regime && activeTicker && <EmptyState ticker={ticker} />}
@@ -138,6 +145,13 @@ type RegimeContentProps = {
   geopoliticalState: GeopoliticalState;
   rule: string;
   vixValue: number | null;
+  brentCondition: string;
+  vixCondition: string;
+  triggerLogic: string;
+  modifierReason: string;
+  modifier: number;
+  specialCaseActive: boolean;
+  cashFloorPct: number;
 };
 
 function RegimeContent({
@@ -148,9 +162,28 @@ function RegimeContent({
   geopoliticalState,
   rule,
   vixValue,
+  brentCondition,
+  vixCondition,
+  triggerLogic,
+  modifierReason,
+  modifier,
+  specialCaseActive,
+  cashFloorPct,
 }: RegimeContentProps) {
   const automaticTone = REGIME_TONE[rule] ?? 'is-cyan';
-  const effectiveTone = REGIME_TONE[effectiveRegime] ?? 'is-yellow';
+
+  const geoTone =
+    geopoliticalState === 'ESCALATING'
+      ? 'is-red'
+      : geopoliticalState === 'ACTIVE_RISK'
+        ? 'is-orange'
+        : geopoliticalState === 'DE_ESCALATING'
+          ? 'is-yellow'
+          : geopoliticalState === 'RESOLVED'
+            ? 'is-green'
+            : 'is-cyan';
+
+  const modifierSign = modifier >= 0 ? `+${modifier}` : `${modifier}`;
 
   return (
     <div className="atlas-regime-content" data-testid="regime-content">
@@ -162,22 +195,11 @@ function RegimeContent({
         <RegimeStat label="BRENT < $95 STREAK" testId="regime-brent-streak" value={String(brentStreak)} />
       </div>
 
-      <div className="atlas-regime-market-row atlas-regime-market-row--secondary">
-        <RegimeStat label="AUTOMATIC REGIME" testId="regime-automatic-regime" tone={automaticTone} value={rule} />
-        <div className="atlas-regime-stat-divider" />
-        <RegimeStat
-          label="GEOPOLITICAL GATE"
-          testId="regime-geopolitical-state"
-          value={formatGeopoliticalState(geopoliticalState)}
-        />
-        <div className="atlas-regime-stat-divider" />
-        <RegimeStat
-          label="EFFECTIVE REGIME"
-          testId="regime-effective-regime"
-          tone={effectiveTone}
-          value={effectiveRegime}
-        />
-      </div>
+      {specialCaseActive && (
+        <div className="atlas-regime-special-case-badge" data-testid="regime-geo-penalty-badge">
+          GEO PENALTY ACTIVE
+        </div>
+      )}
 
       <div className="atlas-regime-determination" data-testid="regime-determination">
         {determinationText}

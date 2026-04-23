@@ -1,0 +1,649 @@
+"""Section 17 — LEAPS Strategy Module service.
+
+V1 scope: read-only eligibility tracking.  No execution engine.
+Positions are tracked manually via the leaps_positions table.
+
+Eligibility (tristate: True | False | None):
+  True  — all required checks passed
+  False — one or more checks failed (blocked)
+  None  — required data unavailable; decision deferred
+
+Tier rules:
+  TIER_1 (score ≥ 85): auto-eligible when IV ≤ 90% and gates clear
+  TIER_2 (70–84): eligible only with $500K+ dark pool flow from F9
+  TIER_3 / WATCHLIST: ineligible
+
+IV hard rule:
+  IV > 90% always blocks LEAPS regardless of tier.
+  IV = null → iv_blocked = null → leaps_eligible = null.
+
+Gate rules:
+  F7 earnings gate active → LEAPS blocked
+  F29 AND gate not passed → LEAPS blocked
+  F30 HARD_HALT → LEAPS blocked
+  F30 CARVEOUT → LEAPS allowed but capped per leaps_position_cap_pct
+
+Entry conditions (Section 17.4):
+  1. Washout signal — VIX spike with subsequent decline (sourced from F29 Signal 1)
+  2. Regime confirms CLEAR or SOFT_CAUTION (F2 regime state)
+  3. Score improvement momentum (3 consecutive session improvement)
+
+Caching:
+  Results are cached per ticker for 5 minutes (300 s).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Any, Final
+
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from atlas.models.leaps import LeapsIvHistory, LeapsPosition
+from atlas.schemas.leaps import (
+    EntryCondition,
+    EntryConditionStatus,
+    IVAlert,
+    LeapsBucketStatus,
+    LeapsEligibility,
+    LeapsPosition as LeapsPositionSchema,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_CACHE_TTL_SECONDS: Final[int] = 300  # 5 minutes
+
+# Tier score thresholds.
+_TIER_1_SCORE_MIN: Final[int] = 85
+_TIER_2_SCORE_MIN: Final[int] = 70
+
+# IV hard-block threshold (as a decimal fraction, e.g. 0.90 = 90%).
+_IV_BLOCK_THRESHOLD: Final[float] = 0.90
+
+# Dark pool flow required for Tier 2 LEAPS eligibility.
+_TIER_2_DARK_POOL_FLOW_USD: Final[float] = 500_000.0
+
+# LEAPS bucket cap as % of NAV.
+_LEAPS_BUCKET_CAP_PCT: Final[float] = 5.0  # 5% max of NAV
+
+# Unusual Whales IV endpoint.
+_UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
+_UW_IV_URL: Final[str] = f"{_UW_BASE_URL}/api/stock/{{ticker}}/iv-rank"
+
+# Regime states that clear LEAPS eligibility.
+_LEAPS_ALLOWED_REGIMES: Final[frozenset[str]] = frozenset(
+    {"CLEAR", "SOFT_CAUTION", "NORMAL", "NONE"}
+)
+
+# ---------------------------------------------------------------------------
+# Module-level cache
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, tuple[LeapsEligibility, float]] = {}
+
+
+def _cache_get(ticker: str) -> tuple[LeapsEligibility | None, float]:
+    """Return (result, age_minutes) from cache, or (None, 0)."""
+    entry = _cache.get(ticker)
+    if entry is None:
+        return None, 0.0
+    result, fetched_at = entry
+    age_minutes = (time.time() - fetched_at) / 60.0
+    return result, age_minutes
+
+
+def _cache_set(ticker: str, result: LeapsEligibility) -> None:
+    """Store result in cache."""
+    _cache[ticker] = (result, time.time())
+
+
+def _cache_invalidate(ticker: str) -> None:
+    """Remove cached result for ticker."""
+    _cache.pop(ticker, None)
+
+
+# ---------------------------------------------------------------------------
+# Pure computation helpers
+# ---------------------------------------------------------------------------
+
+
+def _determine_tier(score: int) -> str:
+    """Map score to tier label. Pure function."""
+    if score >= _TIER_1_SCORE_MIN:
+        return "TIER_1"
+    if score >= _TIER_2_SCORE_MIN:
+        return "TIER_2"
+    return "TIER_3"
+
+
+def _check_iv_block(iv_current: float | None) -> bool | None:
+    """Check if IV blocks LEAPS entry.
+
+    Returns True when IV > 90% (blocked), False when IV ≤ 90% (allowed),
+    None when IV data is unavailable.
+    """
+    if iv_current is None:
+        return None
+    return iv_current > _IV_BLOCK_THRESHOLD
+
+
+def _check_regime_clears_leaps(regime_state: str | None) -> bool | None:
+    """Return True when regime permits LEAPS, False when it doesn't, None when unknown."""
+    if regime_state is None:
+        return None
+    return regime_state.upper() in _LEAPS_ALLOWED_REGIMES
+
+
+def _evaluate_entry_condition1(
+    f29_vix_signal_confirmed: bool | None,
+) -> EntryCondition:
+    """Condition 1: Washout signal — VIX 5-day SMA declining (F29 Signal 1)."""
+    if f29_vix_signal_confirmed is None:
+        return EntryCondition(
+            condition_name="Washout Signal (VIX Declining)",
+            status=EntryConditionStatus.INCOMPLETE,
+            met=None,
+            detail="F29 VIX signal data unavailable.",
+        )
+    if f29_vix_signal_confirmed:
+        return EntryCondition(
+            condition_name="Washout Signal (VIX Declining)",
+            status=EntryConditionStatus.CONFIRMED,
+            met=True,
+            detail="VIX 5-day SMA declining — washout/capitulation signal present.",
+        )
+    return EntryCondition(
+        condition_name="Washout Signal (VIX Declining)",
+        status=EntryConditionStatus.NOT_MET,
+        met=False,
+        detail="VIX 5-day SMA not yet declining — washout signal not confirmed.",
+    )
+
+
+def _evaluate_entry_condition2(regime_state: str | None) -> EntryCondition:
+    """Condition 2: Regime is CLEAR or SOFT_CAUTION."""
+    if regime_state is None:
+        return EntryCondition(
+            condition_name="Regime CLEAR or SOFT_CAUTION",
+            status=EntryConditionStatus.INCOMPLETE,
+            met=None,
+            detail="Regime data unavailable.",
+        )
+    allowed = regime_state.upper() in _LEAPS_ALLOWED_REGIMES
+    return EntryCondition(
+        condition_name="Regime CLEAR or SOFT_CAUTION",
+        status=EntryConditionStatus.CONFIRMED if allowed else EntryConditionStatus.NOT_MET,
+        met=allowed,
+        detail=f"Regime is {regime_state}.",
+    )
+
+
+def _evaluate_entry_condition3(
+    score: int | None,
+) -> EntryCondition:
+    """Condition 3: Score meets LEAPS tier threshold (≥70 required)."""
+    if score is None:
+        return EntryCondition(
+            condition_name="Score Meets LEAPS Threshold (≥70)",
+            status=EntryConditionStatus.INCOMPLETE,
+            met=None,
+            detail="Score data unavailable.",
+        )
+    meets = score >= _TIER_2_SCORE_MIN
+    return EntryCondition(
+        condition_name="Score Meets LEAPS Threshold (≥70)",
+        status=EntryConditionStatus.CONFIRMED if meets else EntryConditionStatus.NOT_MET,
+        met=meets,
+        detail=f"Score {score} {'meets' if meets else 'does not meet'} LEAPS minimum ({_TIER_2_SCORE_MIN}).",
+    )
+
+
+def _compute_iv_alert(
+    iv_current: float | None,
+    iv_percentile: float | None,
+) -> IVAlert:
+    """Determine IV alert state from current IV and percentile. Pure function."""
+    if iv_current is None:
+        return IVAlert.DATA_UNAVAILABLE
+    if iv_current > _IV_BLOCK_THRESHOLD:
+        return IVAlert.IV_HIGH_ALERT
+    if iv_percentile is not None and iv_percentile < 0.30:
+        return IVAlert.IV_COMPRESSION_SIGNAL
+    return IVAlert.NONE
+
+
+def _compute_eligibility(
+    *,
+    ticker: str,
+    score: int | None,
+    tier: str | None,
+    flow_confirmed: bool | None,
+    regime_state: str | None,
+    gate_f7_active: bool | None,
+    gate_f29_passed: bool | None,
+    gate_f30_permits_leaps: bool | None,
+    iv_current: float | None,
+    iv_percentile: float | None,
+    entry_conditions: list[EntryCondition],
+    data_age_minutes: int,
+) -> LeapsEligibility:
+    """Compute LEAPS eligibility from all pre-fetched inputs. Pure function.
+
+    Returns LeapsEligibility with leaps_eligible as True | False | None.
+    """
+    iv_blocked = _check_iv_block(iv_current)
+    regime_clears = _check_regime_clears_leaps(regime_state)
+    iv_alert = _compute_iv_alert(iv_current, iv_percentile)
+
+    block_reasons: list[str] = []
+    warning_messages: list[str] = []
+    has_unknown = False
+
+    # --- Hard blocks (make eligible=False immediately) ---
+
+    if score is not None and score < _TIER_2_SCORE_MIN:
+        block_reasons.append(
+            f"Score {score} below LEAPS minimum ({_TIER_2_SCORE_MIN})."
+        )
+
+    if tier == "TIER_3":
+        block_reasons.append("Tier 3 positions are not eligible for LEAPS.")
+
+    if gate_f7_active is True:
+        block_reasons.append("F7 earnings gate active — LEAPS blocked during gate window.")
+    elif gate_f7_active is None:
+        has_unknown = True
+        warning_messages.append("F7 gate status unknown — eligibility deferred.")
+
+    if gate_f29_passed is False:
+        block_reasons.append(
+            "F29 AND gate not passed — capitulation/re-entry conditions not met."
+        )
+    elif gate_f29_passed is None:
+        has_unknown = True
+        warning_messages.append("F29 gate status unknown — eligibility deferred.")
+
+    if gate_f30_permits_leaps is False:
+        block_reasons.append("F30 HARD_HALT — LEAPS blocked.")
+    elif gate_f30_permits_leaps is None:
+        has_unknown = True
+        warning_messages.append("F30 drawdown state unknown — eligibility deferred.")
+
+    if iv_blocked is True:
+        block_reasons.append(
+            f"IV {iv_current:.0%} exceeds {_IV_BLOCK_THRESHOLD:.0%} — LEAPS blocked."
+        )
+    elif iv_blocked is None:
+        has_unknown = True
+        warning_messages.append("IV data unavailable — eligibility deferred.")
+
+    if regime_clears is False:
+        block_reasons.append(f"Regime {regime_state} does not permit LEAPS.")
+    elif regime_clears is None:
+        has_unknown = True
+        warning_messages.append("Regime data unavailable — eligibility deferred.")
+
+    # Tier 2 requires dark pool flow confirmation.
+    if tier == "TIER_2":
+        if flow_confirmed is False:
+            block_reasons.append(
+                f"Tier 2 LEAPS requires ≥${_TIER_2_DARK_POOL_FLOW_USD:,.0f} dark pool flow (F9). Not confirmed."
+            )
+        elif flow_confirmed is None:
+            has_unknown = True
+            warning_messages.append("F9 dark pool flow data unavailable for Tier 2 check.")
+
+    # --- Determine overall eligibility ---
+    conditions_met = sum(1 for c in entry_conditions if c.met is True)
+    conditions_required = 2  # At least 2 of 3 entry conditions should be met
+
+    if block_reasons:
+        leaps_eligible: bool | None = False
+        eligibility_undetermined = False
+    elif has_unknown:
+        leaps_eligible = None
+        eligibility_undetermined = True
+    else:
+        # All required checks passed and no unknowns.
+        leaps_eligible = True
+        eligibility_undetermined = False
+
+    return LeapsEligibility(
+        ticker=ticker,
+        leaps_eligible=leaps_eligible,
+        eligibility_undetermined=eligibility_undetermined,
+        score=score,
+        tier=tier,
+        flow_confirmed=flow_confirmed,
+        regime_state=regime_state,
+        regime_clears_leaps=regime_clears,
+        gate_f7_active=gate_f7_active,
+        gate_f29_passed=gate_f29_passed,
+        gate_f30_permits_leaps=gate_f30_permits_leaps,
+        iv_current=iv_current,
+        iv_percentile=iv_percentile,
+        iv_blocked=iv_blocked,
+        iv_alert=iv_alert,
+        entry_conditions=entry_conditions,
+        conditions_met=conditions_met,
+        conditions_required=conditions_required,
+        block_reasons=block_reasons,
+        warning_messages=warning_messages,
+        data_age_minutes=data_age_minutes,
+        cache_hit=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Async data fetchers
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_iv_from_uw(
+    ticker: str,
+    uw_api_key: str,
+    client: httpx.AsyncClient,
+) -> tuple[float | None, float | None]:
+    """Fetch current IV and IV percentile from Unusual Whales.
+
+    Returns (iv_current, iv_percentile) where values are 0–1 fractions.
+    Returns (None, None) on error.
+    """
+    if not uw_api_key:
+        return None, None
+
+    try:
+        response = await client.get(
+            _UW_IV_URL.format(ticker=ticker.upper()),
+            headers={"Authorization": f"Bearer {uw_api_key}"},
+            timeout=8.0,
+        )
+
+        if response.status_code != 200:
+            logger.warning(
+                "UW IV rank non-200",
+                extra={"ticker": ticker, "status": response.status_code},
+            )
+            return None, None
+
+        data = response.json()
+        # UW returns something like {"data": {"iv_rank": 0.45, "iv": 0.32}}
+        inner = data.get("data", {}) if isinstance(data, dict) else {}
+        iv_current = inner.get("iv") or inner.get("iv_current")
+        iv_percentile = inner.get("iv_rank") or inner.get("iv_percentile")
+
+        return (
+            float(iv_current) if iv_current is not None else None,
+            float(iv_percentile) if iv_percentile is not None else None,
+        )
+
+    except Exception as exc:
+        logger.warning("UW IV fetch failed", extra={"ticker": ticker, "error": repr(exc)})
+        return None, None
+
+
+# ---------------------------------------------------------------------------
+# Main evaluation function
+# ---------------------------------------------------------------------------
+
+
+async def check_leaps_eligibility(
+    ticker: str,
+    session: AsyncSession,
+    polygon_api_key: str = "",
+    uw_api_key: str = "",
+    alphavantage_api_key: str = "",
+    sec_api_key: str = "",
+    transcript_api_key: str = "",
+    benzinga_api_key: str = "",
+) -> LeapsEligibility:
+    """Evaluate LEAPS eligibility for a specific ticker.
+
+    Orchestrates parallel data fetches from:
+      - F29 AND gate (from in-memory cache or live evaluation)
+      - F30 drawdown state (from in-memory cache or DB evaluation)
+      - F7 earnings gate (live — requires AV API)
+      - F9 dark pool flow (from in-memory cache or live evaluation)
+      - Unusual Whales IV data
+
+    Returns a LeapsEligibility with tristate leaps_eligible.
+    """
+    normalised = ticker.strip().upper()
+
+    cached, age_minutes = _cache_get(normalised)
+    if cached is not None and age_minutes <= _CACHE_TTL_SECONDS / 60.0:
+        return LeapsEligibility(
+            **{**cached.model_dump(), "cache_hit": True}
+        )
+
+    # 1. Fetch F29 gate status (from cache or evaluate).
+    from atlas.services.framework29_service import (
+        evaluate_framework29,
+        get_gate_status as get_f29_gate,
+    )
+
+    f29_cached = get_f29_gate()
+
+    # 2. Fetch F30 drawdown state (from cache or DB evaluate).
+    from atlas.services.framework30_service import (
+        evaluate_framework30,
+        get_drawdown_state as get_f30_state,
+    )
+
+    f30_cached = get_f30_state()
+
+    # 3. Framework 7 gate (requires AV API key + ticker).
+    from atlas.services.framework7_service import Framework7Service
+
+    f7_service = Framework7Service(
+        alphavantage_api_key=alphavantage_api_key,
+        polygon_api_key=polygon_api_key,
+        transcript_api_key=transcript_api_key,
+        benzinga_api_key=benzinga_api_key,
+        unusual_whales_api_key=uw_api_key,
+        sec_api_key=sec_api_key,
+    )
+
+    # 4. F9 score for dark pool flow (use module cache).
+    from atlas.services.framework9_service import evaluate_framework9
+
+    # 5. Run parallel tasks where possible.
+    async with httpx.AsyncClient() as client:
+        f7_task = f7_service.compute(normalised)
+        f9_task = evaluate_framework9(normalised, uw_api_key, polygon_api_key, alphavantage_api_key)
+        iv_task = _fetch_iv_from_uw(normalised, uw_api_key, client)
+
+        f29_task = (
+            asyncio.coroutine(lambda: f29_cached)()
+            if f29_cached is not None
+            else evaluate_framework29(polygon_api_key, uw_api_key)
+        )
+        f30_task = (
+            asyncio.coroutine(lambda: f30_cached)()
+            if f30_cached is not None
+            else evaluate_framework30(session, polygon_api_key)
+        )
+
+        results = await asyncio.gather(
+            f7_task, f9_task, iv_task, f29_task, f30_task,
+            return_exceptions=True,
+        )
+
+    f7_result, f9_result, iv_result, f29_result_raw, f30_result_raw = results
+
+    # Unwrap results safely.
+    gate_f7_active: bool | None = None
+    if not isinstance(f7_result, BaseException):
+        gate_f7_active = f7_result.gate_active  # type: ignore[union-attr]
+
+    score: int | None = None
+    tier: str | None = None
+    flow_confirmed: bool | None = None
+
+    if not isinstance(f9_result, BaseException):
+        f9 = f9_result  # type: ignore[assignment]
+        score_raw = f9.score  # type: ignore[union-attr]
+        score = int(score_raw) if score_raw is not None else None
+        if score is not None:
+            tier = _determine_tier(score)
+            # For Tier 2: check dark pool flow ≥ $500K.
+            dp_usd = getattr(f9, "dark_pool_usd", None)  # type: ignore[union-attr]
+            if dp_usd is not None:
+                flow_confirmed = float(dp_usd) >= _TIER_2_DARK_POOL_FLOW_USD
+            else:
+                flow_confirmed = None
+
+    iv_current: float | None = None
+    iv_percentile: float | None = None
+    if not isinstance(iv_result, BaseException):
+        iv_current, iv_percentile = iv_result  # type: ignore[misc]
+
+    gate_f29_passed: bool | None = None
+    f29_vix_signal: bool | None = None
+    if not isinstance(f29_result_raw, BaseException) and f29_result_raw is not None:
+        gate_f29_passed = f29_result_raw.and_gate_passed  # type: ignore[union-attr]
+        # Extract Signal 1 (VIX declining) status for entry condition 1.
+        signals = getattr(f29_result_raw, "signals", [])  # type: ignore[union-attr]
+        if signals:
+            sig1 = next((s for s in signals if s.signal_number == 1), None)
+            if sig1:
+                from atlas.schemas.framework29 import SignalStatus
+                f29_vix_signal = sig1.status == SignalStatus.CONFIRMED
+
+    gate_f30_permits_leaps: bool | None = None
+    regime_state: str | None = None
+    if not isinstance(f30_result_raw, BaseException) and f30_result_raw is not None:
+        gate_f30_permits_leaps = getattr(f30_result_raw, "leaps_permitted", None)  # type: ignore[union-attr]
+
+    # Regime state: derive from F30 drawdown (best we can without a separate F2 call).
+    # For LEAPS, we use F29 gate as a proxy for regime health when F2 is not called.
+    if gate_f29_passed is True and (
+        gate_f30_permits_leaps is True or gate_f30_permits_leaps is None
+    ):
+        regime_state = "CLEAR"
+    elif gate_f29_passed is False:
+        regime_state = "CAUTION"
+    else:
+        regime_state = None
+
+    # Build entry conditions.
+    entry_conditions = [
+        _evaluate_entry_condition1(f29_vix_signal),
+        _evaluate_entry_condition2(regime_state),
+        _evaluate_entry_condition3(score),
+    ]
+
+    result = _compute_eligibility(
+        ticker=normalised,
+        score=score,
+        tier=tier,
+        flow_confirmed=flow_confirmed,
+        regime_state=regime_state,
+        gate_f7_active=gate_f7_active,
+        gate_f29_passed=gate_f29_passed,
+        gate_f30_permits_leaps=gate_f30_permits_leaps,
+        iv_current=iv_current,
+        iv_percentile=iv_percentile,
+        entry_conditions=entry_conditions,
+        data_age_minutes=0,
+    )
+
+    _cache_set(normalised, result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Position and bucket queries
+# ---------------------------------------------------------------------------
+
+
+async def get_leaps_positions(session: AsyncSession) -> list[LeapsPositionSchema]:
+    """Return all open LEAPS positions from the DB.
+
+    V1: positions have no live price enrichment — prices are null.
+    """
+    result = await session.execute(
+        select(LeapsPosition).where(LeapsPosition.status == "OPEN")
+    )
+    positions = list(result.scalars().all())
+
+    return [
+        LeapsPositionSchema(
+            id=p.id,
+            ticker=p.ticker,
+            option_symbol=p.option_symbol,
+            expiration_date=p.expiration_date.isoformat(),
+            strike_price=float(p.strike_price),
+            option_type=p.option_type,
+            contracts=p.contracts,
+            entry_price=float(p.entry_price),
+            current_price=None,
+            current_value=None,
+            theta_daily=None,
+            iv_at_entry=float(p.iv_at_entry) if p.iv_at_entry else None,
+            iv_current=None,
+            pnl_usd=None,
+            pnl_pct=None,
+            days_to_expiry=(p.expiration_date - date.today()).days,
+            status=p.status,
+            notes=p.notes,
+        )
+        for p in positions
+    ]
+
+
+async def get_leaps_bucket(
+    session: AsyncSession,
+    current_nav: float | None = None,
+) -> LeapsBucketStatus:
+    """Return the current LEAPS bucket utilisation.
+
+    V1: positions have no live prices, so deployed_usd uses entry_price.
+    """
+    result = await session.execute(
+        select(LeapsPosition).where(LeapsPosition.status == "OPEN")
+    )
+    positions = list(result.scalars().all())
+
+    # Total cost basis (entry_price * contracts * 100).
+    SHARES_PER_CONTRACT: Final[int] = 100
+    total_deployed_usd = sum(
+        float(p.entry_price) * p.contracts * SHARES_PER_CONTRACT for p in positions
+    )
+
+    total_deployed_pct = 0.0
+    bucket_available_usd: float | None = None
+
+    if current_nav and current_nav > 0:
+        total_deployed_pct = total_deployed_usd / current_nav * 100.0
+        bucket_available_usd = max(
+            0.0, (_LEAPS_BUCKET_CAP_PCT / 100.0 - total_deployed_usd / current_nav) * current_nav
+        )
+
+    bucket_available_pct = max(0.0, _LEAPS_BUCKET_CAP_PCT - total_deployed_pct)
+
+    warning_messages: list[str] = []
+    if total_deployed_pct > _LEAPS_BUCKET_CAP_PCT:
+        warning_messages.append(
+            f"LEAPS bucket at {total_deployed_pct:.1f}% NAV — exceeds {_LEAPS_BUCKET_CAP_PCT}% cap."
+        )
+
+    return LeapsBucketStatus(
+        total_deployed_usd=round(total_deployed_usd, 2),
+        total_deployed_pct=round(total_deployed_pct, 4),
+        total_cap_pct=_LEAPS_BUCKET_CAP_PCT,
+        positions_count=len(positions),
+        bucket_available_pct=round(bucket_available_pct, 4),
+        bucket_available_usd=round(bucket_available_usd, 2) if bucket_available_usd is not None else None,
+        warning_messages=warning_messages,
+    )

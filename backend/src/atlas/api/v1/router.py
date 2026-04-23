@@ -14,9 +14,12 @@ from atlas.api.v1 import (
     framework9,
     framework13,
     framework14,
+    framework29,
+    framework30,
     framework_score,
     fundamental,
     health,
+    leaps,
     market_conditions,
     momentum,
     options_flow,
@@ -48,6 +51,9 @@ router.include_router(framework8.router)
 router.include_router(framework9.router)
 router.include_router(framework13.router)
 router.include_router(framework14.router)
+router.include_router(framework29.router)
+router.include_router(framework30.router)
+router.include_router(leaps.router)
 router.include_router(position_sizing.router)
 router.include_router(tranche_sizing.router)
 router.include_router(regime_modifier.router)

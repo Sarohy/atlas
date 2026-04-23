@@ -1,6 +1,7 @@
 'use client';
 
 import { useConvictionAction } from '@/lib/hooks/use-conviction-action';
+import { useLeaps } from '@/lib/hooks/use-leaps';
 import type { ConvictionActionResponse, Tier } from '@/lib/schemas/conviction-action';
 import { cn } from '@/lib/utils';
 
@@ -62,6 +63,8 @@ type ConvictionActionPanelProps = {
 export function ConvictionActionPanel({ ticker, adjustedScore }: ConvictionActionPanelProps) {
   const activeTicker = ticker.trim().length > 0;
   const { data, isLoading, isError, error } = useConvictionAction(ticker, adjustedScore);
+  const { data: leapsData } = useLeaps(ticker);
+  const leapsEligible: boolean | null = leapsData?.leaps_eligible ?? null;
   const hasData = activeTicker && data !== undefined;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load conviction data.';
 
@@ -89,7 +92,7 @@ export function ConvictionActionPanel({ ticker, adjustedScore }: ConvictionActio
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && <ConvictionContent data={data} />}
+        {!isLoading && !isError && hasData && <ConvictionContent data={data} leapsEligible={leapsEligible} />}
         {!isLoading && !isError && !hasData && activeTicker && (
           <p className="atlas-fws-state-msg" data-testid="conviction-empty">
             No conviction data available for {ticker}.
@@ -117,7 +120,13 @@ function getTierMessage(tier: string): string {
   return TIER_MESSAGES[tier] ?? tier;
 }
 
-function ConvictionContent({ data }: { data: ConvictionActionResponse }) {
+function ConvictionContent({
+  data,
+  leapsEligible,
+}: {
+  data: ConvictionActionResponse;
+  leapsEligible: boolean | null;
+}) {
   const tierColorClass = TIER_COLOR_CLASS[data.tier] ?? '';
   const bandLabel = data.score_band_max !== null
     ? `${data.score_band_min}–${data.score_band_max}`
@@ -223,10 +232,24 @@ function ConvictionContent({ data }: { data: ConvictionActionResponse }) {
         </div>
       </div>
 
-      {/* ── Section 6: LEAPS chip (TIER_1_CORE only) ────────────────────── */}
-      {data.leaps_eligible && (
-        <div className="atlas-conviction-leaps-chip" data-testid="conviction-leaps-chip">
-          LEAPS ELIGIBLE
+      {/* ── Section 6: LEAPS chip (TIER_1_CORE only, tristate) ─────────── */}
+      {data.tier === 'TIER_1_CORE' && (
+        <div
+          className={cn(
+            'atlas-conviction-leaps-chip',
+            leapsEligible === true
+              ? 'is-leaps-elig-eligible'
+              : leapsEligible === false
+                ? 'is-conviction-leaps-blocked'
+                : 'is-conviction-leaps-unknown',
+          )}
+          data-testid="conviction-leaps-chip"
+        >
+          {leapsEligible === true
+            ? 'LEAPS ELIGIBLE'
+            : leapsEligible === false
+              ? 'LEAPS BLOCKED'
+              : 'LEAPS UNKNOWN'}
         </div>
       )}
 

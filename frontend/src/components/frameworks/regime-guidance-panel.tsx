@@ -1,6 +1,7 @@
 'use client';
 
 import { useFramework7 } from '@/lib/hooks/use-framework7';
+import { useLeaps } from '@/lib/hooks/use-leaps';
 import { usePositionSizing } from '@/lib/hooks/use-position-sizing';
 import type { PositionSizingResponse, PositionTier } from '@/lib/schemas/position-sizing';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,8 @@ export function RegimeGuidancePanel({
   // Framework7Card uses the identical query key in the same render tree.
   const { data: gateData } = useFramework7(ticker, baseScore);
   const f7GateActive = gateData?.gate_active ?? false;
+  const { data: leapsData } = useLeaps(ticker);
+  const leapsEligible: boolean | null = leapsData?.leaps_eligible ?? null;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load framework 3 data.';
 
   return (
@@ -79,7 +82,7 @@ export function RegimeGuidancePanel({
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && <ActionContent data={data} f7GateActive={f7GateActive} />}
+        {!isLoading && !isError && hasData && <ActionContent data={data} f7GateActive={f7GateActive} leapsEligible={leapsEligible} />}
         {!isLoading && !isError && !hasData && activeTicker && (
           <p className="atlas-fws-state-msg" data-testid="regime-guidance-empty">
             No position sizing available for {ticker}.
@@ -97,9 +100,11 @@ export function RegimeGuidancePanel({
 function ActionContent({
   data,
   f7GateActive = false,
+  leapsEligible = null,
 }: {
   data: PositionSizingResponse;
   f7GateActive?: boolean;
+  leapsEligible?: boolean | null;
 }) {
   const tone = tierToTone(data.tier);
   const filledSegs = Math.round(data.conviction_score / SCORE_BAR_SEGMENTS);
@@ -159,7 +164,18 @@ function ActionContent({
         <p className="atlas-regime-cash-title">POSITION DETAILS</p>
         <div className="atlas-regime-cash-row">
           <span className="atlas-regime-cash-label">LEAPS eligible</span>
-          <span className="atlas-regime-cash-value">{data.leaps_eligible ? 'Yes' : 'No'}</span>
+          <span
+            className={cn(
+              'atlas-regime-cash-value',
+              leapsEligible === true
+                ? 'is-active'
+                : leapsEligible === false
+                  ? 'is-blocked'
+                  : 'is-waiting',
+            )}
+          >
+            {leapsEligible === true ? 'Yes' : leapsEligible === false ? 'No' : '—'}
+          </span>
         </div>
         <div className="atlas-regime-cash-row">
           <span className="atlas-regime-cash-label">Adds permitted</span>

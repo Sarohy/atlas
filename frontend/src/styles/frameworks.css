@@ -3518,10 +3518,29 @@
   letter-spacing: 0.1em;
   padding: 3px 8px;
   border-radius: 3px;
+  margin-bottom: 10px;
+  /* default (legacy green) — overridden by state variants below */
   background: rgba(57, 211, 83, 0.15);
   color: #39d353;
   border: 1px solid rgba(57, 211, 83, 0.4);
-  margin-bottom: 10px;
+}
+
+.atlas-conviction-leaps-chip.is-leaps-elig-eligible {
+  background: rgba(57, 211, 83, 0.15);
+  color: #39d353;
+  border-color: rgba(57, 211, 83, 0.4);
+}
+
+.atlas-conviction-leaps-chip.is-conviction-leaps-blocked {
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.atlas-conviction-leaps-chip.is-conviction-leaps-unknown {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.35);
 }
 
 /* ── Exit cycle counter (WATCHLIST only) ── */
@@ -5064,4 +5083,980 @@
 .atlas-fws-f4-gap-msg {
   color: #94a3b8;
   margin-left: 6px;
+}
+
+/* ==========================================================================
+   Framework 29 — Capitulation / Re-Entry Signal  (.atlas-f29-*)
+   ========================================================================== */
+
+.atlas-f29-panel {
+  flex: 1;
+  min-width: 300px;
+}
+
+/* ── Header ── */
+
+.atlas-f29-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-f29-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Gate chip ── */
+
+.atlas-f29-gate-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f29-gate-chip.is-f29-gate-passed {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.atlas-f29-gate-chip.is-f29-gate-failed {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+/* ── Gate summary bar ── */
+
+.atlas-f29-gate-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.atlas-f29-gate-bar-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f29-gate-count {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-f29-unavailable-note {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #4b6070;
+}
+
+.atlas-f29-gate-track {
+  display: flex;
+  gap: 4px;
+  height: 6px;
+}
+
+.atlas-f29-gate-seg {
+  flex: 1;
+  border-radius: 2px;
+}
+
+.atlas-f29-gate-seg.is-f29-seg-confirmed { background: #22c55e; }
+.atlas-f29-gate-seg.is-f29-seg-unavailable { background: #334155; }
+.atlas-f29-gate-seg.is-f29-seg-empty { background: #1e2d40; }
+
+.atlas-f29-gate-message {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+/* ── Signal cards grid ── */
+
+.atlas-f29-signals-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-f29-signal-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f29-signal-card.is-f29-confirmed { border-left: 3px solid #22c55e; }
+.atlas-f29-signal-card.is-f29-not-met { border-left: 3px solid #f85149; }
+.atlas-f29-signal-card.is-f29-unavailable { border-left: 3px solid #334155; }
+.atlas-f29-signal-card.is-f29-manual { border-left: 3px solid #f59e0b; }
+
+.atlas-f29-signal-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f29-signal-number {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #4b6070;
+  min-width: 20px;
+}
+
+.atlas-f29-signal-name {
+  flex: 1;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.atlas-f29-signal-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f29-signal-chip.is-f29-confirmed {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.atlas-f29-signal-chip.is-f29-not-met {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.atlas-f29-signal-chip.is-f29-unavailable {
+  color: #4b6070;
+  background: #1e2d40;
+}
+
+.atlas-f29-signal-chip.is-f29-manual {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.atlas-f29-signal-missing {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  line-height: 1.4;
+}
+
+/* ── Manual confirm button ── */
+
+.atlas-f29-confirm-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.atlas-f29-confirm-btn:hover {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.atlas-f29-confirm-btn:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* ── Warning messages ── */
+
+.atlas-f29-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f29-warning-item {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #f0a500;
+  padding: 3px 6px;
+  background: rgba(240, 165, 0, 0.07);
+  border-left: 2px solid #f0a500;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.4;
+}
+
+/* ── Footer ── */
+
+.atlas-f29-footer {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid #111827;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   Framework 30 — Max Drawdown Gate  (.atlas-f30-*)
+   ========================================================================== */
+
+.atlas-f30-panel {
+  flex: 1;
+  min-width: 300px;
+}
+
+/* ── Header ── */
+
+.atlas-f30-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-f30-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── State chip ── */
+
+.atlas-f30-state-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f30-state-chip-sm {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.atlas-f30-state-chip.is-f30-normal,
+.atlas-f30-state-chip-sm.is-f30-normal {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.atlas-f30-state-chip.is-f30-carveout,
+.atlas-f30-state-chip-sm.is-f30-carveout {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.atlas-f30-state-chip.is-f30-hard-halt,
+.atlas-f30-state-chip-sm.is-f30-hard-halt {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+  animation: atlas-fws-pulse 1.8s ease-in-out infinite;
+}
+
+.atlas-f30-state-chip.is-f30-unknown,
+.atlas-f30-state-chip-sm.is-f30-unknown {
+  color: #4b6070;
+  background: #1e2d40;
+  border-color: #334155;
+}
+
+/* ── Content wrapper ── */
+
+.atlas-f30-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Stat cards row ── */
+
+.atlas-f30-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.atlas-f30-stat-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f30-stat-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-f30-stat-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #e8edf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.atlas-f30-stat-value.is-f30-normal-value { color: #22c55e; }
+.atlas-f30-stat-value.is-f30-carveout-value { color: #f59e0b; }
+.atlas-f30-stat-value.is-f30-halt-value { color: #f85149; }
+
+/* ── Drawdown progress bar ── */
+
+.atlas-f30-drawdown-bar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f30-drawdown-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.atlas-f30-drawdown-bar-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-f30-drawdown-bar-pct {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-f30-drawdown-bar-track {
+  position: relative;
+  height: 8px;
+  background: #1e2d40;
+  border-radius: 4px;
+  overflow: visible;
+}
+
+.atlas-f30-drawdown-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.35s ease;
+}
+
+.atlas-f30-drawdown-bar-fill.is-f30-bar-normal { background: #22c55e; }
+.atlas-f30-drawdown-bar-fill.is-f30-bar-carveout { background: #f59e0b; }
+.atlas-f30-drawdown-bar-fill.is-f30-bar-halt { background: #f85149; }
+.atlas-f30-drawdown-bar-fill.is-f30-bar-unknown { background: #334155; }
+
+.atlas-f30-drawdown-bar-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.atlas-f30-drawdown-bar-marker--amber { background: #f59e0b; }
+.atlas-f30-drawdown-bar-marker--red { background: #f85149; }
+
+.atlas-f30-drawdown-bar-labels {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  color: #4b6070;
+}
+
+/* ── Gate rules panel ── */
+
+.atlas-f30-rules-panel {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f30-rules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #111827;
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.atlas-f30-rules-title {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-f30-rule-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.atlas-f30-rule-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #4b6070;
+}
+
+.atlas-f30-rule-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-f30-rule-value.is-f30-green { color: #22c55e; }
+.atlas-f30-rule-value.is-f30-red { color: #f85149; }
+
+/* ── Positions alert ── */
+
+.atlas-f30-positions-alert {
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f30-positions-stale,
+.atlas-f30-positions-missing {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #f59e0b;
+  line-height: 1.4;
+}
+
+.atlas-f30-positions-missing { color: #f85149; }
+
+/* ── Warning messages ── */
+
+.atlas-f30-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f30-warning-item {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #f0a500;
+  padding: 3px 6px;
+  background: rgba(240, 165, 0, 0.07);
+  border-left: 2px solid #f0a500;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.4;
+}
+
+/* ── Recovery panel ── */
+
+.atlas-f30-recovery-panel {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f30-recovery-label {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.atlas-f30-recovery-days {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  color: #fde68a;
+}
+
+/* ── Footer ── */
+
+.atlas-f30-footer {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid #111827;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .atlas-f30-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ==========================================================================
+   LEAPS Strategy — Section 17  (.atlas-leaps-*)
+   ========================================================================== */
+
+.atlas-leaps-panel {
+  flex: 1;
+  min-width: 300px;
+}
+
+/* ── Header ── */
+
+.atlas-leaps-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-leaps-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Eligibility chip ── */
+
+.atlas-leaps-eligibility-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-leaps-eligibility-chip.is-leaps-elig-eligible {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.atlas-leaps-eligibility-chip.is-leaps-elig-blocked {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.atlas-leaps-eligibility-chip.is-leaps-elig-unknown {
+  color: #94a3b8;
+  background: #1e2d40;
+  border-color: #334155;
+}
+
+/* ── Content wrapper ── */
+
+.atlas-leaps-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Context row ── */
+
+.atlas-leaps-context-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.atlas-leaps-context-cell {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-leaps-context-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.44rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-leaps-context-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #e8edf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Gate checks row ── */
+
+.atlas-leaps-gates-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.atlas-leaps-gate-cell {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.atlas-leaps-gate-cell.is-leaps-gate-passed {
+  border-left: 2px solid #22c55e;
+}
+
+.atlas-leaps-gate-cell.is-leaps-gate-failed {
+  border-left: 2px solid #f85149;
+}
+
+.atlas-leaps-gate-cell.is-leaps-gate-unknown {
+  border-left: 2px solid #334155;
+}
+
+.atlas-leaps-gate-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b6070;
+  text-align: center;
+}
+
+.atlas-leaps-gate-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-leaps-gate-cell.is-leaps-gate-passed .atlas-leaps-gate-value { color: #22c55e; }
+.atlas-leaps-gate-cell.is-leaps-gate-failed .atlas-leaps-gate-value { color: #f85149; }
+.atlas-leaps-gate-cell.is-leaps-gate-unknown .atlas-leaps-gate-value { color: #4b6070; }
+
+/* ── Entry conditions ── */
+
+.atlas-leaps-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-leaps-conditions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-leaps-conditions-title {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-leaps-conditions-count {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.atlas-leaps-condition-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 6px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-leaps-condition-card.is-leaps-cond-confirmed { border-left: 2px solid #22c55e; }
+.atlas-leaps-condition-card.is-leaps-cond-not-met { border-left: 2px solid #f85149; }
+.atlas-leaps-condition-card.is-leaps-cond-incomplete { border-left: 2px solid #f59e0b; }
+.atlas-leaps-condition-card.is-leaps-cond-na { border-left: 2px solid #334155; }
+
+.atlas-leaps-condition-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.atlas-leaps-condition-name {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  color: #94a3b8;
+  flex: 1;
+}
+
+.atlas-leaps-condition-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-leaps-condition-chip.is-leaps-cond-confirmed { color: #22c55e; background: rgba(34,197,94,0.12); }
+.atlas-leaps-condition-chip.is-leaps-cond-not-met { color: #f85149; background: rgba(248,81,73,0.12); }
+.atlas-leaps-condition-chip.is-leaps-cond-incomplete { color: #f59e0b; background: rgba(245,158,11,0.12); }
+.atlas-leaps-condition-chip.is-leaps-cond-na { color: #4b6070; background: #1e2d40; }
+
+.atlas-leaps-condition-detail {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  line-height: 1.4;
+}
+
+/* ── IV panel ── */
+
+.atlas-leaps-iv-panel {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-leaps-iv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #111827;
+  padding-bottom: 4px;
+}
+
+.atlas-leaps-iv-title {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-leaps-iv-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.atlas-leaps-iv-chip.is-leaps-iv-none { color: #22c55e; background: rgba(34,197,94,0.1); }
+.atlas-leaps-iv-chip.is-leaps-iv-blocked { color: #f85149; background: rgba(248,81,73,0.12); }
+.atlas-leaps-iv-chip.is-leaps-iv-signal { color: #22d3ee; background: rgba(34,211,238,0.1); }
+.atlas-leaps-iv-chip.is-leaps-iv-proximity { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.atlas-leaps-iv-chip.is-leaps-iv-unknown { color: #4b6070; background: #1e2d40; }
+
+.atlas-leaps-iv-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.atlas-leaps-iv-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-leaps-iv-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-leaps-iv-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-leaps-iv-value.is-leaps-iv-blocked { color: #f85149; }
+.atlas-leaps-iv-value.is-leaps-iv-none { color: #22c55e; }
+
+/* ── Block reasons ── */
+
+.atlas-leaps-block-reasons {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-leaps-block-reason {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #f85149;
+  padding: 3px 6px;
+  background: rgba(248, 81, 73, 0.07);
+  border-left: 2px solid #f85149;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.4;
+}
+
+/* ── Warning messages ── */
+
+.atlas-leaps-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-leaps-warning-item {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #f0a500;
+  padding: 3px 6px;
+  background: rgba(240, 165, 0, 0.07);
+  border-left: 2px solid #f0a500;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.4;
+}
+
+/* ── Footer ── */
+
+.atlas-leaps-footer {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid #111827;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .atlas-leaps-context-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

@@ -25,18 +25,17 @@ import httpx
 
 from atlas.schemas.analyst import AnalystResponse
 from atlas.schemas.earnings import EarningsResponse
+from atlas.schemas.framework9 import Framework9Result
 from atlas.schemas.framework_score import (
     FactorBreakdown,
     FrameworkScoreResponse,
 )
 from atlas.schemas.fundamental import FundamentalResponse
 from atlas.schemas.momentum import MomentumResponse
-from atlas.schemas.options_flow import OptionsFlowResponse
 from atlas.services.analyst_service import AnalystService
 from atlas.services.earnings_service import EarningsService
 from atlas.services.fundamental_service import FundamentalService
 from atlas.services.momentum_service import MomentumService
-from atlas.services.options_flow_service import OptionsFlowService
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +246,21 @@ class FrameworkScoreService:
                 (isinstance(f2_result, EarningsResponse) and not f2_result.data_available)
                 or (isinstance(f5_result, FundamentalResponse) and not f5_result.data_available)
             ),
+            f4_data_gap_badge=(
+                f4_result.f1_propagation_badge
+                if hasattr(f4_result, "f1_propagation_badge")
+                else None
+            ),
+            f4_data_gap_message=(
+                f4_result.f1_propagation_message
+                if hasattr(f4_result, "f1_propagation_message")
+                else None
+            ),
+            f4_data_gap_tooltip=(
+                f4_result.f1_propagation_tooltip
+                if hasattr(f4_result, "f1_propagation_tooltip")
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -322,10 +336,16 @@ class FrameworkScoreService:
         )
         return await service.compute_analyst(ticker, overview_task=overview_task)
 
-    async def _fetch_f4(self, ticker: str) -> OptionsFlowResponse:
-        """Fetch F4 Options Flow score."""
-        service = OptionsFlowService(api_key=self._unusual_whales_key)
-        return await service.compute_options_flow(ticker)
+    async def _fetch_f4(self, ticker: str) -> Framework9Result:
+        """Fetch F4 Options Flow score via Framework 9 evaluation pipeline."""
+        from atlas.services.framework9_service import evaluate_framework9
+
+        return await evaluate_framework9(
+            ticker,
+            self._unusual_whales_key,
+            self._polygon_key,
+            self._alphavantage_key,
+        )
 
     async def _fetch_f5(
         self,
@@ -338,7 +358,9 @@ class FrameworkScoreService:
             sec_api_key=self._sec_key,
             alphavantage_key=self._alphavantage_key,
         )
-        return await service.compute_fundamental(ticker, income_task=income_task, overview_task=overview_task)
+        return await service.compute_fundamental(
+            ticker, income_task=income_task, overview_task=overview_task
+        )
 
     # ------------------------------------------------------------------
     # Private — score extraction with fallback

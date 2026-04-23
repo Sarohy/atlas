@@ -4743,3 +4743,325 @@
   font-size: 0.6rem;
   margin-top: 1px;
 }
+
+/* ==========================================================================
+   Framework 9 — Options Flow Signal Hierarchy
+   ========================================================================== */
+
+.atlas-f9-panel {
+  border-top: 2px solid #1e3a5f;
+}
+
+.atlas-f9-warning-amber { border-top-color: #d97706; }
+.atlas-f9-warning-red   { border-top-color: #dc2626; }
+
+/* ── Header ── */
+
+.atlas-f9-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+  gap: 8px;
+}
+
+.atlas-f9-header-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-f9-src-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.atlas-f9-src-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.atlas-f9-src-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.atlas-f9-src-chip.is-f9-src-online   { background: #0a1f0a; color: #4ade80; }
+.atlas-f9-src-chip.is-f9-src-online   .atlas-f9-src-dot { background: #4ade80; }
+.atlas-f9-src-chip.is-f9-src-partial  { background: #1a1000; color: #fbbf24; }
+.atlas-f9-src-chip.is-f9-src-partial  .atlas-f9-src-dot { background: #fbbf24; }
+.atlas-f9-src-chip.is-f9-src-stale    { background: #1a0f00; color: #fb923c; }
+.atlas-f9-src-chip.is-f9-src-stale    .atlas-f9-src-dot { background: #fb923c; }
+.atlas-f9-src-chip.is-f9-src-offline  { background: #1a0a0a; color: #f87171; }
+.atlas-f9-src-chip.is-f9-src-offline  .atlas-f9-src-dot { background: #f87171; }
+
+/* ── Gap alert ── */
+
+.atlas-f9-gap-alert {
+  margin: 0 14px 8px;
+  border-radius: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid currentColor;
+}
+
+.atlas-f9-gap-alert.is-f9-amber { background: #1a1000; color: #fbbf24; border-color: #d97706; }
+.atlas-f9-gap-alert.is-f9-red   { background: #1a0a0a; color: #fca5a5; border-color: #dc2626; }
+.atlas-f9-gap-alert.is-f9-green { background: #0a1f0a; color: #4ade80; border-color: #16a34a; }
+
+.atlas-f9-gap-badge {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.atlas-f9-gap-msg {
+  font-size: 0.55rem;
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.atlas-f9-gap-list {
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: disc;
+}
+
+.atlas-f9-gap-item {
+  font-size: 0.5rem;
+  line-height: 1.45;
+  margin-bottom: 2px;
+}
+
+/* ── Score row ── */
+
+.atlas-f9-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+}
+
+.atlas-f9-score-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 48px;
+}
+
+.atlas-f9-score-number {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #e2e8f0;
+}
+
+.atlas-f9-score-grade {
+  font-size: 0.5rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-top: 2px;
+}
+
+.atlas-f9-tier-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f9-tier-label {
+  font-size: 0.6rem;
+  color: #94a3b8;
+}
+
+.atlas-f9-severity-chip {
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.atlas-f9-severity-chip.is-f9-green { background: #0a1f0a; color: #4ade80; }
+.atlas-f9-severity-chip.is-f9-amber { background: #1a1000; color: #fbbf24; }
+.atlas-f9-severity-chip.is-f9-red   { background: #1a0a0a; color: #f87171; }
+
+/* ── Stat cards ── */
+
+.atlas-f9-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  padding: 4px 14px 8px;
+}
+
+.atlas-f9-stat-card {
+  background: #0f1c28;
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f9-stat-label {
+  font-size: 0.48rem;
+  color: #5a7a94;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.atlas-f9-stat-value {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+/* ── Dark pool ── */
+
+.atlas-f9-dark-pool {
+  padding: 4px 14px 8px;
+}
+
+.atlas-f9-section-title {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #5a7a94;
+  margin: 0 0 4px;
+}
+
+.atlas-f9-dp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  border-bottom: 1px solid #112233;
+  font-size: 0.55rem;
+}
+
+.atlas-f9-dp-label { color: #94a3b8; }
+.atlas-f9-dp-value { color: #e2e8f0; font-weight: 500; }
+
+/* ── Breakdown ── */
+
+.atlas-f9-breakdown {
+  padding: 4px 14px 8px;
+}
+
+.atlas-f9-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.55rem;
+  padding: 2px 0;
+  color: #94a3b8;
+}
+
+.atlas-f9-breakdown-row.atlas-f9-breakdown-warning { color: #fbbf24; }
+.atlas-f9-breakdown-row.atlas-f9-breakdown-total   { color: #e2e8f0; font-weight: 600; border-top: 1px solid #1e3a5f; margin-top: 4px; padding-top: 4px; }
+
+.atlas-f9-skipped { color: #3a5a74; font-style: italic; }
+
+/* ── Flags ── */
+
+.atlas-f9-flags {
+  padding: 4px 14px 8px;
+}
+
+.atlas-f9-flag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f9-flag-item {
+  font-size: 0.5rem;
+  color: #fbbf24;
+  line-height: 1.4;
+  padding: 3px 6px;
+  background: #1a1000;
+  border-radius: 3px;
+}
+
+/* ── Source detail ── */
+
+.atlas-f9-source-detail {
+  padding: 4px 14px 10px;
+}
+
+.atlas-f9-source-summary {
+  font-size: 0.52rem;
+  color: #5a7a94;
+  cursor: pointer;
+  user-select: none;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.atlas-f9-source-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+}
+
+.atlas-f9-source-dl dt { font-size: 0.5rem; color: #5a7a94; }
+.atlas-f9-source-dl dd { font-size: 0.5rem; color: #94a3b8; margin: 0; }
+
+.atlas-f9-tooltip-text {
+  font-size: 0.48rem;
+  color: #5a7a94;
+  margin: 6px 0 0;
+  line-height: 1.45;
+  font-style: italic;
+}
+
+/* ── F4 gap badge in Framework Score panel ── */
+
+.atlas-fws-f4-inline-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.atlas-fws-f4-inline-badge.is-amber { background: #1a1000; color: #fbbf24; }
+.atlas-fws-f4-inline-badge.is-red   { background: #1a0a0a; color: #f87171; }
+
+.atlas-fws-f4-gap-note {
+  padding: 5px 14px 4px;
+  font-size: 0.52rem;
+  border-top: 1px solid #1e3a5f;
+}
+
+.atlas-fws-f4-gap-badge {
+  font-weight: 700;
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-fws-f4-gap-msg {
+  color: #94a3b8;
+  margin-left: 6px;
+}

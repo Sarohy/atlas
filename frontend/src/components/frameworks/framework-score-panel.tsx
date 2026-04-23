@@ -8,6 +8,7 @@ import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
+import { useFramework9 } from '@/lib/hooks/use-framework9';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 
@@ -64,6 +65,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
   const { data: earningsData } = useEarnings(ticker);
   const { data: analystData } = useAnalyst(ticker);
   const { data: optionsFlowData } = useOptionsFlow(ticker);
+  const { data: framework9Data } = useFramework9(ticker);
   const { data: fundamentalData } = useFundamental(ticker);
 
   const displayData = data
@@ -71,7 +73,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
         f1: momentumData?.f1_score,
         f2: earningsData?.f2_score,
         f3: analystData?.f3_score,
-        f4: optionsFlowData?.f4_score,
+        f4: framework9Data?.f4_score ?? optionsFlowData?.f4_score,
         f5: fundamentalData?.f5_score,
       })
     : undefined;
@@ -125,7 +127,12 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
           />
         )}
         {!isLoading && !isError && displayData && (
-          <FrameworkScoreContent data={displayData} regimeModifier={regimeModifier} />
+          <FrameworkScoreContent
+            data={displayData}
+            regimeModifier={regimeModifier}
+            f4GapBadge={data?.f4_data_gap_badge ?? null}
+            f4GapMessage={data?.f4_data_gap_message ?? null}
+          />
         )}
         {!isLoading && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
@@ -195,7 +202,17 @@ function DegradedBanner({
 // Main content
 // ---------------------------------------------------------------------------
 
-function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreResponse; regimeModifier: number }) {
+function FrameworkScoreContent({
+  data,
+  regimeModifier,
+  f4GapBadge,
+  f4GapMessage,
+}: {
+  data: FrameworkScoreResponse;
+  regimeModifier: number;
+  f4GapBadge: string | null;
+  f4GapMessage: string | null;
+}) {
   const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
 
@@ -263,11 +280,17 @@ function FrameworkScoreContent({ data, regimeModifier }: { data: FrameworkScoreR
           <span>Contribution</span>
         </div>
         {data.factors.map((f) => (
-          <FactorRow key={f.key} factor={f} />
+          <FactorRow key={f.key} factor={f} f4GapBadge={f.key === 'f4' ? f4GapBadge : null} />
         ))}
 
         {/* ── Calculation footer ── */}
         <div className="atlas-fws-breakdown-divider" />
+        {f4GapBadge && (
+          <div className="atlas-fws-f4-gap-note" data-testid="fws-f4-gap-note">
+            <span className="atlas-fws-f4-gap-badge">⚠ {f4GapBadge}</span>
+            {f4GapMessage && <span className="atlas-fws-f4-gap-msg"> {f4GapMessage}</span>}
+          </div>
+        )}
         <div className="atlas-fws-calc-row">
           <span className="atlas-fws-calc-label">Raw total</span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
@@ -365,7 +388,13 @@ function mapAction(finalScore: number): [string, string] {
 // Factor row
 // ---------------------------------------------------------------------------
 
-function FactorRow({ factor }: { factor: FactorBreakdown }) {
+function FactorRow({
+  factor,
+  f4GapBadge,
+}: {
+  factor: FactorBreakdown;
+  f4GapBadge: string | null;
+}) {
   const gradeTone =
     factor.grade === 'STRONG BUY'
       ? 'is-green'
@@ -385,6 +414,17 @@ function FactorRow({ factor }: { factor: FactorBreakdown }) {
       <span className="atlas-fws-factor-name">
         <span className="atlas-fws-factor-key">{factor.key.toUpperCase()}</span> {factor.name}
         {!factor.available && <span className="atlas-fws-unavailable-tag"> (unavail.)</span>}
+        {f4GapBadge && (
+          <span
+            className={cn(
+              'atlas-fws-f4-inline-badge',
+              f4GapBadge.includes('UNAVAILABLE') ? 'is-red' : 'is-amber',
+            )}
+            title={f4GapBadge}
+          >
+            {f4GapBadge}
+          </span>
+        )}
       </span>
       <span className={cn('atlas-fws-factor-score', gradeTone)}>{factor.score}</span>
       <span className="atlas-fws-factor-weight">{(factor.weight * 100).toFixed(0)}%</span>

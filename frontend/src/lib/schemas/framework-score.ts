@@ -51,6 +51,12 @@ export const frameworkScoreResponseSchema = z.object({
   flags: z.array(z.string()).default([]),
   /** True when F2 or F5 used AV rate-limit fallback scores — do not cache */
   degraded: z.boolean().default(false),
+  /** Badge label when Framework 9 F4 data is incomplete */
+  f4_data_gap_badge: z.string().nullable().default(null),
+  /** Human-readable message for the F4 data gap */
+  f4_data_gap_message: z.string().nullable().default(null),
+  /** Tooltip text for the F4 data gap badge */
+  f4_data_gap_tooltip: z.string().nullable().default(null),
 });
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ import { CashFloorPanel } from './cash-floor-panel';
 import { ConvictionActionPanel } from './conviction-action-panel';
 import { Framework7Card } from './framework7-card';
 import { Framework8Card } from './framework8-card';
+import { Framework9Card } from './framework9-card';
 import { Framework13Card } from './framework13-card';
 import { Framework14Card } from './framework14-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
@@ -166,6 +167,10 @@ export function FrameworksPanelsSection() {
       <div className="atlas-frameworks-secondary-row">
         <Framework7Card ticker={activeTicker} adjustedScore={f1DisplayScore} />
         <Framework8Card ticker={activeTicker} />
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <Framework9Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-frameworks-secondary-row">

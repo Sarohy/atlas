@@ -115,5 +115,23 @@ class FrameworkScoreResponse(BaseModel):
     )
     degraded: bool = Field(
         default=False,
-        description="True when F2 or F5 used fallback scores due to an Alpha Vantage rate-limit. Do not cache this response.",
+        description=(
+            "True when F2 or F5 used fallback scores due to an Alpha Vantage "
+            "rate-limit. Do not cache this response."
+        ),
+    )
+    f4_data_gap_badge: str | None = Field(
+        default=None,
+        description=(
+            "Short badge label propagated from Framework 9 "
+            "when options data is incomplete."
+        ),
+    )
+    f4_data_gap_message: str | None = Field(
+        default=None,
+        description="Human-readable message explaining the F4 data gap.",
+    )
+    f4_data_gap_tooltip: str | None = Field(
+        default=None,
+        description="Detailed tooltip text for the F4 data gap badge.",
     )

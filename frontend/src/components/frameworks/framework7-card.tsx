@@ -226,7 +226,10 @@ function ScoreBar({ score, toneClass }: { score: number; toneClass: string }) {
 
 /** Format an ISO date string as "Mon D" (e.g. "2026-05-06" → "May 6"). */
 function fmtShortDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number);
+  const parts = iso.split('-').map(Number);
+  const y = parts[0] ?? 0;
+  const m = parts[1] ?? 1;
+  const d = parts[2] ?? 1;
   // Construct as local date (no timezone shift).
   return new Date(y, m - 1, d).toLocaleDateString('en-US', {
     month: 'short',

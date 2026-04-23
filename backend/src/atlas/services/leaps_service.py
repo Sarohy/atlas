@@ -507,12 +507,12 @@ async def check_leaps_eligibility(
 
     if not isinstance(f9_result, BaseException):
         f9 = f9_result  # type: ignore[assignment]
-        score_raw = f9.score  # type: ignore[union-attr]
+        score_raw = f9.f4_score  # type: ignore[union-attr]
         score = int(score_raw) if score_raw is not None else None
         if score is not None:
             tier = _determine_tier(score)
-            # For Tier 2: check dark pool flow ≥ $500K.
-            dp_usd = getattr(f9, "dark_pool_usd", None)  # type: ignore[union-attr]
+            # For Tier 2: check dark pool flow ≥ $500K via largest print.
+            dp_usd = f9.largest_print_usd  # type: ignore[union-attr]
             if dp_usd is not None:
                 flow_confirmed = float(dp_usd) >= _TIER_2_DARK_POOL_FLOW_USD
             else:

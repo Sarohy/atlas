@@ -3591,7 +3591,7 @@
 
 /* ── Tone colours ── */
 
-.atlas-f7-panel { flex: 1; min-width: 0; }
+.atlas-f7-panel { flex: 1; min-width: 300px; }
 
 .is-f7-green  { color: #22c55e; }
 .is-f7-red    { color: #ef4444; }
@@ -3667,6 +3667,10 @@
   font-size: 0.65rem;
   font-weight: 700;
   color: #e8edf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 /* ── Main action text ── */
@@ -3678,6 +3682,9 @@
   letter-spacing: 0.04em;
   line-height: 1.2;
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Score vs threshold bar ── */
@@ -3758,15 +3765,14 @@
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.44rem;
   color: #4b6070;
-  position: relative;
 }
 
 .atlas-f7-countdown-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  flex: 1;
+  text-align: center;
   color: #94a3b8;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 /* ── Rule explanation box ── */
@@ -3963,6 +3969,7 @@
 /* ── Panel shell ── */
 
 .atlas-f8-panel {
+  flex: 1;
   min-width: 320px;
 }
 
@@ -4172,6 +4179,7 @@
    ============================================================ */
 
 .atlas-f14-panel {
+  flex: 1;
   min-width: 320px;
 }
 
@@ -4542,6 +4550,7 @@
    ============================================================ */
 
 .atlas-f13-panel {
+  flex: 1;
   min-width: 300px;
 }
 

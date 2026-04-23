@@ -33,7 +33,7 @@ const STATUS_TONE: Record<string, string> = {
 
 /** Main action text per status. */
 const ACTION_TEXT: Record<string, string> = {
-  OPEN: 'WINDOW OPEN',
+  OPEN: 'OPEN',
   CLOSED: 'NO ADDS',
   '50% CAP': '50% CAP',
   'DOUBLE BLOCKED': 'DOUBLE BLOCKED',
@@ -132,7 +132,7 @@ function GateContent({ data }: { data: EarningsGate }) {
         <StatCard label="Earnings" value={data.earnings_date ?? '—'} />
         <StatCard label="Gate closes" value={data.gate_close_date ?? '—'} />
         <StatCard label="Score" value={String(data.final_score)} tone={toneClass} />
-        <StatCard label="Gate" value={data.gate_active ? 'ACTIVE' : 'OPEN'} tone={toneClass} />
+        <StatCard label="Gate" value={data.gate_active ? 'ACTIVE' : '—'} tone={toneClass} />
       </div>
 
       {/* ── Main action text ── */}
@@ -224,6 +224,16 @@ function ScoreBar({ score, toneClass }: { score: number; toneClass: string }) {
 // Countdown bar
 // ---------------------------------------------------------------------------
 
+/** Format an ISO date string as "Mon D" (e.g. "2026-05-06" → "May 6"). */
+function fmtShortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  // Construct as local date (no timezone shift).
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 function CountdownBar({
   gateCloseDate,
   earningsDate,
@@ -251,13 +261,13 @@ function CountdownBar({
         />
       </div>
       <div className="atlas-f7-countdown-labels">
-        <span>Gate {gateCloseDate}</span>
+        <span>Gate {fmtShortDate(gateCloseDate)}</span>
         {daysToEarnings !== null && (
           <span className="atlas-f7-countdown-center">
             {daysToEarnings > 0 ? `${daysToEarnings}d to earnings` : 'Earnings today'}
           </span>
         )}
-        <span>Earnings {earningsDate}</span>
+        <span>Earn {fmtShortDate(earningsDate)}</span>
       </div>
     </div>
   );

@@ -1,13 +1,24 @@
 import { apiFetch } from '@/lib/api/client';
-import { cashFloorResponseSchema, type CashFloorResponse } from '@/lib/schemas/cash-floor';
+import {
+  cashFloorResponseSchema,
+  framework5ResponseSchema,
+  type CashFloorResponse,
+  type Framework5Response,
+} from '@/lib/schemas/cash-floor';
 
 /**
- * Fetch the Framework 5 cash-floor guidance for a single ticker.
- * Calls GET /api/v1/cash-floor/{ticker}.
+ * Fetch the Framework 5 portfolio-level cash floor status.
+ * Calls GET /api/v1/cash-floor/status.
  *
- * The backend calls Framework 2 (Regime Modifier) internally to determine the
- * live regime rule; the result reflects the same Brent / VIX snapshot that
- * Framework 2 is using.
+ * No ticker required — regime and portfolio data are read server-side.
+ */
+export function fetchFramework5Status(): Promise<Framework5Response> {
+  return apiFetch('/api/v1/cash-floor/status', framework5ResponseSchema);
+}
+
+/**
+ * Fetch Framework 5 cash-floor guidance for a single ticker (legacy).
+ * Calls GET /api/v1/cash-floor/{ticker}.
  */
 export function fetchCashFloor(ticker: string): Promise<CashFloorResponse> {
   return apiFetch(

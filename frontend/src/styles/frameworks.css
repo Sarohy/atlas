@@ -143,6 +143,16 @@
   color: var(--atlas-portfolio-cyan);
 }
 
+.atlas-frameworks-overview-value.is-purple,
+.atlas-frameworks-pill.is-purple {
+  color: #a371f7;
+}
+
+.atlas-frameworks-overview-value.is-blue,
+.atlas-frameworks-pill.is-blue {
+  color: #58a6ff;
+}
+
 .atlas-frameworks-overview-value.is-green,
 .atlas-frameworks-pill.is-green {
   color: var(--atlas-portfolio-green);
@@ -2029,6 +2039,12 @@
 .atlas-fws-score-number.is-green {
   color: #22c55e;
 }
+.atlas-fws-score-number.is-purple {
+  color: #a371f7;
+}
+.atlas-fws-score-number.is-blue {
+  color: #58a6ff;
+}
 .atlas-fws-score-number.is-cyan {
   color: #22d3ee;
 }
@@ -2151,6 +2167,12 @@
 
 .atlas-fws-score-seg.is-green {
   background: #22c55e;
+}
+.atlas-fws-score-seg.is-purple {
+  background: #a371f7;
+}
+.atlas-fws-score-seg.is-blue {
+  background: #58a6ff;
 }
 .atlas-fws-score-seg.is-cyan {
   background: #22d3ee;
@@ -2655,10 +2677,11 @@
   color: #ef4444;
 }
 
-.atlas-regime-action-label.is-green  { color: #22c55e; }
+.atlas-regime-action-label.is-green  { color: #39d353; }
+.atlas-regime-action-label.is-purple { color: #a371f7; }
+.atlas-regime-action-label.is-blue   { color: #58a6ff; }
 .atlas-regime-action-label.is-cyan   { color: #22d3ee; }
 .atlas-regime-action-label.is-yellow { color: #eab308; }
-.atlas-regime-action-label.is-purple { color: #a78bfa; }
 .atlas-regime-action-label.is-red    { color: #ef4444; }
 
 .atlas-regime-arrow {
@@ -3094,6 +3117,41 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* ── Status chips row — two side-by-side pills ── */
+
+.atlas-fws-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Warning box ── */
+
+.atlas-fws-warning-box {
+  padding: 8px 10px;
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+}
+
+.atlas-fws-warning-box--critical {
+  background: #2a1515;
+  border-left-color: #f85149;
+}
+
+.atlas-fws-warning-box--amber {
+  background: #1f1700;
+  border-left-color: #f0a500;
+}
+
+.atlas-fws-warning-msg {
+  margin: 0;
+  color: #cbd5e1;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.625rem;
+  line-height: 1.55;
 }
 
 /* ── Rationale box — left border colour follows condition tone ── */

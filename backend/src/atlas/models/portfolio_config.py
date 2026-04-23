@@ -1,9 +1,9 @@
 """SQLAlchemy ORM model for portfolio-wide configuration (singleton row)."""
 
-from datetime import datetime
+import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric, func
+from sqlalchemy import Date, DateTime, Numeric, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from atlas.db.base import Base
@@ -39,19 +39,26 @@ class PortfolioConfig(Base):
         default=CASH_FLOOR_PCT_DEFAULT,
     )
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
     )
 
+    # Date when the portfolio first entered a CLEAR regime — used by Framework 5
+    # to apply the 2-week transition floor (10%) before dropping to 8%.
+    # Null when regime is not CLEAR. Automatically managed by CashFloorService.
+    clear_transition_date: Mapped[datetime.date | None] = mapped_column(
+        Date,
+        nullable=True,
+        default=None,
+    )
+
     def __repr__(self) -> str:
-        return (
-            f"<PortfolioConfig cash={self.cash_balance} floor_pct={self.cash_floor_pct}>"
-        )
+        return f"<PortfolioConfig cash={self.cash_balance} floor_pct={self.cash_floor_pct}>"

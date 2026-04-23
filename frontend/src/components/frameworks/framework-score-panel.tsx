@@ -18,21 +18,20 @@ import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/fram
 /** Number of score-bar segments for the full 100-pt scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Inclusive lower bounds for Framework 1 action buckets. */
-const ACTION_MAXIMUM_POSITION_MIN = 90;
-const ACTION_HOLD_ADD_MIN = 80;
-const ACTION_HOLD_MIN = 70;
-const ACTION_REDUCE_MIN = 60;
-const ACTION_REDUCE_FURTHER_MIN = 55;
+/** Inclusive lower bounds for Framework 3 / Score Action Map bands (v7.3.4). */
+const ACTION_TIER1_MIN = 85;       // >= 85  → CORE / LEAPS ELIGIBLE
+const ACTION_GREY_ZONE_MIN = 78;   // 78-84  → GREY ZONE
+const ACTION_TIER2_MIN = 70;       // 70-77  → GTC ADDS PERMITTED
+const ACTION_TIER3_MIN = 55;       // 55-69  → SMALL POSITION ONLY
+                                   // < 55   → WATCHLIST
 
-/** CSS tone class for each action string from the Factor_Mapping_Guide. */
+/** CSS tone class for each action tone string. */
 const ACTION_TONE_CLASS: Record<string, string> = {
   'tone-green': 'is-green',
-  'tone-cyan': 'is-cyan',
+  'tone-purple': 'is-purple',
+  'tone-blue': 'is-blue',
   'tone-yellow': 'is-yellow',
-  'tone-orange': 'is-orange',
   'tone-red': 'is-red',
-  'tone-dark-red': 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -347,22 +346,19 @@ function calculateFinalScore(rawTotal: number): number {
 }
 
 function mapAction(finalScore: number): [string, string] {
-  if (finalScore >= ACTION_MAXIMUM_POSITION_MIN) {
-    return ['MAXIMUM POSITION', 'tone-green'];
+  if (finalScore >= ACTION_TIER1_MIN) {
+    return ['CORE / LEAPS ELIGIBLE', 'tone-green'];
   }
-  if (finalScore >= ACTION_HOLD_ADD_MIN) {
-    return ['HOLD / ADD', 'tone-cyan'];
+  if (finalScore >= ACTION_GREY_ZONE_MIN) {
+    return ['GREY ZONE', 'tone-purple'];
   }
-  if (finalScore >= ACTION_HOLD_MIN) {
-    return ['HOLD', 'tone-yellow'];
+  if (finalScore >= ACTION_TIER2_MIN) {
+    return ['GTC ADDS PERMITTED', 'tone-blue'];
   }
-  if (finalScore >= ACTION_REDUCE_MIN) {
-    return ['REDUCE', 'tone-orange'];
+  if (finalScore >= ACTION_TIER3_MIN) {
+    return ['SMALL POSITION ONLY', 'tone-yellow'];
   }
-  if (finalScore >= ACTION_REDUCE_FURTHER_MIN) {
-    return ['REDUCE FURTHER', 'tone-red'];
-  }
-  return ['EXIT', 'tone-dark-red'];
+  return ['WATCHLIST', 'tone-red'];
 }
 
 // ---------------------------------------------------------------------------

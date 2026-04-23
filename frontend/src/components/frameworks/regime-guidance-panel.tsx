@@ -14,7 +14,7 @@ function tierToTone(tier: PositionTier): string {
     case 'TIER_2_GREY':
       return 'is-purple';
     case 'TIER_2':
-      return 'is-cyan';
+      return 'is-blue';
     case 'TIER_3':
       return 'is-yellow';
     case 'WATCHLIST':

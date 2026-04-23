@@ -159,7 +159,7 @@ export function FrameworksPanelsSection() {
       </div>
 
       <div className="atlas-frameworks-secondary-row">
-        <CashFloorPanel ticker={activeTicker} />
+        <CashFloorPanel />
         <ConvictionActionPanel ticker={activeTicker} adjustedScore={f1DisplayScore} />
       </div>
 

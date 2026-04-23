@@ -1,33 +1,22 @@
 'use client';
 
-import { useCashFloor } from '@/lib/hooks/use-cash-floor';
-import type { CashFloorResponse } from '@/lib/schemas/cash-floor';
+import { useFramework5 } from '@/lib/hooks/use-cash-floor';
+import type { FloorStatus, Framework5Response } from '@/lib/schemas/cash-floor';
 
 // ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
-type CashFloorPanelProps = {
-  /** Active ticker driven by the shared selector above the panels. */
-  ticker: string;
-};
-
-// ---------------------------------------------------------------------------
-// Public component
+// Public component — no ticker prop; portfolio-level
 // ---------------------------------------------------------------------------
 
 /**
  * Framework 5 — Cash Floor panel.
  *
- * Reads the live Framework 2 (Regime Modifier) rule and displays the
- * minimum cash reserve the investor must hold against the ticker position.
+ * Reads the live Framework 2 regime (Brent + VIX) and displays the
+ * portfolio-level minimum cash reserve requirement.
+ * No ticker required — the floor applies to the whole portfolio.
  */
-export function CashFloorPanel({ ticker }: CashFloorPanelProps) {
-  const activeTicker = ticker.trim().length > 0;
+export function CashFloorPanel() {
+  const { data, isLoading, isError, error } = useFramework5();
 
-  const { data, isLoading, isError, error } = useCashFloor(ticker);
-
-  const hasData = activeTicker && data !== undefined;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load cash floor data.';
 
   return (
@@ -54,13 +43,8 @@ export function CashFloorPanel({ ticker }: CashFloorPanelProps) {
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && (
+        {!isLoading && !isError && data !== undefined && (
           <CashFloorContent data={data} />
-        )}
-        {!isLoading && !isError && !hasData && activeTicker && (
-          <p className="atlas-fws-state-msg" data-testid="cash-floor-empty">
-            No cash floor data available for {ticker}.
-          </p>
         )}
       </div>
     </section>
@@ -68,20 +52,71 @@ export function CashFloorPanel({ ticker }: CashFloorPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const USD_FORMAT: Intl.NumberFormatOptions = {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+};
+
+function formatUsd(value: number): string {
+  return `$${value.toLocaleString('en-US', USD_FORMAT)}`;
+}
+
+/** Human-readable labels for each FloorStatus value. */
+const CASH_STATUS_LABELS: Record<FloorStatus, string> = {
+  HEALTHY: 'HEALTHY',
+  LOW_BUFFER: 'LOW BUFFER',
+  AT_FLOOR: 'AT FLOOR',
+  BELOW_FLOOR: 'CRITICAL — BELOW FLOOR',
+  CRITICAL_ZERO: 'CRITICAL — ZERO CASH',
+};
+
+function getCashStatusLabel(status: FloorStatus): string {
+  return CASH_STATUS_LABELS[status];
+}
+
+/** Pill tone class for each FloorStatus. */
+const STATUS_CHIP_TONE: Record<FloorStatus, string> = {
+  HEALTHY: 'is-green',
+  LOW_BUFFER: 'is-yellow',
+  AT_FLOOR: 'is-yellow',
+  BELOW_FLOOR: 'is-red',
+  CRITICAL_ZERO: 'is-red',
+};
+
+/** Pill tone class for regime names returned by the API (space-separated). */
+const REGIME_CHIP_TONE: Record<string, string> = {
+  CLEAR: 'is-green',
+  'SOFT CAUTION': 'is-blue',
+  CAUTION: 'is-yellow',
+  'CRISIS HALT': 'is-red',
+};
+
+// ---------------------------------------------------------------------------
 // Content component
 // ---------------------------------------------------------------------------
 
-function CashFloorContent({ data }: { data: CashFloorResponse }) {
-  const floorMinPct = Math.round(data.floor_pct_min * 100);
-  const floorMaxPct = Math.round(data.floor_pct_max * 100);
-  const isSymmetric = floorMinPct === floorMaxPct;
-
-  const floorRangeLabel = isSymmetric
-    ? `${floorMinPct}% (permanent)`
-    : `${floorMinPct}% – ${floorMaxPct}%`;
-
+function CashFloorContent({ data }: { data: Framework5Response }) {
   return (
     <div className="atlas-cash-floor-content" data-testid="cash-floor-content">
+      {/* Status chips row — two distinct pills: cash status + regime */}
+      <div className="atlas-fws-status-row">
+        <span
+          className={`atlas-frameworks-pill ${STATUS_CHIP_TONE[data.floor_status]}`}
+          data-testid="cash-floor-status-chip"
+        >
+          {getCashStatusLabel(data.floor_status)}
+        </span>
+        <span
+          className={`atlas-frameworks-pill ${REGIME_CHIP_TONE[data.regime] ?? 'is-yellow'}`}
+          data-testid="cash-floor-regime-chip"
+        >
+          {data.regime}
+        </span>
+      </div>
+
       {/* Market snapshot */}
       <div className="atlas-regime-market-row">
         <div className="atlas-regime-stat">
@@ -99,61 +134,56 @@ function CashFloorContent({ data }: { data: CashFloorResponse }) {
         </div>
       </div>
 
-      {/* Cash floor details block */}
+      {/* Warning box — shown for AMBER and CRITICAL */}
+      {data.warning_level !== 'NONE' && data.warning_message && (
+        <div
+          className={`atlas-fws-warning-box atlas-fws-warning-box--${data.warning_level.toLowerCase()}`}
+          data-testid="cash-floor-warning-box"
+        >
+          <p className="atlas-fws-warning-msg">{data.warning_message}</p>
+        </div>
+      )}
+
+      {/* Cash floor details */}
       <div className="atlas-regime-cash-block">
         <p className="atlas-regime-cash-title">CASH FLOOR REQUIREMENT</p>
 
         <div className="atlas-regime-cash-row" data-testid="cash-floor-range-row">
-          <span className="atlas-regime-cash-label">Floor Range</span>
-          <span
-            className="atlas-regime-cash-value"
-            data-testid="cash-floor-range-value"
-          >
-            {floorRangeLabel}
+          <span className="atlas-regime-cash-label">Floor</span>
+          <span className="atlas-regime-cash-value" data-testid="cash-floor-range-value">
+            {data.floor_pct_display}
           </span>
         </div>
 
-        {data.position_value_usd !== null && (
-          <div className="atlas-regime-cash-row" data-testid="cash-floor-position-row">
-            <span className="atlas-regime-cash-label">Position Value</span>
-            <span className="atlas-regime-cash-value" data-testid="cash-floor-position-value">
-              ${data.position_value_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-          </div>
-        )}
+        <div className="atlas-regime-cash-row" data-testid="cash-floor-position-row">
+          <span className="atlas-regime-cash-label">Total NAV</span>
+          <span className="atlas-regime-cash-value" data-testid="cash-floor-position-value">
+            {formatUsd(data.total_nav)}
+          </span>
+        </div>
 
-        {data.floor_usd_min !== null && (
-          <div className="atlas-regime-cash-row" data-testid="cash-floor-min-row">
-            <span className="atlas-regime-cash-label">Min Floor (USD)</span>
-            <span
-              className="atlas-regime-cash-value"
-              data-testid="cash-floor-min-value"
-            >
-              ${data.floor_usd_min.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-          </div>
-        )}
+        <div className="atlas-regime-cash-row" data-testid="cash-floor-min-row">
+          <span className="atlas-regime-cash-label">
+            Floor Amount ({Math.round(data.floor_pct * 100)}%)
+          </span>
+          <span className="atlas-regime-cash-value" data-testid="cash-floor-min-value">
+            {formatUsd(data.floor_amount)}
+          </span>
+        </div>
 
-        {data.floor_usd_max !== null && !isSymmetric && (
-          <div className="atlas-regime-cash-row" data-testid="cash-floor-max-row">
-            <span className="atlas-regime-cash-label">Max Floor (USD)</span>
-            <span
-              className="atlas-regime-cash-value"
-              data-testid="cash-floor-max-value"
-            >
-              ${data.floor_usd_max.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-          </div>
-        )}
+        <div className="atlas-regime-cash-row" data-testid="cash-floor-cash-held-row">
+          <span className="atlas-regime-cash-label">Cash Held</span>
+          <span className="atlas-regime-cash-value" data-testid="cash-floor-cash-held-value">
+            {formatUsd(data.total_cash)}
+          </span>
+        </div>
 
-        {data.position_value_usd === null && (
-          <div className="atlas-regime-cash-row">
-            <span className="atlas-regime-cash-label">USD amounts</span>
-            <span className="atlas-regime-cash-value atlas-cash-floor-no-position">
-              Not in portfolio
-            </span>
-          </div>
-        )}
+        <div className="atlas-regime-cash-row" data-testid="cash-floor-available-row">
+          <span className="atlas-regime-cash-label">Available Above Floor</span>
+          <span className="atlas-regime-cash-value" data-testid="cash-floor-available-value">
+            {formatUsd(data.available_above_floor)}
+          </span>
+        </div>
       </div>
 
       {/* Rationale */}

@@ -4,7 +4,7 @@ Tests cover:
   - calculate_gate_close_date: 5 trading-day count-back, weekend skip
   - _evaluate_gate_logic: all four status branches with boundary conditions
 
-All tests exercise pure functions only — no I/O, no mocks required.
+All tests exercise pure functions only -- no I/O, no mocks required.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from atlas.services.framework7_service import (
     _evaluate_gate_logic,
     calculate_gate_close_date,
 )
-
 
 # ---------------------------------------------------------------------------
 # calculate_gate_close_date
@@ -46,7 +45,7 @@ class TestCalculateGateCloseDate:
 
     def test_always_returns_a_weekday(self) -> None:
         result = calculate_gate_close_date(date(2026, 5, 20))
-        # weekday() < 5 means Mon–Fri
+        # weekday() < 5 means Mon-Fri
         assert result.weekday() < 5
 
     def test_gate_close_strictly_before_earnings(self) -> None:
@@ -378,3 +377,4 @@ class TestGateDoubleBlocked:
         )
         # April 29 - April 23 = 6 days
         assert result.days_to_earnings == 6
+

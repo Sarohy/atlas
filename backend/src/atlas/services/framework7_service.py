@@ -13,8 +13,8 @@ Gate close date calculation:
   Count back exactly 5 trading weekdays from the earnings date.
   Gate is active when today >= gate_close_date.
 
-Earnings dates are fetched from Alpha Vantage EARNINGS_CALENDAR (CSV) and
-cached in process memory for 24 hours to avoid rate-limit exhaustion.
+Earnings dates are fetched fresh from Alpha Vantage EARNINGS_CALENDAR (CSV)
+on every request — no caching.
 
 The final_score is fetched from Framework 1 (FrameworkScoreService) unless
 the caller supplies ``provided_score`` directly (e.g. from the frontend cache)
@@ -26,7 +26,6 @@ from __future__ import annotations
 import csv
 import io
 import logging
-import time
 from datetime import date, timedelta
 from typing import Final
 
@@ -58,14 +57,6 @@ _STATUS_DOUBLE_BLOCKED: Final[str] = "DOUBLE BLOCKED"
 # AlphaVantage EARNINGS_CALENDAR URL.
 _AV_EARNINGS_URL: Final[str] = "https://www.alphavantage.co/query"
 
-# In-memory earnings date cache TTL (24 hours).
-_CACHE_TTL_SECONDS: Final[int] = 86_400
-
-# Module-level in-memory cache.
-# Key: ticker (upper-case)
-# Value: (report_date_str | None, unix_timestamp)
-_earnings_cache: dict[str, tuple[str | None, float]] = {}
-
 # ---------------------------------------------------------------------------
 # Pure functions
 # ---------------------------------------------------------------------------
@@ -77,7 +68,7 @@ def calculate_gate_close_date(earnings_date: date) -> date:
     Weekends (Saturday = 5, Sunday = 6) are skipped.
     Returns the date on which the gate closes (the 5th trading day back).
 
-    Pure function — no I/O.
+    Pure function -- no I/O.
     """
     current = earnings_date
     days_counted = 0
@@ -96,7 +87,7 @@ def _evaluate_gate_logic(
     final_score: int,
     insider_flag: bool,
 ) -> EarningsGate:
-    """Apply Framework 7 gate rules. Pure function — no I/O.
+    """Apply Framework 7 gate rules. Pure function -- no I/O.
 
     Parameters
     ----------
@@ -131,16 +122,16 @@ def _evaluate_gate_logic(
             message="No upcoming earnings — no gate active",
         )
 
-    gate_close_date = calculate_gate_close_date(earnings_date)
+    _gate_close = calculate_gate_close_date(earnings_date)
     days_to_earnings = (earnings_date - today).days
-    gate_active = today >= gate_close_date
+    gate_active = today >= _gate_close
 
     # ── Gate not yet active ────────────────────────────────────────────────
     if not gate_active:
         return EarningsGate(
             ticker=ticker,
             earnings_date=earnings_date,
-            gate_close_date=gate_close_date,
+            gate_close_date=_gate_close,
             days_to_earnings=days_to_earnings,
             gate_active=False,
             final_score=final_score,
@@ -149,7 +140,7 @@ def _evaluate_gate_logic(
             size_cap=1.0,
             status=_STATUS_OPEN,
             message=(
-                f"Gate opens {gate_close_date.isoformat()} — "
+                f"Gate opens {_gate_close.isoformat()} — "
                 f"{days_to_earnings} days to earnings"
             ),
         )
@@ -161,7 +152,7 @@ def _evaluate_gate_logic(
         return EarningsGate(
             ticker=ticker,
             earnings_date=earnings_date,
-            gate_close_date=gate_close_date,
+            gate_close_date=_gate_close,
             days_to_earnings=days_to_earnings,
             gate_active=True,
             final_score=final_score,
@@ -180,7 +171,7 @@ def _evaluate_gate_logic(
         return EarningsGate(
             ticker=ticker,
             earnings_date=earnings_date,
-            gate_close_date=gate_close_date,
+            gate_close_date=_gate_close,
             days_to_earnings=days_to_earnings,
             gate_active=True,
             final_score=final_score,
@@ -198,7 +189,7 @@ def _evaluate_gate_logic(
     return EarningsGate(
         ticker=ticker,
         earnings_date=earnings_date,
-        gate_close_date=gate_close_date,
+        gate_close_date=_gate_close,
         days_to_earnings=days_to_earnings,
         gate_active=True,
         final_score=final_score,
@@ -219,19 +210,10 @@ def _evaluate_gate_logic(
 # ---------------------------------------------------------------------------
 
 
-def _is_cache_valid(ticker_upper: str) -> bool:
-    """Return True if a non-expired cache entry exists for ``ticker_upper``."""
-    if ticker_upper not in _earnings_cache:
-        return False
-    _, ts = _earnings_cache[ticker_upper]
-    return (time.monotonic() - ts) < _CACHE_TTL_SECONDS
-
-
 async def get_earnings_date(ticker: str, api_key: str) -> str | None:
     """Fetch the next earnings report date for ``ticker`` from Alpha Vantage.
 
-    Calls the EARNINGS_CALENDAR endpoint (CSV response).  Result is cached
-    in process memory for 24 hours.
+    Calls the EARNINGS_CALENDAR endpoint (CSV response) fresh on every call.
 
     Parameters
     ----------
@@ -245,10 +227,6 @@ async def get_earnings_date(ticker: str, api_key: str) -> str | None:
     ISO-format date string (YYYY-MM-DD) or None when not found / API error.
     """
     ticker_upper = ticker.upper()
-
-    if _is_cache_valid(ticker_upper):
-        cached_date, _ = _earnings_cache[ticker_upper]
-        return cached_date
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -266,12 +244,9 @@ async def get_earnings_date(ticker: str, api_key: str) -> str | None:
         reader = csv.DictReader(io.StringIO(resp.text))
         for row in reader:
             if row.get("symbol", "").upper() == ticker_upper:
-                report_date: str | None = row.get("reportDate") or None
-                _earnings_cache[ticker_upper] = (report_date, time.monotonic())
-                return report_date
+                return row.get("reportDate") or None
 
         # Ticker present in portfolio but no upcoming earnings in 3-month window.
-        _earnings_cache[ticker_upper] = (None, time.monotonic())
         return None
 
     except Exception as exc:
@@ -279,10 +254,6 @@ async def get_earnings_date(ticker: str, api_key: str) -> str | None:
             "Failed to fetch earnings date from Alpha Vantage",
             extra={"ticker": ticker_upper, "error": repr(exc)},
         )
-        # Return stale cache entry if available rather than None.
-        if ticker_upper in _earnings_cache:
-            cached_date, _ = _earnings_cache[ticker_upper]
-            return cached_date
         return None
 
 
@@ -359,24 +330,18 @@ class Framework7Service:
         """
         import asyncio
 
-        # Fetch earnings date and Framework 1 score concurrently.
-        earnings_task = get_earnings_date(ticker, self._alphavantage_api_key)
-
         if provided_score is not None:
-            earnings_date_str, _ = await asyncio.gather(
-                earnings_task,
-                asyncio.sleep(0),  # no-op to keep gather interface consistent
-            )
+            earnings_date_str = await get_earnings_date(ticker, self._alphavantage_api_key)
             final_score = provided_score
         else:
             earnings_date_str_result, f1_result = await asyncio.gather(
-                earnings_task,
+                get_earnings_date(ticker, self._alphavantage_api_key),
                 self._f1_service.compute_framework_score(ticker),
                 return_exceptions=True,
             )
             earnings_date_str = (
                 earnings_date_str_result
-                if not isinstance(earnings_date_str_result, BaseException)
+                if isinstance(earnings_date_str_result, str)
                 else None
             )
             if isinstance(f1_result, FrameworkScoreResponse):
@@ -388,10 +353,10 @@ class Framework7Service:
                 )
                 final_score = 50
 
-        # Fetch insider flag from Framework 8 (independent, no gather needed).
+        # Fetch insider flag from Framework 8.
         insider_flag = await self._f8_service.get_insider_flag(ticker)
 
-        # Parse earnings date string → date object.
+        # Parse earnings date string -> date object.
         earnings_date: date | None = None
         if isinstance(earnings_date_str, str) and earnings_date_str:
             try:

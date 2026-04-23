@@ -274,7 +274,7 @@ function RuleExplanation({ data, toneClass }: { data: EarningsGate; toneClass: s
         <p className="atlas-f7-rule-text">{data.message}</p>
       </div>
 
-      {data.status === 'DOUBLE BLOCKED' && (
+      {data.insider_flag && data.status === 'DOUBLE BLOCKED' && (
         <div className="atlas-f7-rule-box is-f7-purple atlas-f7-f8-box">
           <p className="atlas-f7-rule-text">
             <strong>Framework 8 also active.</strong> Insider selling detected within the last 30

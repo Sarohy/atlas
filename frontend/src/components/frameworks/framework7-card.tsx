@@ -132,7 +132,7 @@ function GateContent({ data }: { data: EarningsGate }) {
         <StatCard label="Earnings" value={data.earnings_date ?? '—'} />
         <StatCard label="Gate closes" value={data.gate_close_date ?? '—'} />
         <StatCard label="Score" value={String(data.final_score)} tone={toneClass} />
-        <StatCard label="Gate" value={data.gate_active ? 'ACTIVE' : '—'} tone={toneClass} />
+        <StatCard label="Gate" value={data.gate_active ? 'ACTIVE' : 'OPEN'} tone={data.gate_active ? 'is-f7-red' : 'is-f7-green'} />
       </div>
 
       {/* ── Main action text ── */}
@@ -277,6 +277,68 @@ function CountdownBar({
 }
 
 // ---------------------------------------------------------------------------
+// Gate message helpers
+// ---------------------------------------------------------------------------
+
+/** Days from today (local midnight) to an ISO date string (positive = future). */
+function daysUntil(isoDate: string): number {
+  const parts = isoDate.split('-').map(Number);
+  const target = new Date(parts[0] ?? 0, (parts[1] ?? 1) - 1, parts[2] ?? 1);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Compute the human-readable gate message shown in the rule box.
+ *
+ * Falls back to `data.message` (backend value) when key dates are unavailable.
+ */
+function getGateMessage(data: EarningsGate): string {
+  if (!data.gate_close_date || !data.earnings_date) {
+    return data.message;
+  }
+
+  const daysToGate = daysUntil(data.gate_close_date);
+  const daysLabel =
+    data.days_to_earnings !== null ? `${data.days_to_earnings}d to earnings` : '';
+
+  if (!data.gate_active) {
+    const scoreCapNote =
+      data.final_score >= SCORE_THRESHOLD
+        ? `Score ${data.final_score} above 80 — 50% cap applies.`
+        : `Score ${data.final_score} below 80 — full close tomorrow.`;
+
+    if (daysToGate <= 0) {
+      return [
+        'Gate closes today',
+        daysLabel,
+        scoreCapNote,
+      ]
+        .filter(Boolean)
+        .join(' — ');
+    }
+
+    if (daysToGate === 1) {
+      return [
+        `Gate closes tomorrow (${data.gate_close_date})`,
+        daysLabel ? `${daysLabel}. ${scoreCapNote}` : scoreCapNote,
+      ]
+        .filter(Boolean)
+        .join(' — ');
+    }
+
+    return `Gate closes in ${daysToGate} days (${data.gate_close_date})${daysLabel ? ` — ${daysLabel}` : ''}`;
+  }
+
+  // gate_active = true
+  if (data.final_score >= SCORE_THRESHOLD) {
+    return `Gate active — 50% cap applies. Max 50% of target size until after ${data.earnings_date} print. Score ${data.final_score} above 80.`;
+  }
+  return `Gate active — no adds permitted. Score ${data.final_score} below 80. Hold existing position only until after ${data.earnings_date} print.`;
+}
+
+// ---------------------------------------------------------------------------
 // Rule explanation
 // ---------------------------------------------------------------------------
 
@@ -284,7 +346,7 @@ function RuleExplanation({ data, toneClass }: { data: EarningsGate; toneClass: s
   return (
     <>
       <div className={cn('atlas-f7-rule-box', toneClass)}>
-        <p className="atlas-f7-rule-text">{data.message}</p>
+        <p className="atlas-f7-rule-text">{getGateMessage(data)}</p>
       </div>
 
       {data.insider_flag && data.status === 'DOUBLE BLOCKED' && (

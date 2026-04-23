@@ -1,5 +1,6 @@
 'use client';
 
+import { useFramework7 } from '@/lib/hooks/use-framework7';
 import { usePositionSizing } from '@/lib/hooks/use-position-sizing';
 import type { PositionSizingResponse, PositionTier } from '@/lib/schemas/position-sizing';
 import { cn } from '@/lib/utils';
@@ -48,6 +49,10 @@ export function RegimeGuidancePanel({
     enabled,
   );
   const hasData = activeTicker && data !== undefined;
+  // Hoist F7 gate status — TanStack Query deduplicates this request since
+  // Framework7Card uses the identical query key in the same render tree.
+  const { data: gateData } = useFramework7(ticker, baseScore);
+  const f7GateActive = gateData?.gate_active ?? false;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load framework 3 data.';
 
   return (
@@ -74,7 +79,7 @@ export function RegimeGuidancePanel({
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && <ActionContent data={data} />}
+        {!isLoading && !isError && hasData && <ActionContent data={data} f7GateActive={f7GateActive} />}
         {!isLoading && !isError && !hasData && activeTicker && (
           <p className="atlas-fws-state-msg" data-testid="regime-guidance-empty">
             No position sizing available for {ticker}.
@@ -89,9 +94,29 @@ export function RegimeGuidancePanel({
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ActionContent({ data }: { data: PositionSizingResponse }) {
+function ActionContent({
+  data,
+  f7GateActive = false,
+}: {
+  data: PositionSizingResponse;
+  f7GateActive?: boolean;
+}) {
   const tone = tierToTone(data.tier);
   const filledSegs = Math.round(data.conviction_score / SCORE_BAR_SEGMENTS);
+
+  // TIER_3 fix: backend hardcodes adds_permitted=false for all TIER_3 entries,
+  // but the correct value is true when no blocking condition exists. F7 gate
+  // is the only blocking condition available at this layer.
+  const addsPermitted =
+    data.tier === 'TIER_3' ? !f7GateActive : data.adds_permitted;
+
+  // TIER_3 fix: override the backend display_message with corrected guidance.
+  const displayMessage =
+    data.tier === 'TIER_3'
+      ? addsPermitted
+        ? 'Small position only — max 0.5% NAV. Satellite sizing.'
+        : 'Adds blocked — F7 earnings gate active.'
+      : data.display_message;
 
   return (
     <div className="atlas-regime-content" data-testid="regime-guidance-content">
@@ -138,12 +163,12 @@ function ActionContent({ data }: { data: PositionSizingResponse }) {
         </div>
         <div className="atlas-regime-cash-row">
           <span className="atlas-regime-cash-label">Adds permitted</span>
-          <span className="atlas-regime-cash-value">{data.adds_permitted ? 'Yes' : 'No'}</span>
+          <span className="atlas-regime-cash-value">{addsPermitted ? 'Yes' : 'No'}</span>
         </div>
       </div>
 
       <div className="atlas-regime-output" data-testid="regime-guidance-output-text">
-        <p className="atlas-regime-output-line">{data.display_message}</p>
+        <p className="atlas-regime-output-line">{displayMessage}</p>
       </div>
 
       {data.trigger_exit_rules && (

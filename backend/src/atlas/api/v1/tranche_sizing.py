@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.db.session import get_db_session
 from atlas.schemas.tranche_sizing import TrancheSizingResponse
+from atlas.services.framework11_service import get_f11_simple
 from atlas.services.tranche_sizing_service import (
     compute_tranche_sizing,
     fire_t2_tranche,
@@ -113,6 +114,50 @@ async def get_tranche_sizing(
         effective_weight = float(position_weight_override)
     else:
         effective_weight = await get_position_weight(normalised_ticker, session)
+
+    # Framework 11 — Cash Floor Gate.
+    # Check F11 cache before computing tranches.  If the floor is violated or
+    # data is unavailable, all tranches are blocked.  F11 is the single source
+    # of truth for floor_violated; we never recalculate the floor here.
+    _BLOCKED_F11 = "Blocked"
+    f11 = get_f11_simple()
+    if f11 is not None and f11.all_buys_blocked:
+        if f11.floor_violated is True:
+            cash_pct_str = f"{f11.cash_pct:.1f}%" if f11.cash_pct is not None else "unknown%"
+            floor_pct_str = f"{f11.floor_pct:.0f}%" if f11.floor_pct is not None else "unknown%"
+            shortfall_str = (
+                f"${f11.shortfall_usd:,.0f}" if f11.shortfall_usd is not None else "unknown"
+            )
+            f11_msg = (
+                f"Blocked \u2014 Framework 11 cash floor violated. "
+                f"Cash {cash_pct_str} below {floor_pct_str} floor. "
+                f"Shortfall: {shortfall_str}"
+            )
+        else:
+            f11_msg = (
+                "Unknown \u2014 Framework 11 cash floor status unavailable. "
+                "No deployment until data restored."
+            )
+        return TrancheSizingResponse(
+            ticker=normalised_ticker,
+            cap_active=False,
+            tranche_display=False,
+            position_weight=effective_weight,
+            message=f11_msg,
+            and_gate_active=False,
+            and_gate_passed=False,
+            signals_confirmed=0,
+            signals_detail=[],
+            t1=_BLOCKED_F11,
+            t2=_BLOCKED_F11,
+            t3=_BLOCKED_F11,
+            t4=_BLOCKED_F11,
+            t1_fired=False,
+            t2_fired=False,
+            t2_pending=False,
+            t3_fired=False,
+            t3_pending=False,
+        )
 
     return compute_tranche_sizing(
         ticker=normalised_ticker,

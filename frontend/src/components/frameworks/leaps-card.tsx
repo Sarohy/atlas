@@ -89,7 +89,7 @@ type LeapsCardProps = {
 // ---------------------------------------------------------------------------
 
 /**
- * LEAPS Strategy card (Section 17).
+ * LEAPS Strategy card (Framework 10).
  *
  * Per-ticker. Sections:
  *   1. Header + eligibility chip
@@ -115,7 +115,7 @@ export function LeapsCard({ ticker }: LeapsCardProps) {
       {/* ── Section 1: Header + eligibility chip ── */}
       <header className="atlas-leaps-header">
         <div className="atlas-leaps-header-left">
-          <h2 className="atlas-frameworks-panel-title">Section 17</h2>
+          <h2 className="atlas-frameworks-panel-title">Framework 10</h2>
           <span className="atlas-fws-subtitle">LEAPS Strategy</span>
         </div>
         {hasTicker && data !== undefined && (

@@ -232,6 +232,7 @@ def _compute_eligibility(
     gate_f7_active: bool | None,
     gate_f29_passed: bool | None,
     gate_f30_permits_leaps: bool | None,
+    gate_f11_blocks: bool | None,
     iv_current: float | None,
     iv_percentile: float | None,
     entry_conditions: list[EntryCondition],
@@ -278,6 +279,14 @@ def _compute_eligibility(
     elif gate_f30_permits_leaps is None:
         has_unknown = True
         warning_messages.append("F30 drawdown state unknown — eligibility deferred.")
+
+    if gate_f11_blocks is True:
+        block_reasons.append(
+            "F11 cash floor violated — all LEAPS entries blocked until cash restored."
+        )
+    elif gate_f11_blocks is None:
+        has_unknown = True
+        warning_messages.append("F11 cash floor status unknown — eligibility deferred.")
 
     if iv_blocked is True:
         block_reasons.append(
@@ -463,13 +472,19 @@ async def check_leaps_eligibility(
         f9_task = evaluate_framework9(normalised, uw_api_key, polygon_api_key, alphavantage_api_key)
         iv_task = _fetch_iv_from_uw(normalised, uw_api_key, client)
 
+        async def _resolved_f29() -> object:
+            return f29_cached
+
+        async def _resolved_f30() -> object:
+            return f30_cached
+
         f29_task = (
-            asyncio.coroutine(lambda: f29_cached)()
+            _resolved_f29()
             if f29_cached is not None
             else evaluate_framework29(polygon_api_key, uw_api_key)
         )
         f30_task = (
-            asyncio.coroutine(lambda: f30_cached)()
+            _resolved_f30()
             if f30_cached is not None
             else evaluate_framework30(session, polygon_api_key)
         )
@@ -543,6 +558,19 @@ async def check_leaps_eligibility(
         _evaluate_entry_condition3(score),
     ]
 
+    # Framework 11 — Cash Floor Gate (read-only from F11 cache).
+    from atlas.services.framework11_service import get_f11_simple
+
+    f11_simple = get_f11_simple()
+    gate_f11_blocks: bool | None
+    if f11_simple is None:
+        # F11 not yet evaluated — treat as unknown (don't block on missing cache).
+        gate_f11_blocks = None
+    elif f11_simple.all_buys_blocked:
+        gate_f11_blocks = True
+    else:
+        gate_f11_blocks = False
+
     result = _compute_eligibility(
         ticker=normalised,
         score=score,
@@ -552,6 +580,7 @@ async def check_leaps_eligibility(
         gate_f7_active=gate_f7_active,
         gate_f29_passed=gate_f29_passed,
         gate_f30_permits_leaps=gate_f30_permits_leaps,
+        gate_f11_blocks=gate_f11_blocks,
         iv_current=iv_current,
         iv_percentile=iv_percentile,
         entry_conditions=entry_conditions,

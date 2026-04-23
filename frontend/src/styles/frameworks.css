@@ -6060,3 +6060,802 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ============================================================
+   Framework 11 — Cash Floor Enforcer (.atlas-f11-*)
+   ============================================================ */
+
+/* ── Card shell ── */
+
+.atlas-f11-card {
+  background: #0d1117;
+  border: 1px solid #1e2a38;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+/* ── Header ── */
+
+.atlas-f11-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.atlas-f11-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f11-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f11-label {
+  background: #1e2a38;
+  color: #64748b;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.atlas-f11-title {
+  color: #94a3b8;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Status chip ── */
+
+.atlas-f11-status-chip {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.is-f11-compliant {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.is-f11-violated {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.is-f11-unknown {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* ── Refresh button ── */
+
+.atlas-f11-refresh-btn {
+  background: none;
+  border: 1px solid #1e2a38;
+  border-radius: 3px;
+  color: #4b6070;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 2px 5px;
+  transition: color 0.15s;
+}
+
+.atlas-f11-refresh-btn:hover {
+  color: #94a3b8;
+}
+
+/* ── State panels ── */
+
+.atlas-f11-loading,
+.atlas-f11-error {
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.atlas-f11-loading {
+  color: #64748b;
+}
+
+.atlas-f11-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ── Stat grid ── */
+
+.atlas-f11-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.atlas-f11-stat-card {
+  background: #0a0f16;
+  border: 1px solid #1e2a38;
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f11-stat-label {
+  color: #4b6070;
+  font-size: 0.55rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.atlas-f11-stat-value {
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.is-f11-violated-value {
+  color: #ef4444;
+}
+
+.is-f11-compliant-value {
+  color: #10b981;
+}
+
+.is-f11-conservative {
+  color: #f59e0b;
+}
+
+.is-f11-data-missing {
+  color: #f59e0b;
+}
+
+.is-f11-shortfall {
+  color: #ef4444;
+}
+
+.is-f11-buffer {
+  color: #10b981;
+}
+
+/* ── Status panel ── */
+
+.atlas-f11-status-panel {
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.is-f11-panel-compliant {
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.is-f11-panel-violated {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.is-f11-panel-unknown {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.atlas-f11-panel-title {
+  margin: 0 0 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.is-f11-violated-title {
+  color: #ef4444;
+}
+
+.is-f11-unknown-title {
+  color: #f59e0b;
+}
+
+.atlas-f11-panel-line {
+  margin: 2px 0;
+  font-size: 0.63rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.atlas-f11-panel-detail {
+  margin: 2px 0;
+  font-size: 0.6rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.is-f11-queued-note {
+  color: #f59e0b;
+}
+
+.atlas-f11-panel-conservative {
+  margin: 4px 0 0;
+  font-size: 0.6rem;
+  color: #f59e0b;
+  font-style: italic;
+}
+
+/* ── Detail grid ── */
+
+.atlas-f11-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background: #0a0f16;
+  border: 1px solid #1e2a38;
+  border-radius: 4px;
+}
+
+.atlas-f11-detail-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.atlas-f11-detail-label {
+  color: #4b6070;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+}
+
+.atlas-f11-detail-value {
+  color: #94a3b8;
+  font-size: 0.6rem;
+}
+
+/* ── Sections ── */
+
+.atlas-f11-section {
+  margin-bottom: 10px;
+}
+
+.atlas-f11-section-title {
+  margin: 0 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.atlas-f11-gtc-counts {
+  font-weight: 400;
+  color: #4b6070;
+  font-size: 0.55rem;
+  letter-spacing: 0;
+}
+
+/* ── GTC window ── */
+
+.atlas-f11-formula {
+  margin: 0 0 4px;
+  font-size: 0.6rem;
+  color: #4b6070;
+  letter-spacing: 0.02em;
+}
+
+.atlas-f11-formula-expanded {
+  margin: 0 0 6px;
+  font-size: 0.63rem;
+  color: #64748b;
+}
+
+.atlas-f11-gtc-panel {
+  border-radius: 4px;
+  padding: 7px 9px;
+}
+
+.is-f11-gtc-unknown {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+  font-size: 0.63rem;
+}
+
+.is-f11-gtc-danger {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.is-f11-gtc-ok {
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+/* ── GTC table ── */
+
+.atlas-f11-gtc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.6rem;
+}
+
+.atlas-f11-gtc-th {
+  text-align: left;
+  padding: 3px 6px;
+  color: #4b6070;
+  font-size: 0.55rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #1e2a38;
+}
+
+.atlas-f11-gtc-cell {
+  padding: 4px 6px;
+  border-bottom: 1px solid #0d1520;
+}
+
+.atlas-f11-gtc-row.is-f11-gtc-near-money td {
+  color: #e2e8f0;
+}
+
+.atlas-f11-gtc-row.is-f11-gtc-exempt td {
+  color: #4b6070;
+}
+
+.atlas-f11-gtc-row.is-f11-gtc-price-missing td {
+  color: #f59e0b;
+}
+
+.atlas-f11-no-orders {
+  margin: 0;
+  font-size: 0.6rem;
+  color: #4b6070;
+  font-style: italic;
+}
+
+/* ── Queued signals ── */
+
+.atlas-f11-queue-section {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.is-f11-queue-title {
+  color: #f59e0b;
+}
+
+.atlas-f11-queue-list {
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  list-style: disc;
+}
+
+.atlas-f11-queue-item {
+  font-size: 0.6rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+/* ── Warning messages ── */
+
+.atlas-f11-warnings {
+  margin-bottom: 8px;
+}
+
+.atlas-f11-warning-item {
+  margin: 2px 0;
+  font-size: 0.6rem;
+  color: #f59e0b;
+  line-height: 1.4;
+}
+
+/* ── Data source status ── */
+
+.atlas-f11-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid #1e2a38;
+}
+
+.atlas-f11-source-badge {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.is-f11-source-online {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.is-f11-source-offline {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.atlas-f11-source-age {
+  font-size: 0.55rem;
+  color: #4b6070;
+  margin-left: auto;
+}
+
+@media (max-width: 900px) {
+  .atlas-f11-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Framework 12 — Catalyst No-Fly Zone (.atlas-f12-*)
+   ========================================================================== */
+
+.atlas-f12-card {
+  background: #0d1821;
+  border: 1px solid #1a2a38;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 340px;
+  flex: 1;
+}
+
+.atlas-f12-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.atlas-f12-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f12-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f12-label {
+  font-size: 0.6rem;
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+.atlas-f12-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c8dce8;
+  margin: 0;
+}
+
+.atlas-f12-subtitle {
+  font-size: 0.65rem;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f12-status-chip {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.is-f12-active {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.is-f12-clear {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.is-f12-unknown {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.atlas-f12-refresh-btn {
+  background: transparent;
+  border: 1px solid #1a2a38;
+  border-radius: 4px;
+  color: #3d6080;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 3px 7px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.atlas-f12-refresh-btn:hover {
+  border-color: #2d4a60;
+  color: #c8dce8;
+}
+
+.atlas-f12-loading,
+.atlas-f12-error {
+  font-size: 0.75rem;
+  padding: 12px;
+  text-align: center;
+  color: #4b6070;
+}
+
+.atlas-f12-error {
+  color: #ef4444;
+}
+
+/* Status panels */
+.atlas-f12-status-panel {
+  border-radius: 5px;
+  padding: 10px 14px;
+}
+
+.is-f12-panel-blocked {
+  background: rgba(239, 68, 68, 0.07);
+  border-left: 3px solid #ef4444;
+}
+
+.is-f12-panel-clear {
+  background: rgba(16, 185, 129, 0.05);
+  border-left: 3px solid #10b981;
+}
+
+.is-f12-panel-unknown {
+  background: rgba(245, 158, 11, 0.05);
+  border-left: 3px solid #f59e0b;
+}
+
+.atlas-f12-panel-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #c8dce8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 4px;
+}
+
+.atlas-f12-panel-line {
+  font-size: 0.7rem;
+  color: #7a9ab8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Action grid */
+.atlas-f12-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.atlas-f12-action-card {
+  border-radius: 5px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid transparent;
+}
+
+.is-f12-action-blocked {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.is-f12-action-permitted {
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.15);
+}
+
+.is-f12-action-overridden {
+  background: rgba(245, 158, 11, 0.07);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.is-f12-action-unknown {
+  background: rgba(100, 100, 120, 0.1);
+  border-color: rgba(100, 100, 120, 0.2);
+}
+
+.atlas-f12-action-label {
+  font-size: 0.6rem;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.atlas-f12-action-status {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.is-f12-action-blocked .atlas-f12-action-status { color: #ef4444; }
+.is-f12-action-permitted .atlas-f12-action-status { color: #10b981; }
+.is-f12-action-overridden .atlas-f12-action-status { color: #f59e0b; }
+.is-f12-action-unknown .atlas-f12-action-status { color: #4b6070; }
+
+.atlas-f12-override-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.atlas-f12-override-reason {
+  font-size: 0.58rem;
+  color: #c8dce8;
+  line-height: 1.4;
+}
+
+.atlas-f12-override-expires {
+  font-size: 0.55rem;
+  color: #4b6070;
+}
+
+/* Exit rule deferred panel */
+.atlas-f12-exit-deferred-panel {
+  background: rgba(245, 158, 11, 0.05);
+  border-left: 3px solid #f59e0b;
+  border-radius: 5px;
+  padding: 10px 14px;
+}
+
+/* Catalyst list */
+.atlas-f12-catalyst-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f12-section-heading {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+
+.atlas-f12-catalyst-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+
+.atlas-f12-catalyst-type {
+  font-weight: 600;
+  color: #c8dce8;
+  min-width: 90px;
+}
+
+.atlas-f12-catalyst-date {
+  color: #7a9ab8;
+  min-width: 80px;
+}
+
+.atlas-f12-catalyst-days {
+  color: #ef4444;
+  font-weight: 700;
+  min-width: 28px;
+}
+
+.atlas-f12-catalyst-desc {
+  color: #4b6070;
+  font-size: 0.62rem;
+  flex: 1;
+}
+
+/* Warnings */
+.atlas-f12-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f12-warning-line {
+  font-size: 0.65rem;
+  color: #f59e0b;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Footer */
+.atlas-f12-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #1a2a38;
+}
+
+.atlas-f12-source-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f12-source-badge {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.is-f12-source-online {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.is-f12-source-offline {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.atlas-f12-last-updated {
+  font-size: 0.55rem;
+  color: #4b6070;
+}
+
+@media (max-width: 900px) {
+  .atlas-f12-action-grid {
+    grid-template-columns: repeat(1, 1fr);
+  }
+}

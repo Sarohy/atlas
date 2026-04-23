@@ -3338,6 +3338,254 @@
 }
 
 /* ==========================================================================
+   Framework 6 v7.3.4 — Conviction Tier UI  (.atlas-conviction-*)
+   ========================================================================== */
+
+/* ── Tier label (large headline) ── */
+
+.atlas-conviction-tier-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  margin-bottom: 10px;
+}
+
+.atlas-conviction-tier-label.is-green  { color: #39d353; }
+.atlas-conviction-tier-label.is-purple { color: #a371f7; }
+.atlas-conviction-tier-label.is-blue   { color: #58a6ff; }
+.atlas-conviction-tier-label.is-amber  { color: #f0a500; }
+.atlas-conviction-tier-label.is-red    { color: #f85149; }
+
+/* ── Info row (score band + size range side-by-side) ── */
+
+.atlas-conviction-info-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.atlas-conviction-info-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+
+.atlas-conviction-info-box__label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-conviction-info-box__value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+/* ── Position details panel ── */
+
+.atlas-conviction-position-panel {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.atlas-conviction-position-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.atlas-conviction-position-row__label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4b6070;
+}
+
+.atlas-conviction-position-row__value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e8edf5;
+}
+
+.atlas-conviction-position-row__value.is-green { color: #39d353; }
+.atlas-conviction-position-row__value.is-red   { color: #f85149; }
+
+/* ── Adds-blocked reason ── */
+
+.atlas-conviction-blocked-reason {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f0a500;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: rgba(240, 165, 0, 0.08);
+  border-left: 3px solid #f0a500;
+  border-radius: 3px;
+}
+
+/* ── Consensus panel (GREY_ZONE only) ── */
+
+.atlas-conviction-consensus-panel {
+  background: #0b1623;
+  border: 1px solid #a371f7;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.atlas-conviction-consensus-panel__title {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a371f7;
+  margin-bottom: 6px;
+}
+
+.atlas-conviction-consensus-panel__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-conviction-consensus-panel__label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-conviction-consensus-panel__chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #1e2d40;
+  color: #e8edf5;
+}
+
+.atlas-conviction-consensus-panel__chip.is-green  { background: rgba(57, 211, 83, 0.15); color: #39d353; }
+.atlas-conviction-consensus-panel__chip.is-red    { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+.atlas-conviction-consensus-panel__chip.is-amber  { background: rgba(240, 165, 0, 0.15); color: #f0a500; }
+
+/* ── Cluster panel ── */
+
+.atlas-conviction-cluster-panel {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── LEAPS chip (TIER_1_CORE only) ── */
+
+.atlas-conviction-leaps-chip {
+  display: inline-block;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(57, 211, 83, 0.15);
+  color: #39d353;
+  border: 1px solid rgba(57, 211, 83, 0.4);
+  margin-bottom: 10px;
+}
+
+/* ── Exit cycle counter (WATCHLIST only) ── */
+
+.atlas-conviction-exit-counter {
+  background: #0b1623;
+  border: 1px solid #f85149;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.atlas-conviction-exit-counter__label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f85149;
+  margin-bottom: 6px;
+}
+
+.atlas-conviction-exit-bar {
+  height: 6px;
+  background: #1e2d40;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.atlas-conviction-exit-fill {
+  height: 100%;
+  background: #f0a500;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.atlas-conviction-exit-fill.is-triggered {
+  background: #f85149;
+}
+
+.atlas-conviction-exit-alert {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #f85149;
+  letter-spacing: 0.04em;
+}
+
+/* ── Rationale (bottom) ── */
+
+.atlas-conviction-rationale {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8899aa;
+  line-height: 1.6;
+  padding-top: 12px;
+  border-top: 1px solid #1e2d40;
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ==========================================================================
    Framework 7 — Earnings Gate Rule  (.atlas-f7-*)
    ========================================================================== */
 

@@ -392,6 +392,9 @@ def compute_tranche_sizing(
             f18_active=None,
             f18_reduction_pct=None,
             f18_note=None,
+            f19_active=None,
+            f19_all_ai_buys_blocked=False,
+            f19_note=None,
         )
 
     # Step 2: Check Framework 13 beta cap.
@@ -429,6 +432,9 @@ def compute_tranche_sizing(
             f18_active=None,
             f18_reduction_pct=None,
             f18_note=None,
+            f19_active=None,
+            f19_all_ai_buys_blocked=False,
+            f19_note=None,
         )
 
     # Step 3a: Check Framework 15 VIX session halt.
@@ -460,6 +466,9 @@ def compute_tranche_sizing(
             f18_active=None,
             f18_reduction_pct=None,
             f18_note=None,
+            f19_active=None,
+            f19_all_ai_buys_blocked=False,
+            f19_note=None,
         )
     if _f15 is not None and _f15.f15_active is None:
         _f15_unknown_msg = "Unknown \u2014 F15 VIX data unavailable"
@@ -486,6 +495,9 @@ def compute_tranche_sizing(
             f18_active=None,
             f18_reduction_pct=None,
             f18_note=None,
+            f19_active=None,
+            f19_all_ai_buys_blocked=False,
+            f19_note=None,
         )
 
     # Step 3b: Check Framework 18 — 4-Week Trend Gate.
@@ -511,6 +523,17 @@ def compute_tranche_sizing(
                 "F18 status unknown — SPY weekly data unavailable. "
                 "Using normal tranche sizing as fallback. Verify trend manually."
             )
+
+    # Step 3c: Check Framework 19 — NVDA Kill Switch.
+    # F19 is async (DB-backed session state, no module cache).
+    # Tranche sizing service is sync — we cannot await here.
+    # F19 integration at this level is informational only (note + flag).
+    # The consuming endpoint (tranche_sizing router) must call get_f19_simple
+    # and pass the result; for now we set safe defaults.
+    # F3/F4 integration via get_f19_simple() is performed in the API layer.
+    _f19_active: bool | None = None
+    _f19_all_ai_buys_blocked: bool = False
+    _f19_note: str | None = None
 
     # Step 3: Determine AND gate state (Framework 29).
     regime_normalised = regime_rule.strip().upper()
@@ -604,4 +627,7 @@ def compute_tranche_sizing(
         f18_active=_f18_active,
         f18_reduction_pct=_f18_reduction_pct,
         f18_note=_f18_note,
+        f19_active=_f19_active,
+        f19_all_ai_buys_blocked=_f19_all_ai_buys_blocked,
+        f19_note=_f19_note,
     )

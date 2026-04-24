@@ -1,16 +1,28 @@
 """FastAPI application factory."""
 
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from atlas.api.v1.router import router as v1_router
 from atlas.config import get_settings
 from atlas.core.logging import configure_logging, get_logger
+from atlas.core.scheduler import start_scheduler, stop_scheduler
 
 
 def _parse_allowed_origins(raw_allowed_origins: str) -> list[str]:
     """Return a normalized list of allowed CORS origins from a CSV env var."""
     return [origin.strip() for origin in raw_allowed_origins.split(",") if origin.strip()]
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """FastAPI lifespan — start and stop background services."""
+    await start_scheduler()
+    yield
+    await stop_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -24,6 +36,7 @@ def create_app() -> FastAPI:
         title="ATLAS Backend",
         description="Decision-support tool for active investing.",
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     # CORS — allow the Next.js dev server
@@ -41,3 +54,4 @@ def create_app() -> FastAPI:
     logger.info("ATLAS backend booted", environment=settings.environment)
 
     return app
+

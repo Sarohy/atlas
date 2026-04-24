@@ -37,3 +37,12 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the module-level session factory.
+
+    Used by background jobs (e.g. APScheduler) that manage their own sessions
+    outside of the FastAPI dependency injection system.
+    """
+    return AsyncSessionLocal

@@ -30,6 +30,7 @@ import { Framework12Card } from './framework12-card';
 import { Framework15Card } from './framework15-card';
 import { Framework17Card } from './framework17-card';
 import { Framework18Card } from './framework18-card';
+import { Framework19Card } from './framework19-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -198,6 +199,7 @@ export function FrameworksPanelsSection() {
       <div className="atlas-frameworks-secondary-row">
         <Framework17Card />
         <Framework18Card />
+        <Framework19Card />
       </div>
 
       {/* Always mounted so F1-F5 hooks pre-fetch data before the overlay opens.

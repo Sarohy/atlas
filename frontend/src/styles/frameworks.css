@@ -8229,3 +8229,394 @@
   padding: 20px 0;
   text-align: center;
 }
+
+
+/* ==========================================================================
+   Framework 19 — NVDA Kill Switch
+   ========================================================================== */
+
+.atlas-f19-card {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  min-width: 320px;
+}
+
+/* Status border variants */
+.atlas-f19-card.is-f19-active {
+  border-color: #f85149;
+  box-shadow: 0 0 12px rgba(248, 81, 73, 0.25);
+  animation: f19-pulse 2s ease-in-out infinite;
+}
+.atlas-f19-card.is-f19-clear {
+  border-color: #39d353;
+}
+.atlas-f19-card.is-f19-unknown {
+  border-color: #f0a500;
+}
+.atlas-f19-card.is-f19-outside {
+  border-color: #30363d;
+}
+
+@keyframes f19-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(248, 81, 73, 0.25); }
+  50%       { box-shadow: 0 0 20px rgba(248, 81, 73, 0.55); }
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.atlas-f19-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.atlas-f19-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.atlas-f19-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #e6edf3;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.atlas-f19-session-date {
+  font-size: 0.65rem;
+  color: #8b949e;
+}
+.atlas-f19-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+/* ── Status chip ──────────────────────────────────────────────────────────── */
+
+.atlas-f19-status-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.atlas-f19-status-chip.is-f19-active {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+  border: 1px solid #f85149;
+}
+.atlas-f19-status-chip.is-f19-clear {
+  background: rgba(57, 211, 83, 0.15);
+  color: #39d353;
+  border: 1px solid #39d353;
+}
+.atlas-f19-status-chip.is-f19-unknown {
+  background: rgba(240, 165, 0, 0.15);
+  color: #f0a500;
+  border: 1px solid #f0a500;
+}
+.atlas-f19-status-chip.is-f19-outside {
+  background: rgba(48, 54, 61, 0.4);
+  color: #8b949e;
+  border: 1px solid #30363d;
+}
+
+/* ── Severity badge ───────────────────────────────────────────────────────── */
+
+.atlas-f19-severity-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.atlas-f19-severity-badge.is-critical {
+  background: rgba(248, 81, 73, 0.3);
+  color: #ff6b6b;
+}
+.atlas-f19-severity-badge.is-high {
+  background: rgba(240, 165, 0, 0.2);
+  color: #f0a500;
+}
+.atlas-f19-severity-badge.is-unknown {
+  background: rgba(139, 148, 158, 0.2);
+  color: #8b949e;
+}
+
+/* ── Drop monitor section ─────────────────────────────────────────────────── */
+
+.atlas-f19-drop-section {
+  margin-bottom: 12px;
+}
+.atlas-f19-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.atlas-f19-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: #161b22;
+  border-radius: 4px;
+  border: 1px solid #21262d;
+}
+.atlas-f19-stat.is-breached {
+  border-color: #f85149;
+  background: rgba(248, 81, 73, 0.08);
+}
+.atlas-f19-stat-label {
+  font-size: 0.6rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.atlas-f19-stat-value {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #e6edf3;
+}
+
+/* ── Drop bar ─────────────────────────────────────────────────────────────── */
+
+.atlas-f19-drop-bar-wrap {
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  position: relative;
+  overflow: visible;
+}
+.atlas-f19-drop-bar-fill {
+  height: 100%;
+  background: #58a6ff;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.atlas-f19-drop-bar-fill.is-breached {
+  background: #f85149;
+}
+.atlas-f19-drop-bar-threshold {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: #f0a500;
+  border-radius: 1px;
+}
+
+/* ── Status panel ─────────────────────────────────────────────────────────── */
+
+.atlas-f19-status-panel {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.atlas-f19-status-panel.is-f19-active {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  color: #ffa198;
+}
+.atlas-f19-status-panel.is-f19-clear {
+  background: rgba(57, 211, 83, 0.06);
+  border: 1px solid rgba(57, 211, 83, 0.25);
+  color: #8dba8f;
+}
+.atlas-f19-status-panel.is-f19-unknown {
+  background: rgba(240, 165, 0, 0.08);
+  border: 1px solid rgba(240, 165, 0, 0.3);
+  color: #c9a040;
+}
+.atlas-f19-status-panel.is-f19-outside {
+  background: rgba(48, 54, 61, 0.3);
+  border: 1px solid #30363d;
+  color: #8b949e;
+}
+.atlas-f19-status-panel p {
+  margin: 0;
+}
+
+/* ── Affected holdings ────────────────────────────────────────────────────── */
+
+.atlas-f19-holdings-section {
+  margin-bottom: 12px;
+}
+.atlas-f19-section-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.atlas-f19-holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+.atlas-f19-holdings-table th {
+  text-align: left;
+  color: #8b949e;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 1px solid #21262d;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.atlas-f19-holdings-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #161b22;
+}
+.atlas-f19-holding-row.is-high-beta {
+  background: rgba(248, 81, 73, 0.05);
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+
+.atlas-f19-badge {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.atlas-f19-badge.is-high-beta {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+}
+.atlas-f19-badge.is-normal-beta {
+  background: rgba(57, 211, 83, 0.1);
+  color: #39d353;
+}
+.atlas-f19-badge.is-blocked {
+  background: rgba(248, 81, 73, 0.15);
+  color: #ff6b6b;
+}
+.atlas-f19-badge.is-clear {
+  color: #30363d;
+}
+
+/* ── Alert row ────────────────────────────────────────────────────────────── */
+
+.atlas-f19-alert-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #161b22;
+  border-radius: 4px;
+}
+.atlas-f19-alert-sent {
+  color: #39d353;
+  font-size: 0.68rem;
+}
+.atlas-f19-alert-pending {
+  color: #30363d;
+  font-size: 0.68rem;
+}
+
+/* ── Session row ──────────────────────────────────────────────────────────── */
+
+.atlas-f19-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 0.68rem;
+  color: #8b949e;
+}
+.atlas-f19-session-triggered {
+  color: #c9d1d9;
+}
+.atlas-f19-session-paused-count {
+  color: #f0a500;
+}
+
+/* ── Footer / data source badges ─────────────────────────────────────────── */
+
+.atlas-f19-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid #21262d;
+}
+.atlas-f19-data-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.atlas-f19-data-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.atlas-f19-data-badge.is-live {
+  background: rgba(57, 211, 83, 0.1);
+  color: #39d353;
+  border: 1px solid rgba(57, 211, 83, 0.3);
+}
+.atlas-f19-data-badge.is-unavailable {
+  background: rgba(248, 81, 73, 0.1);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+.atlas-f19-data-badge.is-no-cache {
+  background: rgba(88, 166, 255, 0.1);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+.atlas-f19-footer-ts {
+  font-size: 0.6rem;
+  color: #3d6080;
+}
+
+/* ── Warning messages ─────────────────────────────────────────────────────── */
+
+.atlas-f19-warnings {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.atlas-f19-warning-msg {
+  font-size: 0.65rem;
+  color: #f0a500;
+  padding: 4px 8px;
+  background: rgba(240, 165, 0, 0.08);
+  border-radius: 3px;
+  border-left: 2px solid #f0a500;
+}
+
+/* ── Loading / error states ───────────────────────────────────────────────── */
+
+.atlas-f19-loading,
+.atlas-f19-error {
+  font-size: 0.72rem;
+  color: #3d6080;
+  padding: 20px 0;
+  text-align: center;
+}

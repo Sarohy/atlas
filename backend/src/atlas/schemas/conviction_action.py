@@ -143,6 +143,26 @@ class ConvictionActionResponse(BaseModel):
         description="Human-readable F18 reduction or block note shown in the UI.",
     )
 
+    # ── Framework 19 — NVDA Kill Switch ────────────────────────────────────
+    f19_active: bool | None = Field(
+        default=None,
+        description=(
+            "True when NVDA kill switch fired this session, False when clear, "
+            "None when Polygon data unavailable. None is treated as BLOCKED."
+        ),
+    )
+    f19_all_ai_buys_blocked: bool = Field(
+        default=False,
+        description=(
+            "True when f19_active=True or f19_active=None (UNKNOWN). "
+            "All AI-correlated buy orders are blocked while kill switch is active."
+        ),
+    )
+    f19_note: str | None = Field(
+        default=None,
+        description="Human-readable F19 block note shown in the UI.",
+    )
+
     # ── Bottom-line rationale ───────────────────────────────────────────────
     rationale: str = Field(description="One-line bottom action message.")
 

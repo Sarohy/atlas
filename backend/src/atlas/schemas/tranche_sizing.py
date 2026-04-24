@@ -175,3 +175,23 @@ class TrancheSizingResponse(BaseModel):
             "E.g. 'Tranche reduced by 50% — F18 trend gate active. 3 consecutive down weeks.'"
         ),
     )
+
+    # ── Framework 19 — NVDA Kill Switch ────────────────────────────────────
+    f19_active: bool | None = Field(
+        default=None,
+        description=(
+            "True when NVDA kill switch fired this session, False when clear, "
+            "None when Polygon data unavailable. None is treated as BLOCKED."
+        ),
+    )
+    f19_all_ai_buys_blocked: bool = Field(
+        default=False,
+        description=(
+            "True when f19_active=True or f19_active=None (UNKNOWN). "
+            "All tranche buy deployments are blocked while kill switch is active."
+        ),
+    )
+    f19_note: str | None = Field(
+        default=None,
+        description="Human-readable F19 block note shown on tranche rows.",
+    )

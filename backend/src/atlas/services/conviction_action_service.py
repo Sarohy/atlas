@@ -204,6 +204,7 @@ def _compute_adds_permitted(
     f18_speculative_blocked: bool = False,
     f18_tier3_blocked: bool = False,
     f18_unknown_blocks: bool = False,
+    f19_all_ai_buys_blocked: bool = False,
 ) -> tuple[bool, str | None]:
     """Return (adds_permitted, blocking_reason).
 
@@ -216,6 +217,7 @@ def _compute_adds_permitted(
       6. F18 speculative starter blocked → blocked
       7. F18 Tier 3 blocked → blocked
       8. F18 data unknown → blocked (conservative)
+      9. F19 NVDA kill switch → blocked
 
     Pure function — no I/O.
     """
@@ -237,6 +239,8 @@ def _compute_adds_permitted(
         return (False, "F18 active — Tier 3 adds blocked during 4-week trend gate")
     if f18_unknown_blocks:
         return (False, "F18 status unknown — SPY data unavailable (conservative block)")
+    if f19_all_ai_buys_blocked:
+        return (False, "F19 NVDA kill switch active — all AI-correlated buy orders blocked")
     return (True, None)
 
 
@@ -488,6 +492,29 @@ class ConvictionActionService:
                     "Adds blocked as conservative precaution."
                 )
 
+        # ── Step 9c: Framework 19 — NVDA Kill Switch ─────────────────────
+        from atlas.services.framework19_service import get_f19_simple as _get_f19_state
+
+        _f19 = await _get_f19_state(self._session)
+        # f19_active=None (UNKNOWN) is treated as blocked — conservative posture.
+        _f19_active: bool | None = _f19.f19_active
+        _f19_all_ai_buys_blocked: bool = _f19.all_ai_buys_blocked
+        _f19_note: str | None = None
+        if _f19_all_ai_buys_blocked:
+            if _f19_active is True:
+                _f19_note = (
+                    f"F19 NVDA kill switch active — all AI-correlated buy orders blocked. "
+                    f"NVDA drop: {_f19.drop_pct:.2f}% "
+                    f"(threshold: {_f19.threshold_pct:.1f}%)."
+                    if _f19.drop_pct is not None and _f19.threshold_pct is not None
+                    else "F19 NVDA kill switch active — all AI-correlated buy orders blocked."
+                )
+            else:
+                _f19_note = (
+                    "F19 status unknown — NVDA data unavailable. "
+                    "Adds blocked as conservative precaution."
+                )
+
         adds_permitted, adds_blocked_reason = _compute_adds_permitted(
             tier,
             beta_cap_active,
@@ -497,6 +524,7 @@ class ConvictionActionService:
             f18_speculative_blocked=_f18_speculative_blocked,
             f18_tier3_blocked=_f18_tier3_blocked,
             f18_unknown_blocks=_f18_unknown_blocks,
+            f19_all_ai_buys_blocked=_f19_all_ai_buys_blocked,
         )
 
         # ── Step 10: Exit cycle ───────────────────────────────────────────
@@ -539,6 +567,9 @@ class ConvictionActionService:
             f18_tier3_blocked=_f18_tier3_blocked,
             f18_size_max_reduced=_f18_size_max_reduced,
             f18_note=_f18_note,
+            f19_active=_f19_active,
+            f19_all_ai_buys_blocked=_f19_all_ai_buys_blocked,
+            f19_note=_f19_note,
         )
 
     async def update_consensus(

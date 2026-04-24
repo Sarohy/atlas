@@ -109,6 +109,40 @@ class ConvictionActionResponse(BaseModel):
     cluster_weight_pct: float = Field(description="Total cluster weight as % of NAV.")
     cluster_status: str = Field(description="NORMAL / YELLOW_ZONE / RED_ZONE.")
 
+    # ── Framework 18 — 4-Week Trend Gate ────────────────────────────────────
+    f18_active: bool | None = Field(
+        default=None,
+        description=(
+            "True when the 4-Week Trend Gate is active, False when clear, "
+            "None when SPY data unavailable. None is treated as BLOCKED."
+        ),
+    )
+    f18_speculative_blocked: bool = Field(
+        default=False,
+        description=(
+            "True when f18_active=True and ticker is NOT in the portfolio. "
+            "No new positions on non-portfolio tickers while gate is active."
+        ),
+    )
+    f18_tier3_blocked: bool = Field(
+        default=False,
+        description=(
+            "True when f18_active=True and the ticker's tier is TIER_3. "
+            "Tier 3 adds are blocked while the gate is active."
+        ),
+    )
+    f18_size_max_reduced: bool = Field(
+        default=False,
+        description=(
+            "True when size_max_pct has been reduced by add_reduction_pct "
+            "because f18_active=True."
+        ),
+    )
+    f18_note: str | None = Field(
+        default=None,
+        description="Human-readable F18 reduction or block note shown in the UI.",
+    )
+
     # ── Bottom-line rationale ───────────────────────────────────────────────
     rationale: str = Field(description="One-line bottom action message.")
 

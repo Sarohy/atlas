@@ -7802,3 +7802,430 @@
   padding: 20px 0;
   text-align: center;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   FRAMEWORK 18 — 4-Week Trend Gate
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.atlas-f18-card {
+  background: #0d1b2a;
+  border: 1px solid #1e3448;
+  border-radius: 6px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  transition: border-color 0.2s ease;
+}
+
+.atlas-f18-card.is-f18-active {
+  border-color: #e74c3c;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.18);
+}
+
+.atlas-f18-card.is-f18-clear {
+  border-color: #27ae60;
+}
+
+.atlas-f18-card.is-f18-unknown {
+  border-color: #e67e22;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.atlas-f18-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.atlas-f18-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atlas-f18-framework-label {
+  font-size: 0.6rem;
+  color: #4a7ca0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.atlas-f18-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a8c8e8;
+  letter-spacing: 0.03em;
+}
+
+.atlas-f18-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.atlas-f18-status-chip {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+
+.atlas-f18-status-chip.is-f18-active {
+  background: rgba(231, 76, 60, 0.22);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.4);
+}
+
+.atlas-f18-status-chip.is-f18-clear {
+  background: rgba(39, 174, 96, 0.18);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.35);
+}
+
+.atlas-f18-status-chip.is-f18-unknown {
+  background: rgba(230, 126, 34, 0.18);
+  color: #e67e22;
+  border: 1px solid rgba(230, 126, 34, 0.35);
+}
+
+.atlas-f18-cache-badge {
+  font-size: 0.56rem;
+  color: #4a7ca0;
+  border: 1px solid #1e3448;
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.06em;
+}
+
+/* ── SPY closes panel ────────────────────────────────────────────────────── */
+
+.atlas-f18-closes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f18-closes-label {
+  font-size: 0.6rem;
+  color: #4a7ca0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f18-closes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.atlas-f18-close-stat {
+  background: #0a1520;
+  border: 1px solid #1e3448;
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.atlas-f18-close-stat-label {
+  font-size: 0.56rem;
+  color: #4a7ca0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f18-close-stat-price {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #a8c8e8;
+}
+
+.atlas-f18-close-stat-arrow {
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.atlas-f18-close-stat-arrow.is-down {
+  color: #e74c3c;
+}
+
+.atlas-f18-close-stat-arrow.is-up {
+  color: #27ae60;
+}
+
+.atlas-f18-close-stat-arrow.is-flat {
+  color: #4a7ca0;
+}
+
+.atlas-f18-close-stat-date {
+  font-size: 0.54rem;
+  color: #3d6080;
+}
+
+.atlas-f18-stale-badge {
+  font-size: 0.6rem;
+  color: #e67e22;
+  background: rgba(230, 126, 34, 0.1);
+  border: 1px solid rgba(230, 126, 34, 0.3);
+  border-radius: 3px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+/* ── Trend status panel ──────────────────────────────────────────────────── */
+
+.atlas-f18-trend-panel {
+  background: #0a1520;
+  border: 1px solid #1e3448;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f18-trend-panel.is-f18-active {
+  border-color: rgba(231, 76, 60, 0.3);
+  background: rgba(231, 76, 60, 0.05);
+}
+
+.atlas-f18-trend-panel.is-f18-clear {
+  border-color: rgba(39, 174, 96, 0.25);
+}
+
+.atlas-f18-streak-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f18-streak-label {
+  color: #4a7ca0;
+  font-size: 0.65rem;
+}
+
+.atlas-f18-streak-count {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #a8c8e8;
+}
+
+.atlas-f18-streak-threshold {
+  font-size: 0.6rem;
+  font-weight: 400;
+  color: #4a7ca0;
+}
+
+.atlas-f18-streak-bar-wrap {
+  height: 4px;
+  background: #1e3448;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.atlas-f18-streak-bar-fill {
+  height: 100%;
+  background: #e74c3c;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  min-width: 0;
+}
+
+/* ── Actions panel ───────────────────────────────────────────────────────── */
+
+.atlas-f18-actions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-f18-actions-label {
+  font-size: 0.6rem;
+  color: #4a7ca0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f18-actions-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.atlas-f18-action-chip {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.atlas-f18-action-chip.is-block {
+  background: rgba(231, 76, 60, 0.18);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.35);
+}
+
+.atlas-f18-action-chip.is-reduce {
+  background: rgba(230, 126, 34, 0.15);
+  color: #e67e22;
+  border: 1px solid rgba(230, 126, 34, 0.3);
+}
+
+.atlas-f18-action-chip.is-quality {
+  background: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
+}
+
+.atlas-f18-action-chip.is-info {
+  background: rgba(74, 124, 160, 0.12);
+  color: #4a7ca0;
+  border: 1px solid rgba(74, 124, 160, 0.25);
+}
+
+/* ── Factor 9 ────────────────────────────────────────────────────────────── */
+
+.atlas-f18-factor9-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid #1e3448;
+}
+
+.atlas-f18-factor9-label {
+  font-size: 0.6rem;
+  color: #4a7ca0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.atlas-f18-factor9-value {
+  font-size: 0.62rem;
+  color: #6a9ac0;
+  text-align: right;
+}
+
+/* ── Warnings ────────────────────────────────────────────────────────────── */
+
+.atlas-f18-warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f18-warning-item {
+  font-size: 0.62rem;
+  color: #e67e22;
+  background: rgba(230, 126, 34, 0.07);
+  border-left: 2px solid #e67e22;
+  padding: 3px 7px;
+  border-radius: 0 3px 3px 0;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.atlas-f18-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #1e3448;
+}
+
+.atlas-f18-sources {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.atlas-f18-source-badge {
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.atlas-f18-source-badge.is-live {
+  background: rgba(39, 174, 96, 0.12);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.25);
+}
+
+.atlas-f18-source-badge.is-stale {
+  background: rgba(230, 126, 34, 0.12);
+  color: #e67e22;
+  border: 1px solid rgba(230, 126, 34, 0.25);
+}
+
+.atlas-f18-source-badge.is-unavailable {
+  background: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.2);
+}
+
+.atlas-f18-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f18-refresh-btn {
+  font-size: 0.6rem;
+  color: #4a7ca0;
+  background: transparent;
+  border: 1px solid #1e3448;
+  border-radius: 3px;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.atlas-f18-refresh-btn:hover:not(:disabled) {
+  color: #a8c8e8;
+  border-color: #3d6080;
+}
+
+.atlas-f18-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.atlas-f18-footer-ts {
+  font-size: 0.56rem;
+  color: #3d6080;
+}
+
+/* ── Loading / error states ──────────────────────────────────────────────── */
+
+.atlas-f18-loading,
+.atlas-f18-error {
+  font-size: 0.72rem;
+  color: #3d6080;
+  padding: 20px 0;
+  text-align: center;
+}

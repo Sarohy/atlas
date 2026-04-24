@@ -67,7 +67,7 @@ export function fetchPausedOrders(): Promise<PausedOrdersResponse> {
 export function addOverride(
   body: AddOverrideRequest,
 ): Promise<Record<string, unknown>> {
-  return apiFetch('/api/v1/framework15/override', z.record(z.unknown()), {
+  return apiFetch('/api/v1/framework15/override', z.record(z.string(), z.unknown()), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -84,7 +84,7 @@ export function reviewPausedOrder(
 ): Promise<Record<string, unknown>> {
   return apiFetch(
     `/api/v1/framework15/paused-orders/${orderId}/review`,
-    z.record(z.unknown()),
+    z.record(z.string(), z.unknown()),
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

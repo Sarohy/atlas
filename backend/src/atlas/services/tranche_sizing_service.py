@@ -389,6 +389,9 @@ def compute_tranche_sizing(
             t2_pending=False,
             t3_fired=False,
             t3_pending=False,
+            f18_active=None,
+            f18_reduction_pct=None,
+            f18_note=None,
         )
 
     # Step 2: Check Framework 13 beta cap.
@@ -423,6 +426,9 @@ def compute_tranche_sizing(
             t2_pending=False,
             t3_fired=False,
             t3_pending=False,
+            f18_active=None,
+            f18_reduction_pct=None,
+            f18_note=None,
         )
 
     # Step 3a: Check Framework 15 VIX session halt.
@@ -451,6 +457,9 @@ def compute_tranche_sizing(
             t2_pending=False,
             t3_fired=False,
             t3_pending=False,
+            f18_active=None,
+            f18_reduction_pct=None,
+            f18_note=None,
         )
     if _f15 is not None and _f15.f15_active is None:
         _f15_unknown_msg = "Unknown \u2014 F15 VIX data unavailable"
@@ -474,7 +483,34 @@ def compute_tranche_sizing(
             t2_pending=False,
             t3_fired=False,
             t3_pending=False,
+            f18_active=None,
+            f18_reduction_pct=None,
+            f18_note=None,
         )
+
+    # Step 3b: Check Framework 18 — 4-Week Trend Gate.
+    # Does NOT suppress tranche display — provides note and reduction context.
+    from atlas.services.framework18_service import get_f18_simple as _get_f18_simple
+
+    _f18 = _get_f18_simple()
+    _f18_active: bool | None = _f18.f18_active if _f18 is not None else None
+    _f18_reduction_pct: float | None = None
+    _f18_note: str | None = None
+
+    if _f18 is not None:
+        if _f18.f18_active is True:
+            _f18_reduction_pct = _f18.add_reduction_pct
+            _f18_note = (
+                f"Tranche reduced by {_f18.add_reduction_pct:.0f}% — "
+                f"F18 trend gate active. "
+                f"{_f18.consecutive_weeks_down} consecutive down weeks "
+                f"(threshold: {_f18.consecutive_threshold})."
+            )
+        elif _f18.f18_active is None:
+            _f18_note = (
+                "F18 status unknown — SPY weekly data unavailable. "
+                "Using normal tranche sizing as fallback. Verify trend manually."
+            )
 
     # Step 3: Determine AND gate state (Framework 29).
     regime_normalised = regime_rule.strip().upper()
@@ -565,4 +601,7 @@ def compute_tranche_sizing(
         t3_fired=t3_fired,
         t3_pending=t3_pending,
         catalyst_confirmed=t1_fired,
+        f18_active=_f18_active,
+        f18_reduction_pct=_f18_reduction_pct,
+        f18_note=_f18_note,
     )

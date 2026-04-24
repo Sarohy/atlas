@@ -201,6 +201,9 @@ def _compute_adds_permitted(
     concentration_cap: bool,
     consensus_status: ConsensusStatus,
     f15_blocks: bool | None = None,
+    f18_speculative_blocked: bool = False,
+    f18_tier3_blocked: bool = False,
+    f18_unknown_blocks: bool = False,
 ) -> tuple[bool, str | None]:
     """Return (adds_permitted, blocking_reason).
 
@@ -210,6 +213,9 @@ def _compute_adds_permitted(
       3. Concentration cap active → blocked
       4. GREY_ZONE without CONFIRMED consensus → blocked
       5. F15 VIX session halt → blocked
+      6. F18 speculative starter blocked → blocked
+      7. F18 Tier 3 blocked → blocked
+      8. F18 data unknown → blocked (conservative)
 
     Pure function — no I/O.
     """
@@ -225,6 +231,12 @@ def _compute_adds_permitted(
         return (False, "F15 VIX session halt active — no new orders this session")
     if f15_blocks is None:
         return (False, "F15 status unknown — VIX data unavailable")
+    if f18_speculative_blocked:
+        return (False, "F18 active — no new positions on non-portfolio tickers")
+    if f18_tier3_blocked:
+        return (False, "F18 active — Tier 3 adds blocked during 4-week trend gate")
+    if f18_unknown_blocks:
+        return (False, "F18 status unknown — SPY data unavailable (conservative block)")
     return (True, None)
 
 
@@ -416,8 +428,75 @@ class ConvictionActionService:
             True if _f15.new_market_orders_blocked else False
         )
 
+        # ── Step 9b: Framework 18 — 4-Week Trend Gate ────────────────────
+        from atlas.services.framework18_service import get_f18_simple as _get_f18_simple
+
+        _f18 = _get_f18_simple()
+
+        # Defaults: no F18 effect until we inspect the cached result.
+        _f18_active: bool | None = None
+        _f18_speculative_blocked = False
+        _f18_tier3_blocked = False
+        _f18_size_max_reduced = False
+        _f18_note: str | None = None
+        _f18_unknown_blocks = False
+
+        if _f18 is not None:
+            _f18_active = _f18.f18_active
+
+            if _f18.f18_active is True:
+                # No new positions on tickers NOT already in the portfolio.
+                if position_weight == 0.0:
+                    _f18_speculative_blocked = True
+                    _f18_note = (
+                        f"F18 active — no new speculative starters. "
+                        f"{_f18.consecutive_weeks_down} consecutive down weeks "
+                        f"(threshold: {_f18.consecutive_threshold})."
+                    )
+
+                # Tier 3 adds are blocked when gate is active.
+                if tier == Tier.TIER_3:
+                    _f18_tier3_blocked = True
+                    _f18_note = (
+                        f"F18 active — Tier 3 adds blocked. "
+                        f"{_f18.consecutive_weeks_down} consecutive down weeks "
+                        f"(threshold: {_f18.consecutive_threshold})."
+                    )
+
+                # Reduce size_max by add_reduction_pct for permitted tiers
+                # (Tier 1 and Tier 2 existing positions only).
+                if (
+                    not _f18_speculative_blocked
+                    and not _f18_tier3_blocked
+                    and _f18.add_reduction_pct is not None
+                    and _f18.add_reduction_pct > 0
+                ):
+                    reduction_factor = 1.0 - (_f18.add_reduction_pct / 100.0)
+                    size_max = size_max * reduction_factor
+                    room_to_add = max(0.0, size_max - position_weight)
+                    _f18_size_max_reduced = True
+                    _f18_note = (
+                        f"F18 active — add size reduced by {_f18.add_reduction_pct:.0f}%. "
+                        f"{_f18.consecutive_weeks_down} consecutive down weeks."
+                    )
+
+            elif _f18.f18_active is None:
+                # SPY data unavailable — conservative block.
+                _f18_unknown_blocks = True
+                _f18_note = (
+                    "F18 status unknown — SPY weekly data unavailable. "
+                    "Adds blocked as conservative precaution."
+                )
+
         adds_permitted, adds_blocked_reason = _compute_adds_permitted(
-            tier, beta_cap_active, concentration_cap, consensus_status, _f15_blocks
+            tier,
+            beta_cap_active,
+            concentration_cap,
+            consensus_status,
+            _f15_blocks,
+            f18_speculative_blocked=_f18_speculative_blocked,
+            f18_tier3_blocked=_f18_tier3_blocked,
+            f18_unknown_blocks=_f18_unknown_blocks,
         )
 
         # ── Step 10: Exit cycle ───────────────────────────────────────────
@@ -455,6 +534,11 @@ class ConvictionActionService:
             cluster_weight_pct=round(cluster_weight * 100.0, 2),
             cluster_status=str(cluster_info["cluster_status"]),
             rationale=_build_rationale(tier, exit_triggered),
+            f18_active=_f18_active,
+            f18_speculative_blocked=_f18_speculative_blocked,
+            f18_tier3_blocked=_f18_tier3_blocked,
+            f18_size_max_reduced=_f18_size_max_reduced,
+            f18_note=_f18_note,
         )
 
     async def update_consensus(

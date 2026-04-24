@@ -152,3 +152,26 @@ class TrancheSizingResponse(BaseModel):
             "Mirrors t1_fired — single source of truth for the CATALYST header display."
         ),
     )
+
+    # ── Framework 18 — 4-Week Trend Gate ────────────────────────────────────
+    f18_active: bool | None = Field(
+        default=None,
+        description=(
+            "True when the 4-Week Trend Gate is active, False when clear, "
+            "None when SPY data is unavailable."
+        ),
+    )
+    f18_reduction_pct: float | None = Field(
+        default=None,
+        description=(
+            "Reduction percentage from atlas_config when f18_active=True. "
+            "Applied by Framework 6 to size_max. Informational here."
+        ),
+    )
+    f18_note: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable note shown on tranche rows when F18 is active or unknown. "
+            "E.g. 'Tranche reduced by 50% — F18 trend gate active. 3 consecutive down weeks.'"
+        ),
+    )

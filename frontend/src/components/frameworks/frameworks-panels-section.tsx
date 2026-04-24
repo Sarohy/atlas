@@ -31,6 +31,7 @@ import { Framework15Card } from './framework15-card';
 import { Framework17Card } from './framework17-card';
 import { Framework18Card } from './framework18-card';
 import { Framework19Card } from './framework19-card';
+import { Section16Panel } from './section16-panel';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -137,6 +138,10 @@ export function FrameworksPanelsSection() {
             onChange={setSelectedTicker}
           />
         )}
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <Section16Panel ticker={activeTicker} />
       </div>
 
       <div className="atlas-regime-panels-row">

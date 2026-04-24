@@ -347,20 +347,32 @@ async def _fetch_active_overrides(
 async def _fetch_exit_rule_status(ticker: str) -> dict[str, object]:
     """Check whether Section 16 has an active exit rule for ticker.
 
-    Section 16 is not yet implemented in V1.  This function returns
-    available=False gracefully so Framework 12 can surface the correct
-    PARTIAL data_gap_severity without crashing.
-
-    When Section 16 is built it will expose:
-      GET /api/v1/section16/exit-status/{ticker}
-    and this function will call it.
+    Calls GET /api/v1/section16/exit-status/{ticker}/simple.
+    Falls back to available=False on any error so F12 degrades gracefully.
     """
-    # Section 16 is not yet implemented — return gracefully.
-    return {
-        "available": False,
-        "exit_rule_active": None,
-        "reason": "Section 16 not yet implemented in V1.",
-    }
+    from atlas.config import get_settings
+
+    settings = get_settings()
+    url = f"http://localhost:8000{_S16_PATH.format(ticker=ticker)}/simple"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.get(url, headers={"X-API-Key": settings.atlas_api_key})
+            if resp.status_code == 404:
+                return {"available": False, "exit_rule_active": None, "reason": "Ticker not found in S16."}
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "available": data.get("available", True),
+                "exit_rule_active": data.get("exit_rule_active"),
+                "overall_status": data.get("overall_status"),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Section 16 fetch failed for %s: %s", ticker, exc)
+            return {
+                "available": False,
+                "exit_rule_active": None,
+                "reason": f"Section 16 fetch error: {exc}",
+            }
 
 
 # ---------------------------------------------------------------------------

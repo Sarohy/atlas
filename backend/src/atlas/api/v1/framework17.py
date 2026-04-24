@@ -19,7 +19,8 @@ After POST /flag:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
+from typing import Final
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.db.session import get_db_session
+from atlas.models.geo_flag_history import GeoFlagHistory
 from atlas.models.geopolitical_flag import GeopoliticalFlag
 from atlas.schemas.framework17 import (
     FlagHistoryEntry,
@@ -54,9 +56,6 @@ _MIN_OVERRIDE_REASON_LEN: int = 50
 
 # Framework 2 refresh endpoint — called after every flag change.
 _F2_REFRESH_PATH: Final[str] = "/api/v1/regime-modifier/refresh"
-
-from typing import Final
-
 
 # ---------------------------------------------------------------------------
 # Read routes
@@ -186,12 +185,30 @@ async def set_f17_flag(
     new_flag = GeopoliticalFlag(
         flag_state=body.flag_state.value,
         set_by=body.set_by,
-        set_at=datetime.now(timezone.utc),
+        set_at=datetime.now(UTC),
         conflict_start_date=body.conflict_start_date,
         notes=body.notes,
         session_date=date.today(),
     )
     session.add(new_flag)
+
+    # Write/update geo_flag_history for Section 16 Friday rescore reconstruction.
+    # Upserts on flag_date (PK) so repeated calls on the same day update in place.
+    today = date.today()
+    existing_history = await session.get(GeoFlagHistory, today)
+    if existing_history is not None:
+        existing_history.flag_state = body.flag_state.value
+        existing_history.set_by = body.set_by
+        existing_history.notes = body.notes
+    else:
+        session.add(
+            GeoFlagHistory(
+                flag_date=today,
+                flag_state=body.flag_state.value,
+                set_by=body.set_by,
+                notes=body.notes,
+            )
+        )
 
     # Log decision trace (append-only).
     await _log_decision_trace(

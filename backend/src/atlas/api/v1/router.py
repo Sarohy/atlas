@@ -34,6 +34,7 @@ from atlas.api.v1 import (
     portfolio,
     position_sizing,
     regime_modifier,
+    section16,
     ticker_search,
     tickers,
     tranche_sizing,
@@ -76,3 +77,4 @@ router.include_router(regime_modifier.router)
 router.include_router(cash_floor.router)
 router.include_router(conviction_action.router)
 router.include_router(market_conditions.router)
+router.include_router(section16.router)

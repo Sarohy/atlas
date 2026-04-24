@@ -181,23 +181,23 @@ export function FrameworksPanelsSection() {
       <div className="atlas-frameworks-secondary-row">
         <Framework9Card ticker={activeTicker} />
         <LeapsCard ticker={activeTicker} />
+        <Framework11Card />
         <Framework12Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-frameworks-secondary-row">
-        <Framework14Card ticker={activeTicker} />
         <Framework13Card ticker={activeTicker} />
+        <Framework14Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-frameworks-secondary-row">
+        <Framework15Card />
+        <Framework17Card />
         <Framework29Card />
         <Framework30Card />
-        <Framework11Card />
-        <Framework15Card />
       </div>
 
       <div className="atlas-frameworks-secondary-row">
-        <Framework17Card />
         <Framework18Card />
         <Framework19Card />
       </div>

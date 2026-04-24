@@ -26,7 +26,7 @@ const ACTION_TIER2_MIN = 70;       // 70-77  → GTC ADDS PERMITTED
 const ACTION_TIER3_MIN = 55;       // 55-69  → SMALL POSITION ONLY
                                    // < 55   → WATCHLIST
 
-/** CSS tone class for each action tone string. */
+/** CSS tone class for each action_tone string from the backend. */
 const ACTION_TONE_CLASS: Record<string, string> = {
   'tone-green': 'is-green',
   'tone-purple': 'is-purple',
@@ -69,13 +69,20 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
   const { data: fundamentalData } = useFundamental(ticker);
 
   const displayData = data
-    ? buildDisplayFrameworkScore(data, {
-        f1: momentumData?.f1_score,
-        f2: earningsData?.f2_score,
-        f3: analystData?.f3_score,
-        f4: framework9Data?.f4_score ?? optionsFlowData?.f4_score,
-        f5: fundamentalData?.f5_score,
-      })
+    ? buildDisplayFrameworkScore(
+        data,
+        {
+          f1: momentumData?.f1_score,
+          f2: earningsData?.f2_score,
+          f3: analystData?.f3_score,
+          f4: framework9Data?.f4_score ?? optionsFlowData?.f4_score,
+          // When F8 cap is active, pass undefined so buildDisplayFactor leaves
+          // the API's already-capped factor.score (f5_cap_applied) untouched.
+          // Without this guard, fundamentalData.f5_score (raw) overwrites the cap.
+          f5: data.f5_capped ? undefined : fundamentalData?.f5_score,
+        },
+        regimeModifier,
+      )
     : undefined;
 
   return (
@@ -226,6 +233,18 @@ function FrameworkScoreContent({
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
+      {/* ── F8 stale / unavailable warnings ── */}
+      {data.f8_stale && (
+        <div className="atlas-fws-f8-warning" data-testid="fws-f8-stale-warning">
+          ⚠ Framework 8 data is stale. F5 cap value may be outdated. Refresh Framework 8 recommended.
+        </div>
+      )}
+      {!data.f8_available && (
+        <div className="atlas-fws-f8-warning" data-testid="fws-f8-unavailable-warning">
+          ⚠ Framework 8 unavailable. F5 cap could not be verified. Raw F5 score used. Verify insider flag manually.
+        </div>
+      )}
+
       {/* ── Hero ── */}
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
@@ -280,8 +299,24 @@ function FrameworkScoreContent({
           <span>Contribution</span>
         </div>
         {data.factors.map((f) => (
-          <FactorRow key={f.key} factor={f} f4GapBadge={f.key === 'f4' ? f4GapBadge : null} />
+          <FactorRow
+            key={f.key}
+            factor={f}
+            f4GapBadge={f.key === 'f4' ? f4GapBadge : null}
+            f5CapApplied={f.key === 'f5' && data.f5_capped ? data.f5_cap_applied : null}
+            f5RawScore={f.key === 'f5' ? data.f5_raw_score : null}
+            f5CapSource={f.key === 'f5' ? data.f5_cap_source : null}
+          />
         ))}
+
+        {/* ── F5 cap amber note ── */}
+        {data.f5_capped && data.f5_cap_applied != null && (
+          <div className="atlas-fws-f8-cap-note" data-testid="fws-f5-cap-note">
+            ⚠ F5 capped at {data.f5_cap_applied} by Framework 8 insider selling flag. Raw F5 was{' '}
+            {data.f5_raw_score}. Cap reduces contribution by{' '}
+            {(((data.f5_raw_score ?? 0) - data.f5_cap_applied) * 0.3).toFixed(2)} points.
+          </div>
+        )}
 
         {/* ── Calculation footer ── */}
         <div className="atlas-fws-breakdown-divider" />
@@ -295,6 +330,15 @@ function FrameworkScoreContent({
           <span className="atlas-fws-calc-label">Raw total</span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
         </div>
+        {/* ── Raw total cap impact note ── */}
+        {data.f5_capped && data.f5_cap_applied != null && data.f5_raw_score != null && (
+          <div className="atlas-fws-f8-cap-note atlas-fws-f8-cap-note--calc" data-testid="fws-f5-cap-calc-note">
+            Note: F5 capped by Framework 8. Without cap: raw{' '}
+            {(data.raw_total + (data.f5_raw_score - data.f5_cap_applied) * 0.3).toFixed(2)}, pre-regime{' '}
+            {Math.round(data.raw_total + (data.f5_raw_score - data.f5_cap_applied) * 0.3)}. With cap: raw{' '}
+            {data.raw_total.toFixed(2)}, pre-regime {data.final_score}.
+          </div>
+        )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
           <span className="atlas-fws-calc-label">Framework score before regime</span>
           <span className={cn('atlas-fws-calc-value', toneCss)} data-testid="fws-final-score-calc">
@@ -329,11 +373,17 @@ function FrameworkScoreContent({
 function buildDisplayFrameworkScore(
   data: FrameworkScoreResponse,
   scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
+  regimeModifier: number,
 ): FrameworkScoreResponse {
   const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
   const rawTotal = calculateRawTotal(factors);
   const finalScore = calculateFinalScore(rawTotal);
-  const [action, actionTone] = mapAction(finalScore);
+  // Action label must match the DISPLAYED (regime-adjusted) score, not the
+  // pre-regime score. Using the pre-regime score here would make the label
+  // disagree with the number shown on screen (e.g. pre-regime 74 → GTC ADDS
+  // but displayed 69 which is Tier 3 → SMALL POSITION ONLY).
+  const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));
+  const [action, actionTone] = mapAction(adjustedScore);
 
   return {
     ...data,
@@ -391,9 +441,15 @@ function mapAction(finalScore: number): [string, string] {
 function FactorRow({
   factor,
   f4GapBadge,
+  f5CapApplied,
+  f5RawScore,
+  f5CapSource,
 }: {
   factor: FactorBreakdown;
   f4GapBadge: string | null;
+  f5CapApplied?: number | null;
+  f5RawScore?: number | null;
+  f5CapSource?: string | null;
 }) {
   const gradeTone =
     factor.grade === 'STRONG BUY'
@@ -423,6 +479,18 @@ function FactorRow({
             title={f4GapBadge}
           >
             {f4GapBadge}
+          </span>
+        )}
+        {factor.key === 'f5' && f5CapApplied != null && (
+          <span
+            className="atlas-fws-f5-cap-badge"
+            title={
+              f5CapSource ??
+              `F5 capped at ${f5CapApplied} by Framework 8 insider flag. Raw score: ${f5RawScore ?? '—'}.`
+            }
+            data-testid="fws-f5-cap-badge"
+          >
+            CAPPED BY F8
           </span>
         )}
       </span>

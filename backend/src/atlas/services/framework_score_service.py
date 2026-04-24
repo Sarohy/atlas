@@ -23,21 +23,27 @@ from typing import Any, Final
 
 import httpx
 
+from atlas.core.scoring import classify_tier
 from atlas.schemas.analyst import AnalystResponse
 from atlas.schemas.earnings import EarningsResponse
-from atlas.schemas.framework9 import Framework9Result
 from atlas.schemas.framework_score import (
     FactorBreakdown,
     FrameworkScoreResponse,
 )
 from atlas.schemas.fundamental import FundamentalResponse
 from atlas.schemas.momentum import MomentumResponse
+from atlas.schemas.options_flow import OptionsFlowResponse
 from atlas.services.analyst_service import AnalystService
 from atlas.services.earnings_service import EarningsService
+from atlas.services.framework8_service import Framework8Service
 from atlas.services.fundamental_service import FundamentalService
 from atlas.services.momentum_service import MomentumService
 
 logger = logging.getLogger(__name__)
+
+# Staleness threshold for Framework 8 data (minutes).  If F8 reports
+# data_age_minutes above this value the f8_stale flag is set in the response.
+_F8_STALE_THRESHOLD_MINUTES: Final[int] = 30
 
 # ---------------------------------------------------------------------------
 # Framework-level weights (Factor_Mapping_Guide §Final Score)
@@ -51,13 +57,6 @@ _W_F3: Final[float] = 0.15  # Analyst Sentiment
 _W_F4: Final[float] = 0.15  # Options Flow
 _W_F5: Final[float] = 0.30  # Fundamental Quality
 
-# Score thresholds for action map (inclusive lower bound).
-_ACTION_MAX_MIN: Final[int] = 90
-_ACTION_HOLD_ADD_MIN: Final[int] = 80
-_ACTION_HOLD_MIN: Final[int] = 70
-_ACTION_REDUCE_MIN: Final[int] = 60
-_ACTION_REDUCE_FURTHER_MIN: Final[int] = 55
-
 # Neutral fallback score when a factor service is unavailable.
 _NEUTRAL_SCORE: Final[int] = 50
 
@@ -70,27 +69,13 @@ _NEUTRAL_SCORE: Final[int] = 50
 def _map_action(final_score: int) -> tuple[str, str]:
     """Map a final conviction score to (action_string, tone_class).
 
-    Pure function — no I/O.
+    Delegates to ``atlas.core.scoring.classify_tier`` — the single source
+    of truth for v7.3.3 tier boundaries.
 
-    Score -> Action map (Factor_Mapping_Guide §Score-Action):
-      90-100  MAXIMUM POSITION  tone-green
-      80-89   HOLD / ADD        tone-cyan
-      70-79   HOLD              tone-yellow
-      60-69   REDUCE            tone-orange
-      55-59   REDUCE FURTHER    tone-red
-      <  55   EXIT              tone-dark-red
+    Pure function — no I/O.
     """
-    if final_score >= _ACTION_MAX_MIN:
-        return "MAXIMUM POSITION", "tone-green"
-    if final_score >= _ACTION_HOLD_ADD_MIN:
-        return "HOLD / ADD", "tone-cyan"
-    if final_score >= _ACTION_HOLD_MIN:
-        return "HOLD", "tone-yellow"
-    if final_score >= _ACTION_REDUCE_MIN:
-        return "REDUCE", "tone-orange"
-    if final_score >= _ACTION_REDUCE_FURTHER_MIN:
-        return "REDUCE FURTHER", "tone-red"
-    return "EXIT", "tone-dark-red"
+    result = classify_tier(final_score)
+    return result["action"], result["action_tone"]
 
 
 def _compute_raw_total(f1: int, f2: int, f3: int, f4: int, f5: int) -> float:
@@ -173,12 +158,13 @@ class FrameworkScoreService:
                 self._fetch_av_raw(client, ticker, "OVERVIEW")
             )
 
-            f1_result, f2_result, f3_result, f4_result, f5_result = await asyncio.gather(
+            f1_result, f2_result, f3_result, f4_result, f5_result, f8_data = await asyncio.gather(
                 self._fetch_f1(ticker, client),
                 self._fetch_f2(ticker, client, income_task),
                 self._fetch_f3(ticker, overview_task),
                 self._fetch_f4(ticker),
                 self._fetch_f5(ticker, income_task, overview_task),
+                self._fetch_f8(ticker),
                 return_exceptions=True,
             )
 
@@ -200,6 +186,49 @@ class FrameworkScoreService:
         f5_score, f5_grade, f5_ok = self._extract_factor(
             f5_result, "f5_score", "f5_grade", "F5 Fundamental Quality", flags
         )
+        f5_raw_score = f5_score  # preserve pre-cap value for response metadata
+
+        # --- Framework 8 insider cap (Rule 1-10 per Data Sync Rules) ---
+        # F8 is fetched fresh in parallel above — never cached here.
+        if isinstance(f8_data, Exception):
+            f8_data = {
+                "available": False,
+                "flag_active": None,
+                "f5_cap": None,
+                "reason": repr(f8_data),
+                "data_age_minutes": 0,
+            }
+
+        f8_available: bool = bool(f8_data.get("available", False))
+        f8_flag_active: bool | None = f8_data.get("flag_active")
+        f8_cap: int | None = f8_data.get("f5_cap")
+        f8_data_age: int = int(f8_data.get("data_age_minutes", 0))
+        f8_stale: bool = f8_available and f8_data_age > _F8_STALE_THRESHOLD_MINUTES
+        f5_capped = False
+        f5_cap_applied: int | None = None
+        f5_cap_source: str | None = None
+
+        if not f8_available:
+            flags.append(
+                f"Framework 8 unavailable — {f8_data.get('reason', 'unknown error')}. "
+                "F5 cap could not be verified. Using raw F5 score. "
+                "Verify insider flag manually before acting."
+            )
+        elif f8_stale:
+            flags.append(
+                f"Framework 8 data is {f8_data_age} minutes old. "
+                "F5 cap value may be stale. Refresh recommended."
+            )
+
+        if f8_available and f8_flag_active is True and f8_cap is not None and f5_score > f8_cap:
+            f5_capped = True
+            f5_score = f8_cap
+            f5_cap_applied = f8_cap
+            f5_cap_source = f8_data.get("cap_reason", "Framework 8 insider flag active")
+            flags.append(
+                f"F5 capped at {f8_cap} by Framework 8 insider flag. "
+                f"Raw F5 was {f5_raw_score}."
+            )
 
         # --- F5 block detection ---
         f5_blocked = False
@@ -208,12 +237,21 @@ class FrameworkScoreService:
             flags.append("F5 HARD BLOCK: Altman Z-Score below 1.8 — no new capital.")
 
         # --- Assemble factor breakdowns ---
+        # available=False when either score extraction failed OR the underlying
+        # data source reported data_available=False (the latter drives degraded=True).
+        f2_data_ok = not (
+            isinstance(f2_result, EarningsResponse) and not f2_result.data_available
+        )
+        f5_data_ok = not (
+            isinstance(f5_result, FundamentalResponse) and not f5_result.data_available
+        )
+
         factor_meta: list[tuple[str, str, int, float, str, bool]] = [
             ("f1", "Momentum", f1_score, _W_F1, f1_grade, f1_ok),
-            ("f2", "Earnings Quality", f2_score, _W_F2, f2_grade, f2_ok),
+            ("f2", "Earnings Quality", f2_score, _W_F2, f2_grade, f2_ok and f2_data_ok),
             ("f3", "Analyst Sentiment", f3_score, _W_F3, f3_grade, f3_ok),
             ("f4", "Options Flow", f4_score, _W_F4, f4_grade, f4_ok),
-            ("f5", "Fundamental Quality", f5_score, _W_F5, f5_grade, f5_ok),
+            ("f5", "Fundamental Quality", f5_score, _W_F5, f5_grade, f5_ok and f5_data_ok),
         ]
         factors = [
             FactorBreakdown(
@@ -261,6 +299,13 @@ class FrameworkScoreService:
                 if hasattr(f4_result, "f1_propagation_tooltip")
                 else None
             ),
+            f5_raw_score=f5_raw_score,
+            f5_capped=f5_capped,
+            f5_cap_applied=f5_cap_applied,
+            f5_cap_source=f5_cap_source,
+            f8_available=f8_available,
+            f8_flag_active=f8_flag_active,
+            f8_stale=f8_stale,
         )
 
     # ------------------------------------------------------------------
@@ -336,16 +381,12 @@ class FrameworkScoreService:
         )
         return await service.compute_analyst(ticker, overview_task=overview_task)
 
-    async def _fetch_f4(self, ticker: str) -> Framework9Result:
-        """Fetch F4 Options Flow score via Framework 9 evaluation pipeline."""
-        from atlas.services.framework9_service import evaluate_framework9
+    async def _fetch_f4(self, ticker: str) -> OptionsFlowResponse:
+        """Fetch F4 Options Flow score via OptionsFlowService (Unusual Whales)."""
+        from atlas.services.options_flow_service import OptionsFlowService
 
-        return await evaluate_framework9(
-            ticker,
-            self._unusual_whales_key,
-            self._polygon_key,
-            self._alphavantage_key,
-        )
+        service = OptionsFlowService(api_key=self._unusual_whales_key)
+        return await service.compute_options_flow(ticker)
 
     async def _fetch_f5(
         self,
@@ -361,6 +402,40 @@ class FrameworkScoreService:
         return await service.compute_fundamental(
             ticker, income_task=income_task, overview_task=overview_task
         )
+
+    async def _fetch_f8(self, ticker: str) -> dict[str, Any]:
+        """Fetch Framework 8 insider flag status for *ticker*.
+
+        Called fresh on every evaluation — no caching of the cap value.
+        On any failure returns a safe dict with available=False so the caller
+        can surface a warning without blocking Framework 1 scoring.
+        """
+        try:
+            service = Framework8Service(sec_api_key=self._sec_key)
+            result = await service.compute(ticker)
+            return {
+                "available": True,
+                "flag_active": result.flag_active,
+                "f5_cap": result.f5_cap,
+                "cap_reason": (
+                    f"Framework 8 insider flag — "
+                    f"largest sale ${(result.largest_sale_usd or 0) / 1_000_000:.1f}M "
+                    f"(filer tier: {result.filer_tier})"
+                ),
+                "data_age_minutes": 0,
+            }
+        except Exception as exc:
+            logger.warning(
+                "Framework 8 fetch failed — F5 cap cannot be verified",
+                extra={"ticker": ticker, "error": repr(exc)},
+            )
+            return {
+                "available": False,
+                "flag_active": None,
+                "f5_cap": None,
+                "reason": repr(exc),
+                "data_age_minutes": 0,
+            }
 
     # ------------------------------------------------------------------
     # Private — score extraction with fallback

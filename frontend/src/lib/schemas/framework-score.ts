@@ -57,6 +57,22 @@ export const frameworkScoreResponseSchema = z.object({
   f4_data_gap_message: z.string().nullable().default(null),
   /** Tooltip text for the F4 data gap badge */
   f4_data_gap_tooltip: z.string().nullable().default(null),
+
+  // --- Framework 8 insider cap sync fields ---
+  /** Raw F5 score before any Framework 8 insider cap. Null when F5 unavailable. */
+  f5_raw_score: z.number().int().min(0).max(100).nullable().default(null),
+  /** True when Framework 8 insider flag is active and the cap was applied to F5. */
+  f5_capped: z.boolean().default(false),
+  /** The Framework 8 cap value applied to F5. Null when no cap active. */
+  f5_cap_applied: z.number().int().nullable().default(null),
+  /** Human-readable reason for the F5 cap. */
+  f5_cap_source: z.string().nullable().default(null),
+  /** True when Framework 8 was successfully fetched this evaluation. */
+  f8_available: z.boolean().default(false),
+  /** Framework 8 insider flag status. Null when F8 was unavailable. */
+  f8_flag_active: z.boolean().nullable().default(null),
+  /** True when Framework 8 data exceeded the staleness threshold. */
+  f8_stale: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------

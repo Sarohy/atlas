@@ -10,7 +10,7 @@ Eligibility (tristate: True | False | None):
 
 Tier rules:
   TIER_1 (score ≥ 85): auto-eligible when IV ≤ 90% and gates clear
-  TIER_2 (70–84): eligible only with $500K+ dark pool flow from F9
+  TIER_2 (70-84): eligible only with $500K+ dark pool flow from F9
   TIER_3 / WATCHLIST: ineligible
 
 IV hard rule:
@@ -37,21 +37,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date, datetime, timezone
-from decimal import Decimal
-from typing import Any, Final
+from datetime import date
+from typing import Final
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from atlas.models.leaps import LeapsIvHistory, LeapsPosition
+from atlas.models.leaps import LeapsPosition
 from atlas.schemas.leaps import (
     EntryCondition,
     EntryConditionStatus,
     IVAlert,
     LeapsBucketStatus,
     LeapsEligibility,
+)
+from atlas.schemas.leaps import (
     LeapsPosition as LeapsPositionSchema,
 )
 
@@ -204,7 +205,10 @@ def _evaluate_entry_condition3(
         condition_name="Score Meets LEAPS Threshold (≥70)",
         status=EntryConditionStatus.CONFIRMED if meets else EntryConditionStatus.NOT_MET,
         met=meets,
-        detail=f"Score {score} {'meets' if meets else 'does not meet'} LEAPS minimum ({_TIER_2_SCORE_MIN}).",
+        detail=(
+            f"Score {score} {'meets' if meets else 'does not meet'} "
+            f"LEAPS minimum ({_TIER_2_SCORE_MIN})."
+        ),
     )
 
 
@@ -250,6 +254,15 @@ def _compute_eligibility(
     block_reasons: list[str] = []
     warning_messages: list[str] = []
     has_unknown = False
+
+    # --- Score availability check (Rule 6: never default to any score value) ---
+    # When Framework 1 data is missing, eligibility cannot be determined.
+    if score is None:
+        has_unknown = True
+        warning_messages.append(
+            "Score unavailable — Framework 1 data missing. "
+            "Cannot determine LEAPS eligibility."
+        )
 
     # --- Hard blocks (make eligible=False immediately) ---
 
@@ -315,7 +328,8 @@ def _compute_eligibility(
     if tier == "TIER_2":
         if flow_confirmed is False:
             block_reasons.append(
-                f"Tier 2 LEAPS requires ≥${_TIER_2_DARK_POOL_FLOW_USD:,.0f} dark pool flow (F9). Not confirmed."
+                f"Tier 2 LEAPS requires \u2265${_TIER_2_DARK_POOL_FLOW_USD:,.0f} "
+                "dark pool flow (F9). Not confirmed."
             )
         elif flow_confirmed is None:
             has_unknown = True
@@ -374,7 +388,7 @@ async def _fetch_iv_from_uw(
 ) -> tuple[float | None, float | None]:
     """Fetch current IV and IV percentile from Unusual Whales.
 
-    Returns (iv_current, iv_percentile) where values are 0–1 fractions.
+    Returns (iv_current, iv_percentile) where values are 0-1 fractions.
     Returns (None, None) on error.
     """
     if not uw_api_key:
@@ -447,6 +461,8 @@ async def check_leaps_eligibility(
     # 1. Fetch F29 gate status (from cache or evaluate).
     from atlas.services.framework29_service import (
         evaluate_framework29,
+    )
+    from atlas.services.framework29_service import (
         get_gate_status as get_f29_gate,
     )
 
@@ -455,6 +471,8 @@ async def check_leaps_eligibility(
     # 2. Fetch F30 drawdown state (from cache or DB evaluate).
     from atlas.services.framework30_service import (
         evaluate_framework30,
+    )
+    from atlas.services.framework30_service import (
         get_drawdown_state as get_f30_state,
     )
 
@@ -508,36 +526,41 @@ async def check_leaps_eligibility(
     # Unwrap results safely.
     gate_f7_active: bool | None = None
     if not isinstance(f7_result, BaseException):
-        gate_f7_active = f7_result.gate_active  # type: ignore[union-attr]
+        gate_f7_active = f7_result.gate_active
 
+    # --- Conviction score from F1 (embedded in F7 EarningsGate response) ---
+    # Rule: final_score is the post-regime conviction score for ALL LEAPS decisions.
+    # NEVER read factor sub-scores (f4_score, f1_score, raw_total, etc.) as the
+    # conviction score — they do not include regime modifier or F8 cap.
     score: int | None = None
     tier: str | None = None
+
+    if not isinstance(f7_result, BaseException):
+        score = f7_result.final_score
+        if score is not None:
+            tier = _determine_tier(score)
+
+    # --- Dark pool flow from F9 (Tier 2 confirmation only) ---
+    # F9 is used exclusively for the $500K dark pool flow check.
+    # F9 f4_score is NOT the conviction score — do not use it here.
     flow_confirmed: bool | None = None
 
     if not isinstance(f9_result, BaseException):
-        f9 = f9_result  # type: ignore[assignment]
-        score_raw = f9.f4_score  # type: ignore[union-attr]
-        score = int(score_raw) if score_raw is not None else None
-        if score is not None:
-            tier = _determine_tier(score)
-            # For Tier 2: check dark pool flow ≥ $500K via largest print.
-            dp_usd = f9.largest_print_usd  # type: ignore[union-attr]
-            if dp_usd is not None:
-                flow_confirmed = float(dp_usd) >= _TIER_2_DARK_POOL_FLOW_USD
-            else:
-                flow_confirmed = None
+        dp_usd = f9_result.largest_print_usd
+        if dp_usd is not None:
+            flow_confirmed = float(dp_usd) >= _TIER_2_DARK_POOL_FLOW_USD
 
     iv_current: float | None = None
     iv_percentile: float | None = None
     if not isinstance(iv_result, BaseException):
-        iv_current, iv_percentile = iv_result  # type: ignore[misc]
+        iv_current, iv_percentile = iv_result
 
     gate_f29_passed: bool | None = None
     f29_vix_signal: bool | None = None
     if not isinstance(f29_result_raw, BaseException) and f29_result_raw is not None:
-        gate_f29_passed = f29_result_raw.and_gate_passed  # type: ignore[union-attr]
+        gate_f29_passed = f29_result_raw.and_gate_passed  # type: ignore[attr-defined]
         # Extract Signal 1 (VIX declining) status for entry condition 1.
-        signals = getattr(f29_result_raw, "signals", [])  # type: ignore[union-attr]
+        signals = getattr(f29_result_raw, "signals", [])
         if signals:
             sig1 = next((s for s in signals if s.signal_number == 1), None)
             if sig1:
@@ -547,7 +570,7 @@ async def check_leaps_eligibility(
     gate_f30_permits_leaps: bool | None = None
     regime_state: str | None = None
     if not isinstance(f30_result_raw, BaseException) and f30_result_raw is not None:
-        gate_f30_permits_leaps = getattr(f30_result_raw, "leaps_permitted", None)  # type: ignore[union-attr]
+        gate_f30_permits_leaps = getattr(f30_result_raw, "leaps_permitted", None)
 
     # Regime state: derive from F30 drawdown (best we can without a separate F2 call).
     # For LEAPS, we use F29 gate as a proxy for regime health when F2 is not called.
@@ -667,9 +690,9 @@ async def get_leaps_bucket(
     positions = list(result.scalars().all())
 
     # Total cost basis (entry_price * contracts * 100).
-    SHARES_PER_CONTRACT: Final[int] = 100
+    _shares_per_contract: Final[int] = 100
     total_deployed_usd = sum(
-        float(p.entry_price) * p.contracts * SHARES_PER_CONTRACT for p in positions
+        float(p.entry_price) * p.contracts * _shares_per_contract for p in positions
     )
 
     total_deployed_pct = 0.0
@@ -695,6 +718,8 @@ async def get_leaps_bucket(
         total_cap_pct=_LEAPS_BUCKET_CAP_PCT,
         positions_count=len(positions),
         bucket_available_pct=round(bucket_available_pct, 4),
-        bucket_available_usd=round(bucket_available_usd, 2) if bucket_available_usd is not None else None,
+        bucket_available_usd=(
+            round(bucket_available_usd, 2) if bucket_available_usd is not None else None
+        ),
         warning_messages=warning_messages,
     )

@@ -1,12 +1,12 @@
 """Framework 3 — Score Action Map v7.3.4.
 
 Maps a Framework 1 conviction score to a position-sizing action.
-All band logic lives in the pure helper ``score_to_action`` so it is
-trivially unit-testable without any I/O.
+All band logic delegates to ``atlas.core.scoring.classify_tier`` — the single
+source of truth for v7.3.3 tier boundaries.
 
-Score bands (v7.3.4):
-  >= 85       TIER_1         - Core position, LEAPS eligible
-  78 - 84     TIER_2_GREY    - Grey zone, 3-model consensus required
+Score bands (v7.3.3):
+  >= 85       TIER_1_CORE    - Core position, LEAPS eligible
+  78 - 84     GREY_ZONE      - 3-AI consensus required before any add
   70 - 77     TIER_2         - GTC adds permitted
   55 - 69     TIER_3         - Small position only
   < 55        WATCHLIST      - Exit rules active (see Framework 16)
@@ -15,19 +15,9 @@ Score bands (v7.3.4):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
 
+from atlas.core.scoring import classify_tier
 from atlas.schemas.position_sizing import PositionSizingResponse
-
-# ---------------------------------------------------------------------------
-# Score band thresholds (inclusive lower bounds)
-# ---------------------------------------------------------------------------
-
-_THRESHOLD_TIER_1: Final[int] = 85  # score must be >= this
-_THRESHOLD_TIER_2_GREY_LOW: Final[int] = 78  # 78 - 84 inclusive
-_THRESHOLD_TIER_2_LOW: Final[int] = 70  # 70 - 77 inclusive
-_THRESHOLD_TIER_3_LOW: Final[int] = 55  # 55 - 69 inclusive
-# < 55  ->  WATCHLIST
 
 # ---------------------------------------------------------------------------
 # Consensus store (in-memory; swap for Redis in production)
@@ -80,6 +70,9 @@ def score_to_action(
 ) -> ScoreAction:
     """Map a conviction score to a ``ScoreAction``.
 
+    Delegates to ``atlas.core.scoring.classify_tier`` — the single source of
+    truth for v7.3.3 tier boundaries.
+
     Pure function — no I/O, no side effects.
 
     Parameters
@@ -87,10 +80,13 @@ def score_to_action(
     final_score:
         Framework 1 conviction score (0-100).
     concentration_cap_active:
-        When ``True`` and score falls in TIER_1, adds are blocked by the
+        When ``True`` and score falls in TIER_1_CORE, adds are blocked by the
         Framework 14 concentration cap.  The tier label is unchanged.
     """
-    if final_score >= _THRESHOLD_TIER_1:
+    tier_data = classify_tier(final_score)
+    tier = tier_data["tier"]
+
+    if tier == "TIER_1_CORE":
         if concentration_cap_active:
             return ScoreAction(
                 tier="TIER_1",
@@ -115,7 +111,7 @@ def score_to_action(
             display_message="Core position — LEAPS eligible.",
         )
 
-    if final_score >= _THRESHOLD_TIER_2_GREY_LOW:
+    if tier == "GREY_ZONE":
         return ScoreAction(
             tier="TIER_2_GREY",
             action="GREY ZONE",
@@ -127,7 +123,7 @@ def score_to_action(
             display_message="Grey zone — 3-model consensus required before adding.",
         )
 
-    if final_score >= _THRESHOLD_TIER_2_LOW:
+    if tier == "TIER_2":
         return ScoreAction(
             tier="TIER_2",
             action="GTC ADDS PERMITTED",
@@ -139,7 +135,7 @@ def score_to_action(
             display_message="GTC adds permitted.",
         )
 
-    if final_score >= _THRESHOLD_TIER_3_LOW:
+    if tier == "TIER_3":
         return ScoreAction(
             tier="TIER_3",
             action="SMALL POSITION ONLY",
@@ -151,7 +147,7 @@ def score_to_action(
             display_message="Small position only — monitor for improvement.",
         )
 
-    # < 55 → WATCHLIST
+    # WATCHLIST (score < 55)
     return ScoreAction(
         tier="WATCHLIST",
         action="WATCHLIST",

@@ -5085,6 +5085,46 @@
   margin-left: 6px;
 }
 
+/* F8 insider cap badge — inline on F5 row */
+.atlas-fws-f5-cap-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #1a0d00;
+  color: #fb923c;
+  cursor: help;
+}
+
+/* F8 amber notes — cap applied below F5 row and below raw total */
+.atlas-fws-f8-cap-note {
+  padding: 5px 14px 4px;
+  font-size: 0.52rem;
+  color: #fbbf24;
+  background: #0f0a00;
+  border-left: 2px solid #92400e;
+  margin: 2px 0;
+}
+
+.atlas-fws-f8-cap-note--calc {
+  color: #94a3b8;
+  background: transparent;
+  border-left: 2px solid #334155;
+}
+
+/* F8 stale / unavailable top-of-card warning */
+.atlas-fws-f8-warning {
+  padding: 6px 14px;
+  font-size: 0.52rem;
+  color: #fbbf24;
+  background: #1a1000;
+  border-bottom: 1px solid #92400e;
+}
+
 /* ==========================================================================
    Framework 29 — Capitulation / Re-Entry Signal  (.atlas-f29-*)
    ========================================================================== */

@@ -29,6 +29,8 @@ from typing import Final, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from atlas.core.scoring import TIER_3_MIN as _SCORE_TIER3_MIN
+from atlas.core.scoring import classify_tier
 from atlas.schemas.conviction_action import (
     ConsensusStatus,
     ConsensusUpdateRequest,
@@ -51,31 +53,15 @@ from atlas.services.regime_modifier_service import RegimeModifierService
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Score thresholds (named constants)
+# Score thresholds — the only constant needed locally; all band boundaries
+# live in atlas.core.scoring.classify_tier (single source of truth).
 # ---------------------------------------------------------------------------
 
-# Minimum score for TIER_1_CORE (inclusive)
-_SCORE_TIER1_MIN: Final[int] = 85
-
-# Minimum score for GREY_ZONE (inclusive)
-_SCORE_GREY_MIN: Final[int] = 78
-
-# Minimum score for TIER_2 (inclusive)
-_SCORE_TIER2_MIN: Final[int] = 70
-
-# Minimum score for TIER_3 (inclusive)
-_SCORE_TIER3_MIN: Final[int] = 55
-
-# Threshold below which exit cycle increments
-_SCORE_EXIT_THRESHOLD: Final[int] = 55
+# Threshold below which exit cycle increments (== Tier 3 lower bound = 55)
+_SCORE_EXIT_THRESHOLD: Final[int] = _SCORE_TIER3_MIN
 
 # Number of consecutive below-threshold closes before exit is triggered
 _EXIT_CYCLE_TRIGGER: Final[int] = 2
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# TypedDict for tier details
-# ---------------------------------------------------------------------------
 
 
 class _TierDetails(TypedDict):
@@ -105,17 +91,12 @@ _exit_cycle_store: dict[str, int] = {}
 def assign_tier(final_score: float) -> Tier:
     """Map a regime-adjusted score to a conviction tier.
 
+    Delegates to ``atlas.core.scoring.classify_tier`` — the single source of
+    truth for v7.3.3 tier boundaries.
+
     Pure function — no I/O, fully unit-testable.
     """
-    if final_score >= _SCORE_TIER1_MIN:
-        return Tier.TIER_1_CORE
-    if final_score >= _SCORE_GREY_MIN:
-        return Tier.GREY_ZONE
-    if final_score >= _SCORE_TIER2_MIN:
-        return Tier.TIER_2
-    if final_score >= _SCORE_TIER3_MIN:
-        return Tier.TIER_3
-    return Tier.WATCHLIST
+    return Tier(classify_tier(final_score)["tier"])
 
 
 def get_tier_details(tier: Tier) -> _TierDetails:
@@ -428,9 +409,7 @@ class ConvictionActionService:
         from atlas.services.framework15_service import get_f15_simple as _get_f15_simple
 
         _f15 = _get_f15_simple()
-        _f15_blocks: bool | None = None if _f15 is None else (
-            True if _f15.new_market_orders_blocked else False
-        )
+        _f15_blocks: bool | None = None if _f15 is None else bool(_f15.new_market_orders_blocked)
 
         # ── Step 9b: Framework 18 — 4-Week Trend Gate ────────────────────
         from atlas.services.framework18_service import get_f18_simple as _get_f18_simple

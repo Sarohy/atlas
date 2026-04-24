@@ -284,9 +284,10 @@ async def _fetch_framework2_regime() -> dict:
 
 
 async def _fetch_brent_price() -> float | None:
-    """Fetch the most recent Brent crude daily close from Polygon.io.
+    """Fetch today's Brent crude daily close from Polygon.io.
 
-    Uses the BZ ticker (Brent front-month). Returns None on failure.
+    Uses the BZ ticker (Brent front-month). Returns None if today's data is
+    not yet available or on any failure — does NOT fall back to stale prices.
     Polygon.io is the ONLY source for Brent price in F17.
     """
     settings = get_settings()
@@ -317,22 +318,8 @@ async def _fetch_brent_price() -> float | None:
         if results:
             return float(results[-1].get("c", 0)) or None
 
-        # No results for today — try yesterday's date.
-        from datetime import timedelta
-
-        yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-        url_yesterday = _POLYGON_BRENT_URL.format(date=yesterday_str)
-        response2 = await client.get(
-            url_yesterday,
-            params={"adjusted": "true", "apiKey": settings.polygon_api_key},
-            timeout=5.0,
-        )
-        if response2.status_code == 200:
-            data2 = response2.json()
-            results2 = data2.get("results", [])
-            if results2:
-                return float(results2[-1].get("c", 0)) or None
-
+        # No results for today — do not fall back to stale data.
+        logger.warning("F17: No Brent price available for today — returning None")
         return None
 
     except Exception as exc:

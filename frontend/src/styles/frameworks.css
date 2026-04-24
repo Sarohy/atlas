@@ -7378,3 +7378,427 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Framework 17 — Geopolitical Monitor
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Card shell ─────────────────────────────────────────────────────────── */
+
+.atlas-f17-card {
+  background: #0a1628;
+  border: 1px solid #1a2a44;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.atlas-f17-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f17-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f17-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f17-framework-label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #3d6080;
+  text-transform: uppercase;
+}
+
+.atlas-f17-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #c8dce8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Flag state chip ────────────────────────────────────────────────────── */
+
+.atlas-f17-flag-chip {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.is-f17-active {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.is-f17-deescalating {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.is-f17-none {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+
+.is-f17-notset {
+  background: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+/* ── Severity badge ─────────────────────────────────────────────────────── */
+
+.atlas-f17-sev-badge {
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.is-f17-sev-critical {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+
+.is-f17-sev-high {
+  background: rgba(249, 115, 22, 0.14);
+  color: #fb923c;
+}
+
+.is-f17-sev-elevated {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+
+.is-f17-sev-none {
+  background: rgba(34, 197, 94, 0.08);
+  color: #4ade80;
+}
+
+.is-f17-sev-unknown {
+  background: rgba(100, 116, 139, 0.1);
+  color: #94a3b8;
+}
+
+/* ── Briefing ───────────────────────────────────────────────────────────── */
+
+.atlas-f17-briefing {
+  padding: 8px 10px;
+  border-radius: 5px;
+  border-left: 3px solid #1a2a44;
+  background: #0d1e35;
+}
+
+.is-f17-briefing-urgent {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.is-f17-briefing-warning {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.atlas-f17-briefing-text {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #c8dce8;
+  line-height: 1.5;
+}
+
+.atlas-f17-carried-forward-badge {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 0.6rem;
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+/* ── Stat rows ──────────────────────────────────────────────────────────── */
+
+.atlas-f17-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.atlas-f17-stat-label {
+  font-size: 0.65rem;
+  color: #3d6080;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.atlas-f17-stat-value {
+  font-size: 0.7rem;
+  color: #c8dce8;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.is-f17-value-critical { color: #ef4444; }
+.is-f17-value-warn     { color: #f59e0b; }
+.is-f17-value-ok       { color: #22c55e; }
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+
+.atlas-f17-flag-panel,
+.atlas-f17-conflict-panel,
+.atlas-f17-regime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #0d1e35;
+  border-radius: 5px;
+  border: 1px solid #1a2a44;
+}
+
+.atlas-f17-regime-blocked-note {
+  margin: 4px 0 0;
+  font-size: 0.6rem;
+  color: #ef4444;
+}
+
+/* ── Operator section ───────────────────────────────────────────────────── */
+
+.atlas-f17-operator-section {
+  margin-top: 2px;
+}
+
+.atlas-f17-set-flag-btn {
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  transition: background 0.15s;
+}
+
+.atlas-f17-set-flag-btn:hover {
+  background: rgba(96, 165, 250, 0.18);
+}
+
+/* ── Set flag form ──────────────────────────────────────────────────────── */
+
+.atlas-f17-set-flag-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: #0d1e35;
+  border-radius: 6px;
+  border: 1px solid #1a2a44;
+}
+
+.atlas-f17-set-flag-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #c8dce8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.atlas-f17-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f17-form-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.atlas-f17-form-input,
+.atlas-f17-form-select,
+.atlas-f17-form-textarea {
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #c8dce8;
+  background: #0a1628;
+  border: 1px solid #1a2a44;
+  font-family: inherit;
+  outline: none;
+}
+
+.atlas-f17-form-input:focus,
+.atlas-f17-form-select:focus,
+.atlas-f17-form-textarea:focus {
+  border-color: #3d6080;
+}
+
+.atlas-f17-char-count {
+  font-size: 0.55rem;
+  color: #3d6080;
+}
+
+.atlas-f17-form-error {
+  margin: 0;
+  font-size: 0.65rem;
+  color: #ef4444;
+}
+
+.atlas-f17-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.atlas-f17-btn-cancel {
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #1a2a44;
+}
+
+.atlas-f17-btn-submit {
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+}
+
+.atlas-f17-btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── History ────────────────────────────────────────────────────────────── */
+
+.atlas-f17-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f17-section-title {
+  margin: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f17-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f17-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.62rem;
+}
+
+.atlas-f17-history-state {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.55rem;
+  font-weight: 700;
+}
+
+.atlas-f17-history-date {
+  color: #3d6080;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-f17-history-by {
+  color: #c8dce8;
+  font-weight: 600;
+}
+
+/* ── Data source badges ─────────────────────────────────────────────────── */
+
+.atlas-f17-sources {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f17-source-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.is-f17-source-online {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+
+.is-f17-source-offline {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+
+.atlas-f17-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.atlas-f17-data-as-of {
+  font-size: 0.55rem;
+  color: #3d6080;
+}
+
+/* ── Loading / error ────────────────────────────────────────────────────── */
+
+.atlas-f17-loading,
+.atlas-f17-error {
+  font-size: 0.72rem;
+  color: #3d6080;
+  padding: 20px 0;
+  text-align: center;
+}

@@ -630,6 +630,20 @@ class RegimeModifierService:
         else:
             rule = None
 
+        # ── F17 geo flag gate: block CLEAR regime when ACTIVE geo risk ────
+        # Framework 17 is the ONLY source for this gate.
+        # Only applies when rule 4 (CLEAR) was determined.
+        if rule == 4:
+            from atlas.services.framework17_service import get_f17_clear_blocked
+
+            if get_f17_clear_blocked():
+                # Downgrade CLEAR → SOFT CAUTION when geo flag is ACTIVE.
+                rule = 3
+                logger.info(
+                    "F2: CLEAR regime blocked by active F17 geopolitical flag; "
+                    "downgraded to SOFT CAUTION."
+                )
+
         (
             adjusted_score,
             min_cash_pct,

@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException
 
 from atlas.config import get_settings
 from atlas.schemas.framework7 import EarningsGate
-from atlas.services.framework7_service import Framework7Service
+from atlas.services.framework7_service import Framework7Service, get_oil_priority_elevated
 
 router = APIRouter(prefix="/framework7", tags=["framework7"])
 
@@ -71,4 +71,8 @@ async def get_framework7(
         unusual_whales_api_key=settings.unusual_whales_api_key or "",
         sec_api_key=settings.sec_api_key or "",
     )
-    return await service.compute(normalised, provided_score=score)
+    gate = await service.compute(normalised, provided_score=score)
+
+    # Annotate with F17 oil priority elevation (from cache — no DB call).
+    oil_elevated = await get_oil_priority_elevated()
+    return EarningsGate(**{**gate.model_dump(), "oil_priority_elevated": oil_elevated})

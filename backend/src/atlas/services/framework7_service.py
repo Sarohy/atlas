@@ -374,3 +374,15 @@ class Framework7Service:
             final_score=final_score,
             insider_flag=insider_flag,
         )
+
+
+async def get_oil_priority_elevated() -> bool:
+    """Return True when Framework 17 reports an active geopolitical risk.
+
+    Framework 7 is NOT the source of truth for geopolitical state.
+    This helper reads from the F17 service cache (no DB call).
+    Returns False when F17 cache is empty or flag is not ACTIVE.
+    """
+    from atlas.services.framework17_service import get_f17_clear_blocked
+
+    return get_f17_clear_blocked()

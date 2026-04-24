@@ -49,3 +49,11 @@ class EarningsGate(BaseModel):
 
     # Human-readable explanation of the current gate state.
     message: str
+
+    # ── Geopolitical context (Framework 17 integration) ───────────────────
+    # True when F17 flag is ACTIVE — oil-exposed positions need elevated
+    # scrutiny in morning briefing. Set by Framework 17 service, not by F7.
+    oil_priority_elevated: bool = Field(
+        default=False,
+        description="True when Framework 17 reports an active geopolitical risk.",
+    )

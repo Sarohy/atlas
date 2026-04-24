@@ -16,6 +16,7 @@ from atlas.api.v1 import (
     framework12,
     framework13,
     framework14,
+    framework15,
     framework29,
     framework30,
     framework_score,
@@ -55,6 +56,7 @@ router.include_router(framework11.router)
 router.include_router(framework12.router)
 router.include_router(framework13.router)
 router.include_router(framework14.router)
+router.include_router(framework15.router)
 router.include_router(framework29.router)
 router.include_router(framework30.router)
 router.include_router(leaps.router)

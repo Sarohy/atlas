@@ -200,6 +200,7 @@ def _compute_adds_permitted(
     beta_cap_active: bool,
     concentration_cap: bool,
     consensus_status: ConsensusStatus,
+    f15_blocks: bool | None = None,
 ) -> tuple[bool, str | None]:
     """Return (adds_permitted, blocking_reason).
 
@@ -208,6 +209,7 @@ def _compute_adds_permitted(
       2. Beta cap active → blocked
       3. Concentration cap active → blocked
       4. GREY_ZONE without CONFIRMED consensus → blocked
+      5. F15 VIX session halt → blocked
 
     Pure function — no I/O.
     """
@@ -219,6 +221,10 @@ def _compute_adds_permitted(
         return (False, "Concentration cap (F14) blocking adds")
     if tier == Tier.GREY_ZONE and consensus_status != ConsensusStatus.CONFIRMED:
         return (False, "3-AI consensus required")
+    if f15_blocks is True:
+        return (False, "F15 VIX session halt active — no new orders this session")
+    if f15_blocks is None:
+        return (False, "F15 status unknown — VIX data unavailable")
     return (True, None)
 
 
@@ -403,8 +409,15 @@ class ConvictionActionService:
         consensus_status = get_consensus_status_for_tier(upper, tier)
 
         # ── Step 9: Adds permitted ────────────────────────────────────────
+        from atlas.services.framework15_service import get_f15_simple as _get_f15_simple
+
+        _f15 = _get_f15_simple()
+        _f15_blocks: bool | None = None if _f15 is None else (
+            True if _f15.new_market_orders_blocked else False
+        )
+
         adds_permitted, adds_blocked_reason = _compute_adds_permitted(
-            tier, beta_cap_active, concentration_cap, consensus_status
+            tier, beta_cap_active, concentration_cap, consensus_status, _f15_blocks
         )
 
         # ── Step 10: Exit cycle ───────────────────────────────────────────

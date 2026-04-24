@@ -6859,3 +6859,522 @@
     grid-template-columns: repeat(1, 1fr);
   }
 }
+
+/* ==========================================================================
+   Framework 15 — VIX Regime Override (.atlas-f15-*)
+   ========================================================================== */
+
+.atlas-f15-card {
+  background: #0d1821;
+  border: 1px solid #1a2a38;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 340px;
+  flex: 1;
+}
+
+.atlas-f15-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.atlas-f15-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.atlas-f15-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-f15-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c8dce8;
+  margin: 0;
+}
+
+/* Status chip */
+.atlas-f15-status-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.is-f15-active .atlas-f15-status-chip,
+.atlas-f15-status-chip.is-f15-active {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.is-f15-clear .atlas-f15-status-chip,
+.atlas-f15-status-chip.is-f15-clear {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.is-f15-unknown .atlas-f15-status-chip,
+.atlas-f15-status-chip.is-f15-unknown {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.is-f15-outside-hours .atlas-f15-status-chip,
+.atlas-f15-status-chip.is-f15-outside-hours {
+  background: rgba(107, 114, 128, 0.15);
+  color: #9ca3af;
+  border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+/* Live indicator */
+.atlas-f15-live-indicator {
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.is-f15-live {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  animation: f15-pulse 2s ease-in-out infinite;
+}
+
+.is-f15-closed {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+}
+
+@keyframes f15-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+/* ── Stat grid ─────────────────────────────────────────────────────────── */
+
+.atlas-f15-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.atlas-f15-stat-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #1a2a38;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f15-stat-label {
+  font-size: 0.6rem;
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.atlas-f15-stat-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #c8dce8;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-f15-spike-active {
+  color: #ef4444;
+}
+
+.is-f15-spike-unknown {
+  color: #f59e0b;
+}
+
+.is-f15-data-missing {
+  color: #4b6070;
+}
+
+/* ── Status panel ──────────────────────────────────────────────────────── */
+
+.atlas-f15-status-panel {
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.is-f15-panel-active {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.is-f15-panel-clear {
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.is-f15-panel-unknown {
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+}
+
+.is-f15-panel-outside-hours {
+  background: rgba(107, 114, 128, 0.06);
+  border: 1px solid rgba(107, 114, 128, 0.18);
+}
+
+.atlas-f15-status-headline {
+  color: #c8dce8;
+  margin: 0 0 8px 0;
+}
+
+.atlas-f15-action-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f15-action-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.is-f15-action-blocked {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.is-f15-action-permitted {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+/* ── Paused orders table ───────────────────────────────────────────────── */
+
+.atlas-f15-paused-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.atlas-f15-section-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #7a9ab8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+
+.atlas-f15-orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+
+.atlas-f15-order-th {
+  color: #3d6080;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 0.58rem;
+  font-weight: 700;
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid #1a2a38;
+}
+
+.atlas-f15-order-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.is-f15-order-pending {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.is-f15-order-reviewed {
+  background: transparent;
+  opacity: 0.65;
+}
+
+.atlas-f15-order-cell {
+  padding: 6px 8px;
+  color: #c8dce8;
+  vertical-align: middle;
+}
+
+.atlas-f15-order-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.atlas-f15-review-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.is-f15-review-keep {
+  color: #22c55e;
+}
+
+.is-f15-review-modify {
+  color: #f59e0b;
+}
+
+.is-f15-review-cancel {
+  color: #ef4444;
+}
+
+.atlas-f15-order-reviewed-label {
+  color: #3d6080;
+  font-size: 0.62rem;
+}
+
+/* ── Override panel ────────────────────────────────────────────────────── */
+
+.atlas-f15-override-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.04);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.atlas-f15-override-warning {
+  font-size: 0.68rem;
+  color: #f59e0b;
+  margin: 0;
+}
+
+.atlas-f15-override-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f15-override-label {
+  font-size: 0.65rem;
+  color: #7a9ab8;
+  font-weight: 600;
+}
+
+.atlas-f15-char-count {
+  font-size: 0.6rem;
+  font-weight: 400;
+}
+
+.is-f15-char-valid {
+  color: #22c55e;
+}
+
+.is-f15-char-invalid {
+  color: #ef4444;
+}
+
+.atlas-f15-override-textarea {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #1a2a38;
+  border-radius: 4px;
+  color: #c8dce8;
+  font-size: 0.72rem;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.is-f15-textarea-invalid {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.atlas-f15-restore-input {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #1a2a38;
+  border-radius: 4px;
+  color: #c8dce8;
+  font-size: 0.72rem;
+  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.atlas-f15-override-submit {
+  align-self: flex-start;
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  transition: opacity 0.15s;
+}
+
+.is-f15-submit-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.atlas-f15-override-error {
+  font-size: 0.65rem;
+  color: #ef4444;
+  margin: 0;
+}
+
+/* Override applied badge */
+.atlas-f15-override-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(34, 197, 94, 0.05);
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.atlas-f15-override-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #22c55e;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.atlas-f15-override-reason {
+  font-size: 0.68rem;
+  color: #7a9ab8;
+  margin: 0;
+}
+
+.atlas-f15-override-ts {
+  font-size: 0.62rem;
+  color: #3d6080;
+  margin: 0;
+}
+
+/* ── Framework 25 section ──────────────────────────────────────────────── */
+
+.atlas-f15-f25-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #1a2a38;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.atlas-f15-f25-row {
+  display: flex;
+  gap: 8px;
+  font-size: 0.68rem;
+}
+
+.atlas-f15-f25-label {
+  color: #3d6080;
+  font-weight: 600;
+}
+
+.atlas-f15-f25-value {
+  color: #c8dce8;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-f15-f25-note {
+  font-size: 0.65rem;
+  color: #f59e0b;
+  margin: 0;
+}
+
+/* ── Data source badges ────────────────────────────────────────────────── */
+
+.atlas-f15-sources {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f15-source-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.is-f15-source-online {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+
+.is-f15-source-offline {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+/* ── Warnings ──────────────────────────────────────────────────────────── */
+
+.atlas-f15-warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f15-warning-item {
+  font-size: 0.65rem;
+  color: #f59e0b;
+  line-height: 1.4;
+}
+
+/* ── Loading / error states ────────────────────────────────────────────── */
+
+.atlas-f15-loading,
+.atlas-f15-error {
+  font-size: 0.72rem;
+  color: #3d6080;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .atlas-f15-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

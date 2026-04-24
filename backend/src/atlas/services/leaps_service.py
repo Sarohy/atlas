@@ -233,6 +233,7 @@ def _compute_eligibility(
     gate_f29_passed: bool | None,
     gate_f30_permits_leaps: bool | None,
     gate_f11_blocks: bool | None,
+    gate_f15_blocks: bool | None,
     iv_current: float | None,
     iv_percentile: float | None,
     entry_conditions: list[EntryCondition],
@@ -287,6 +288,14 @@ def _compute_eligibility(
     elif gate_f11_blocks is None:
         has_unknown = True
         warning_messages.append("F11 cash floor status unknown — eligibility deferred.")
+
+    if gate_f15_blocks is True:
+        block_reasons.append(
+            "F15 VIX session halt — no new LEAPS entries this session."
+        )
+    elif gate_f15_blocks is None:
+        has_unknown = True
+        warning_messages.append("F15 status unknown — blocked for safety.")
 
     if iv_blocked is True:
         block_reasons.append(
@@ -571,6 +580,18 @@ async def check_leaps_eligibility(
     else:
         gate_f11_blocks = False
 
+    # Framework 15 — VIX Regime Override gate.
+    from atlas.services.framework15_service import get_f15_simple
+
+    f15_simple = get_f15_simple()
+    gate_f15_blocks: bool | None
+    if f15_simple is None:
+        gate_f15_blocks = None
+    elif f15_simple.new_market_orders_blocked:
+        gate_f15_blocks = True
+    else:
+        gate_f15_blocks = False
+
     result = _compute_eligibility(
         ticker=normalised,
         score=score,
@@ -581,6 +602,7 @@ async def check_leaps_eligibility(
         gate_f29_passed=gate_f29_passed,
         gate_f30_permits_leaps=gate_f30_permits_leaps,
         gate_f11_blocks=gate_f11_blocks,
+        gate_f15_blocks=gate_f15_blocks,
         iv_current=iv_current,
         iv_percentile=iv_percentile,
         entry_conditions=entry_conditions,

@@ -425,6 +425,57 @@ def compute_tranche_sizing(
             t3_pending=False,
         )
 
+    # Step 3a: Check Framework 15 VIX session halt.
+    from atlas.services.framework15_service import get_f15_simple as _get_f15_simple
+
+    _f15 = _get_f15_simple()
+    if _f15 is not None and _f15.f15_active is True:
+        _f15_msg = "Paused \u2014 F15 VIX session halt"
+        return TrancheSizingResponse(
+            ticker=normalised,
+            cap_active=False,
+            beta_cap_active=False,
+            tranche_display=False,
+            position_weight=position_weight,
+            message=_f15_msg,
+            and_gate_active=False,
+            and_gate_passed=False,
+            signals_confirmed=0,
+            signals_detail=_build_signal_details([False] * 5),
+            t1=None,
+            t2=None,
+            t3=None,
+            t4=None,
+            t1_fired=False,
+            t2_fired=False,
+            t2_pending=False,
+            t3_fired=False,
+            t3_pending=False,
+        )
+    if _f15 is not None and _f15.f15_active is None:
+        _f15_unknown_msg = "Unknown \u2014 F15 VIX data unavailable"
+        return TrancheSizingResponse(
+            ticker=normalised,
+            cap_active=False,
+            beta_cap_active=False,
+            tranche_display=False,
+            position_weight=position_weight,
+            message=_f15_unknown_msg,
+            and_gate_active=False,
+            and_gate_passed=False,
+            signals_confirmed=0,
+            signals_detail=_build_signal_details([False] * 5),
+            t1=None,
+            t2=None,
+            t3=None,
+            t4=None,
+            t1_fired=False,
+            t2_fired=False,
+            t2_pending=False,
+            t3_fired=False,
+            t3_pending=False,
+        )
+
     # Step 3: Determine AND gate state (Framework 29).
     regime_normalised = regime_rule.strip().upper()
     and_gate_active = regime_normalised == _REGIME_CLEAR

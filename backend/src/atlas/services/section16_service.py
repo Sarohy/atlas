@@ -84,6 +84,10 @@ _UNASSIGNED: Final[str] = "UNASSIGNED"
 # Polygon: number of calendar days back to fetch for the 365-day high.
 _POLYGON_HISTORY_DAYS: Final[int] = 365
 
+# Unusual Whales: trailing trading-day window for Rule 1 live signal totals.
+_UW_SIGNAL_LOOKBACK_DAYS: Final[int] = 5  # last 5 trading days (Mon–Fri)
+_UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
+
 
 # ---------------------------------------------------------------------------
 # Config helpers — typed accessors over atlas_config key/value store.
@@ -334,6 +338,90 @@ async def fetch_polygon_aggs(ticker: str, days_back: int) -> list[dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# Unusual Whales live fetchers — 5-trading-day totals for Rule 1.
+# ---------------------------------------------------------------------------
+
+
+def _last_n_trading_dates(n: int) -> list[str]:
+    """Return the last *n* weekday dates (Mon–Fri) as YYYY-MM-DD strings.
+
+    Walks backwards from today, skipping Saturday (5) and Sunday (6).
+    """
+    results: list[str] = []
+    day = datetime.now(tz=UTC).date()
+    while len(results) < n:
+        if day.weekday() < 5:  # Mon=0 … Fri=4
+            results.append(day.isoformat())
+        day -= timedelta(days=1)
+    return results
+
+
+async def _fetch_dark_pool_5d_total(ticker: str) -> float | None:
+    """Fetch total dark-pool notional (size × price) over the last 5 trading days.
+
+    Calls the UW darkpool endpoint once per day and sums every print.
+    Returns None only when the API key is absent or every request fails.
+    """
+    api_key = get_settings().unusual_whales_api_key
+    if not api_key:
+        logger.warning("UNUSUAL_WHALES_API_KEY not set; cannot fetch dark-pool totals")
+        return None
+    dates = _last_n_trading_dates(_UW_SIGNAL_LOOKBACK_DAYS)
+    total = 0.0
+    got_any = False
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+        for dt in dates:
+            try:
+                resp = await client.get(
+                    f"{_UW_BASE_URL}/api/darkpool/{ticker.upper()}",
+                    params={"date": dt, "limit": 500},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if resp.status_code != 200:
+                    continue
+                for print_ in resp.json().get("data") or []:
+                    total += float(print_.get("size") or 0) * float(print_.get("price") or 0)
+                got_any = True
+            except Exception:
+                logger.exception("Dark-pool fetch failed for %s on %s", ticker, dt)
+    return total if got_any else None
+
+
+async def _fetch_flow_5d_bullish_total(ticker: str) -> float | None:
+    """Fetch total bullish options premium over the last 5 trading days.
+
+    Uses the UW options-volume endpoint which provides a `bullish_premium`
+    field (ask-side calls + bid-side puts) per day.
+    Returns None when the API key is absent or the request fails.
+    """
+    api_key = get_settings().unusual_whales_api_key
+    if not api_key:
+        logger.warning("UNUSUAL_WHALES_API_KEY not set; cannot fetch options-volume")
+        return None
+    dates = _last_n_trading_dates(_UW_SIGNAL_LOOKBACK_DAYS)
+    date_from = dates[-1]  # oldest (furthest back)
+    date_to = dates[0]     # most recent
+    dates_set = set(dates)
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+            resp = await client.get(
+                f"{_UW_BASE_URL}/api/stock/{ticker.upper()}/options-volume",
+                params={"date_from": date_from, "date_to": date_to, "limit": 10},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code != 200:
+                return None
+            return sum(
+                float(row.get("bullish_premium") or 0)
+                for row in resp.json().get("data") or []
+                if (row.get("date") or "")[:10] in dates_set
+            )
+    except Exception:
+        logger.exception("Options-volume fetch failed for %s", ticker)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Signal extractors — pull the few fields we need from F9 payload.
 # ---------------------------------------------------------------------------
 
@@ -375,10 +463,14 @@ def _is_strong_flow(f9: dict[str, Any]) -> bool:
 
 
 async def evaluate_rule1(
-    ticker: str, f9: dict[str, Any], f7: dict[str, Any],
+    ticker: str, f7: dict[str, Any],
     session: AsyncSession,
 ) -> Rule1Result:
-    """Rule 1 — catalyst conviction (priority-based signal threshold)."""
+    """Rule 1 — catalyst conviction (priority-based signal threshold).
+
+    dark_pool_usd and flow_usd are fetched live from Unusual Whales as
+    5-trading-day totals — never read from F9 or stored in the database.
+    """
     p1_days = await _cfg_int(_KEY_P1_EARN_DAYS, session)
     p2_min = await _cfg_int(_KEY_P2_EARN_MIN, session)
     p2_max = await _cfg_int(_KEY_P2_EARN_MAX, session)
@@ -390,8 +482,10 @@ async def evaluate_rule1(
     p3_flow = await _cfg_float(_KEY_P3_FLOW_USD, session)
 
     days = f7.get("days_to_earnings")
-    dark_usd = _extract_dark_pool_usd(f9)
-    flow_usd = _extract_flow_usd(f9)
+    dark_usd, flow_usd = await asyncio.gather(
+        _fetch_dark_pool_5d_total(ticker),
+        _fetch_flow_5d_bullish_total(ticker),
+    )
 
     # Priority 1: earnings within P1 window AND (dark>=P1 OR flow>=P1).
     if isinstance(days, int) and 0 <= days <= p1_days and (
@@ -485,6 +579,50 @@ def _high_and_current_from_aggs(aggs: list[dict[str, Any]]) -> tuple[float | Non
     return high, current
 
 
+# Preferred lookback windows in descending order — use the largest that fits.
+_LOCAL_HIGH_WINDOWS: Final[tuple[int, ...]] = (50, 20, 10)
+
+
+def _local_high_from_aggs(
+    aggs: list[dict[str, Any]],
+) -> tuple[float | None, int | None]:
+    """Return (local_high, bars_used): most recent confirmed swing high.
+
+    A confirmed swing high is the most recent bar whose intraday high is
+    followed by at least 3 subsequent bars all with highs strictly below it
+    (drop confirmed).  If no 3-bar confirmation exists — e.g. the peak is
+    very recent with fewer than 3 bars after it — falls back to 2 then 1
+    confirming bar so that a fresh peak is not missed.
+
+    Tries window sizes 50 → 20 → 10 (largest that fits in available bars).
+    Returns (None, None) if no confirmed peak is found in any window.
+    """
+    n = len(aggs)
+    for window in _LOCAL_HIGH_WINDOWS:
+        if n < window:
+            continue
+        slice_ = aggs[-window:]
+        m = len(slice_)
+        # Try 3 confirming bars, then 2, then 1.
+        for min_confirm in (3, 2, 1):
+            if m < min_confirm + 1:
+                continue
+            for i in range(m - min_confirm - 1, -1, -1):
+                h0 = float(slice_[i].get("h", 0.0))
+                lower = all(
+                    float(slice_[i + k].get("h", 0.0)) < h0
+                    for k in range(1, min_confirm + 1)
+                )
+                if lower:
+                    return h0, window
+        # Also check if the very last bar is higher than all before it in the window
+        # (stock is still at the peak with no confirming bars yet).
+        last_h = float(slice_[-1].get("h", 0.0))
+        if all(float(b.get("h", 0.0)) <= last_h for b in slice_[:-1]):
+            return last_h, window
+    return None, None
+
+
 async def evaluate_rule3(
     aggs: list[dict[str, Any]], session: AsyncSession,
 ) -> Rule3Result:
@@ -493,11 +631,20 @@ async def evaluate_rule3(
     pullback_pct = await _cfg_float(_KEY_RULE3_PULLBACK, session)
 
     high, current = _high_and_current_from_aggs(aggs)
+    local_high, local_lookback = _local_high_from_aggs(aggs)
+    pct_below_local = (
+        (local_high - current) / local_high * 100.0
+        if local_high and current and local_high > 0
+        else None
+    )
+
     if high is None or current is None or high <= 0:
         return Rule3Result(
             result="UNKNOWN", current_price=current, high_365d=high,
             pct_below_high=None, near_high_pct_threshold=near_high_pct,
             pullback_pct_required=pullback_pct, pullback_pct_actual=None,
+            local_high=local_high, local_high_lookback_bars=local_lookback,
+            pct_below_local_high=pct_below_local,
             reason="Insufficient price history from Polygon.",
         )
 
@@ -505,15 +652,40 @@ async def evaluate_rule3(
     pullback_actual = pct_below_high
 
     if pct_below_high < near_high_pct:
+        # Spec OR clause: near the 52w high, but already pulled back ≥ pullback_pct
+        # from the recent confirmed local high — entry is permitted.
+        if pct_below_local is not None and pct_below_local >= pullback_pct:
+            return Rule3Result(
+                result="PASS", current_price=current, high_365d=high,
+                pct_below_high=pct_below_high,
+                near_high_pct_threshold=near_high_pct,
+                pullback_pct_required=pullback_pct,
+                pullback_pct_actual=pullback_actual,
+                local_high=local_high, local_high_lookback_bars=local_lookback,
+                pct_below_local_high=pct_below_local,
+                reason=(
+                    f"Near 52w high ({pct_below_high:.2f}% below) but pulled back "
+                    f"{pct_below_local:.2f}% from local high "
+                    f"(≥ {pullback_pct}% required)."
+                ),
+            )
         return Rule3Result(
             result="FAIL", current_price=current, high_365d=high,
             pct_below_high=pct_below_high,
             near_high_pct_threshold=near_high_pct,
             pullback_pct_required=pullback_pct,
             pullback_pct_actual=pullback_actual,
+            local_high=local_high, local_high_lookback_bars=local_lookback,
+            pct_below_local_high=pct_below_local,
             reason=(
                 f"Price within {pct_below_high:.2f}% of 365d high "
-                f"(< {near_high_pct}% threshold)."
+                f"(< {near_high_pct}% threshold) and insufficient pullback "
+                f"from local high ({pct_below_local:.2f}% < {pullback_pct}% required)."
+                if pct_below_local is not None
+                else (
+                    f"Price within {pct_below_high:.2f}% of 365d high "
+                    f"(< {near_high_pct}% threshold); no local high identified."
+                )
             ),
         )
     if pct_below_high >= pullback_pct:
@@ -523,6 +695,8 @@ async def evaluate_rule3(
             near_high_pct_threshold=near_high_pct,
             pullback_pct_required=pullback_pct,
             pullback_pct_actual=pullback_actual,
+            local_high=local_high, local_high_lookback_bars=local_lookback,
+            pct_below_local_high=pct_below_local,
             reason=(
                 f"Pullback of {pct_below_high:.2f}% from 365d high "
                 f"(≥ {pullback_pct}% required)."
@@ -534,6 +708,8 @@ async def evaluate_rule3(
         near_high_pct_threshold=near_high_pct,
         pullback_pct_required=pullback_pct,
         pullback_pct_actual=pullback_actual,
+        local_high=local_high, local_high_lookback_bars=local_lookback,
+        pct_below_local_high=pct_below_local,
         reason=(
             f"Price {pct_below_high:.2f}% below 365d high "
             f"(neutral zone)."
@@ -567,10 +743,14 @@ async def evaluate_rule4(ticker: str, session: AsyncSession) -> Rule4Result:
 
 
 async def evaluate_override(
-    ticker: str, f9: dict[str, Any], f7: dict[str, Any],
+    ticker: str, f7: dict[str, Any],
     session: AsyncSession,
 ) -> OverrideResult:
-    """Track-A-only override path — stronger flow within lookback window."""
+    """Track-A-only override path — stronger 5-day UW signal within lookback window.
+
+    dark_pool_usd and flow_usd are fetched live from Unusual Whales as
+    5-trading-day totals, identical to Rule 1 — never read from F9.
+    """
     ovr_dark = await _cfg_float(_KEY_OVR_DARK_USD, session)
     ovr_flow = await _cfg_float(_KEY_OVR_FLOW_USD, session)
     lookback = await _cfg_int(_KEY_OVR_LOOKBACK, session)
@@ -584,8 +764,10 @@ async def evaluate_override(
             earnings_dt = None
 
     used = await is_override_used_in_cycle(ticker, earnings_dt, session)
-    dark_usd = _extract_dark_pool_usd(f9)
-    flow_usd = _extract_flow_usd(f9)
+    dark_usd, flow_usd = await asyncio.gather(
+        _fetch_dark_pool_5d_total(ticker),
+        _fetch_flow_5d_bullish_total(ticker),
+    )
 
     qualifies = (
         (dark_usd is not None and dark_usd >= ovr_dark)
@@ -679,29 +861,25 @@ async def evaluate_section16(
             notes="No track assignment recorded for this ticker.",
         )
 
-    # Live fetches — F7 and F9 in parallel; Polygon only for Track A (Rule 3).
+    # Live fetches — F7 in parallel with Polygon aggs (Track A only).
+    # F9 is no longer needed here: Rule 1 and Override fetch UW signals directly.
     if track == "TRACK_A":
-        f7, f9, aggs = await asyncio.gather(
+        f7, aggs = await asyncio.gather(
             fetch_f7_live(ticker),
-            fetch_f9_live(ticker),
             fetch_polygon_aggs(ticker, _POLYGON_HISTORY_DAYS),
             return_exceptions=False,
         )
     else:
-        f7, f9 = await asyncio.gather(
-            fetch_f7_live(ticker),
-            fetch_f9_live(ticker),
-            return_exceptions=False,
-        )
+        f7 = await fetch_f7_live(ticker)
         aggs = []
 
     rule2 = await evaluate_rule2(f7, track, session)
     rule4 = await evaluate_rule4(ticker, session)
 
     if track == "TRACK_A":
-        rule1 = await evaluate_rule1(ticker, f9, f7, session)
+        rule1 = await evaluate_rule1(ticker, f7, session)
         rule3 = await evaluate_rule3(aggs, session)
-        override = await evaluate_override(ticker, f9, f7, session)
+        override = await evaluate_override(ticker, f7, session)
         gate_a, override_used = _combine_track_a_gate(
             rule1, rule2, rule3, rule4, override,
         )

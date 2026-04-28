@@ -2052,3 +2052,83 @@ This document has been reviewed across multiple sessions by Claude (primary), Gr
 
 
 ATLAS v7.3.3 | April 2026 | 32 Frameworks + 5-Factor Scoring Algorithms (Section 13.5) + Regime Transition State Machine (Section 14.7) + LEAPS Module Spec (Section 17.6) + Backtest Methodology (Section 19) | Reviewed: Claude Sonnet 4.6 + Grok (2 passes) + Opus 4.7 adversarial audit (2 passes) | Developer-ready: all structural implementation gaps addressed
+
+
+---
+
+Section 20: Framework 12 + Section 16 — Final Operational Definition (Updated April 24, 2026)
+
+This section supersedes any prior Section 16 / Framework 12 descriptions elsewhere in this document.
+
+20.1 Section 16 — Entry Gatekeeper (Two Tracks)
+
+Track A — Core Resilient Names (AVGO, MRVL, LITE, MU, TSM, CIEN, VRT, COHR, FN, etc.)
+Must pass ALL 4 rules unless the High-Conviction Underweight Override applies.
+
+Rule 1 — Institutional Conviction (5-day UW totals, fetched live)
+  Priority 1 (earnings ≤ 14 days): Dark pool ≥ $15M OR options flow bullish ≥ $2M
+  Priority 2 (earnings 15–45 days): Dark pool ≥ $20M OR options flow bullish ≥ $3M
+  Priority 3 (no earnings window): Dark pool ≥ $40M AND options flow bullish ≥ $2M
+  All dollar values are 5-trading-day rolling totals from Unusual Whales API.
+  Dark pool total: sum of (size × price) across all prints from /api/darkpool/{ticker}.
+  Bullish flow total: sum of bullish_premium from /api/stock/{ticker}/options-volume.
+
+Rule 2 — Catalyst Timing
+  Earnings or major catalyst ≤ 45 days away (Alpha Vantage calendar).
+  Track B parabolic exception: ≤ 30 days.
+
+Rule 3 — Risk / Reward (Core Names only; not evaluated for Track B)
+  PASS if: price is ≥ 5% below its 52-week high (not near the high), OR
+  PASS if: price has already pulled back ≥ 8% from its most recent confirmed local high.
+  FAIL only when BOTH conditions are false: within 5% of 52w high AND < 8% below local high.
+  Local high = most recent confirmed swing peak (3→2→1 confirming bars, 50→20→10 bar window).
+
+Rule 4 — Portfolio Fit (manual operator gate, set daily)
+  Operator must explicitly mark the ticker as fitting the portfolio today.
+  Checks: fills a clear gap in existing clusters (power, optics, packaging, custom silicon,
+  materials) and does not create redundancy.
+
+Track B — Satellite / High-Beta Names (POET, AXTI, SIVE, FUWAY, SMTC, MXL, NVTS, VECO, etc.)
+  No dark pool requirement (Rule 1 not evaluated).
+  No Rule 3 (Risk/Reward not evaluated).
+  Must pass Rules 2 and 4 only.
+  Allowed even with zero dark pool flow and even at or near all-time highs.
+  Parabolic exception: if earnings ≤ 30 days and Rules 2 and 4 pass, entry is allowed.
+
+20.2 High-Conviction Underweight Override (Track A only)
+
+Conditions required (BOTH must be true):
+  1. Exceptional conviction: Dark pool ≥ $25M OR options flow bullish ≥ $3.5M (last 5 trading days).
+  2. Portfolio is underweight: current allocation < 5% of NAV OR below defined cluster target.
+
+Effect: Rule 3 (Risk/Reward) is automatically waived for that trading day.
+Sizing: higher incremental add sizing applies (see Priority 1-Override / 2-Override rows below).
+Usage: may be used once per name per earnings cycle (tracked in DB; append-only).
+
+20.3 Framework 12 — Decision Matrix (after Section 16 pass)
+
+Priority      | Condition                                              | Max Add (% NAV) | Timing
+--------------|--------------------------------------------------------|-----------------|---------------------------
+1-Override    | Core + earnings ≤ 14d + Override conditions met        | 1.75% – 2.50%   | Execute before the print
+2-Override    | Core + earnings 15–45d + Override conditions met       | 1.50% – 2.00%   | Immediately or minor dip
+1             | Core + earnings ≤ 14d + passes Section 16 (no OVR)    | 1.00% – 1.50%   | Execute before the print
+1b            | Satellite/High-Beta + earnings ≤ 30d                   | 0.40% – 0.60%   | Execute before the print
+2             | Core + earnings 15–45d + underweight (no OVR)          | 1.25% – 1.75%   | Only on dip to defined zone
+2b            | Satellite + earnings 15–45d                            | 0.50% – 0.75%   | Only on dip to defined zone
+3             | Core + no immediate earnings but strong flow            | 0.75% – 1.00%   | On 8–12% pullback
+4             | Passes Section 16 but extended or low urgency           | 0% (watchlist)  | Set alerts, wait for dip
+
+Core / High-Conviction positions receive 2–3× higher max incremental add sizing vs satellites.
+
+20.4 Implementation Notes
+
+- Rule 1 and Override dark pool / flow values are ALWAYS fetched live from Unusual Whales.
+  They are NEVER read from F9, NEVER cached, NEVER stored in the database.
+- Dark pool endpoint: GET /api/darkpool/{ticker}?date={YYYY-MM-DD}&limit=200 (one call per day).
+- Bullish flow endpoint: GET /api/stock/{ticker}/options-volume?date_from=...&date_to=...
+  Field used: bullish_premium (ask-side calls + bid-side puts = directional bullish).
+- The 5-trading-day window is computed by walking backwards from today, skipping weekends.
+- Config thresholds (priority1_dark_pool_usd, etc.) are stored in atlas_config and editable
+  at runtime without code changes.
+- Rule 3 OR logic: near-52w-high stocks with a confirmed 8%+ local pullback PASS Rule 3.
+  This is the correct behaviour — the OR is on the local high, not the annual high.

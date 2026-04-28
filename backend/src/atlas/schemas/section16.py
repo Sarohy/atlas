@@ -61,6 +61,10 @@ class Rule3Result(BaseModel):
     near_high_pct_threshold: float
     pullback_pct_required: float
     pullback_pct_actual: float | None = None
+    # Local high: highest intraday high over the last 50/20/10 available bars.
+    local_high: float | None = None
+    local_high_lookback_bars: int | None = None
+    pct_below_local_high: float | None = None
     reason: str
 
 

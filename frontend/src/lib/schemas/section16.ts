@@ -52,6 +52,9 @@ export const rule3ResultSchema = z.object({
   near_high_pct_threshold: z.number(),
   pullback_pct_required: z.number(),
   pullback_pct_actual: z.number().nullable(),
+  local_high: z.number().nullable().optional(),
+  local_high_lookback_bars: z.number().nullable().optional(),
+  pct_below_local_high: z.number().nullable().optional(),
   reason: z.string(),
 });
 export type Rule3Result = z.infer<typeof rule3ResultSchema>;

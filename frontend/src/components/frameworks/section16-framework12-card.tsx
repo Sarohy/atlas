@@ -5,8 +5,6 @@ import { useState } from 'react';
 import { useFramework12 } from '@/lib/hooks/use-framework12';
 import {
   useSection16,
-  useSetRule4Today,
-  useSetTrackAssignment,
   useUseOverride,
 } from '@/lib/hooks/use-section16';
 import type { Framework12Result } from '@/lib/schemas/framework12';
@@ -17,7 +15,6 @@ import type {
   Rule3Result,
   Rule4Result,
   Section16Result,
-  TrackType,
 } from '@/lib/schemas/section16';
 import { cn } from '@/lib/utils';
 
@@ -128,6 +125,12 @@ function Rule3Detail({ rule }: { rule: Rule3Result }) {
         Price: {formatPrice(rule.current_price)} · 365d high: {formatPrice(rule.high_365d)} · Below
         high: {formatPct(rule.pct_below_high)}
       </span>
+      {rule.local_high != null && (
+        <span className="atlas-s16-rule-line">
+          Local high ({rule.local_high_lookback_bars}d): {formatPrice(rule.local_high)} · Below
+          local high: {formatPct(rule.pct_below_local_high)}
+        </span>
+      )}
     </div>
   );
 }
@@ -139,79 +142,6 @@ function Rule4Detail({ rule }: { rule: Rule4Result }) {
       <span className="atlas-s16-rule-line">
         Set by: {rule.set_by ?? '—'} · Date: {rule.fit_date ?? '—'}
       </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Operator controls
-// ---------------------------------------------------------------------------
-
-function TrackControls({ ticker, currentTrack }: { ticker: string; currentTrack: TrackType }) {
-  const mutation = useSetTrackAssignment(ticker);
-  return (
-    <div className="atlas-s16-controls-row">
-      <span className="atlas-s16-controls-label">Track:</span>
-      <button
-        type="button"
-        className={cn(
-          'atlas-s16-btn',
-          currentTrack === 'TRACK_A' && 'is-s16-btn-active',
-        )}
-        disabled={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({ track: 'TRACK_A', assigned_by: OPERATOR_NAME })
-        }
-        data-testid="s16-set-track-a"
-      >
-        Track A
-      </button>
-      <button
-        type="button"
-        className={cn(
-          'atlas-s16-btn',
-          currentTrack === 'TRACK_B' && 'is-s16-btn-active',
-        )}
-        disabled={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({ track: 'TRACK_B', assigned_by: OPERATOR_NAME })
-        }
-        data-testid="s16-set-track-b"
-      >
-        Track B
-      </button>
-    </div>
-  );
-}
-
-function Rule4Controls({ ticker, current }: { ticker: string; current: Rule4Result | null }) {
-  const mutation = useSetRule4Today(ticker);
-  const fits = current?.fits_portfolio ?? null;
-  return (
-    <div className="atlas-s16-controls-row">
-      <span className="atlas-s16-controls-label">Portfolio fit (today):</span>
-      <button
-        type="button"
-        className={cn('atlas-s16-btn', fits === true && 'is-s16-btn-active')}
-        disabled={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({ fits_portfolio: true, set_by: OPERATOR_NAME })
-        }
-        data-testid="s16-set-rule4-yes"
-      >
-        YES
-      </button>
-      <button
-        type="button"
-        className={cn('atlas-s16-btn', fits === false && 'is-s16-btn-active')}
-        disabled={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({ fits_portfolio: false, set_by: OPERATOR_NAME })
-        }
-        data-testid="s16-set-rule4-no"
-      >
-        NO
-      </button>
     </div>
   );
 }
@@ -339,11 +269,6 @@ function Section16Panel({ ticker }: { ticker: string }) {
             )}
 
             <OverrideBlock ticker={ticker} data={data} />
-
-            <div className="atlas-s16-controls" data-testid="s16-controls">
-              <TrackControls ticker={ticker} currentTrack={data.track} />
-              <Rule4Controls ticker={ticker} current={data.rule4} />
-            </div>
           </>
         )}
       </div>

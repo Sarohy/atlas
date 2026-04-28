@@ -603,27 +603,32 @@ async def evaluate_framework9(
 ) -> Framework9Result:
     """Run the Framework 9 evaluation pipeline for *ticker*.
 
-    Steps:
-      1. Fetch all three sources concurrently.
-      2. Build data gap list and severity.
-      3. Check Framework 7 gate status.
-      4. Short-circuit on CRITICAL severity (all sources offline).
-      5. Validate minimum signal thresholds.
-      6. Assign signal tier and base score.
-      7. Covered call exception check.
-      8. Conflicting signals check.
-      9. Compute put/call modifier.
-      10. Compute dark pool modifier.
-      11. Apply pre-earnings modifier (from F7 gate).
-      12. Low liquidity cap.
-      13. Final F4 score calculation.
-      14. Determine warning level.
-      15. Return Framework9Result.
+    Source-of-truth contract: F9 reuses the F4 score produced by
+    ``OptionsFlowService.compute_options_flow`` (the same data already
+    rendered in the F4 panel).  F9's only job is to layer F9-specific
+    timing modifiers (pre-earnings reduction from F7) on top of the F4
+    score.  It does NOT re-fetch options data from Unusual Whales or
+    Polygon — those endpoints have moved/become entitled-only and
+    fetching them here previously caused a spurious "F4 MAJOR DATA GAP"
+    badge while the F4 panel itself was healthy.
+
+    Modifier policy:
+      • put_call and dark_pool modifiers are NOT applied here. F4 already
+        weights call/put ratio (20%) and dark-pool premium (15%) inside
+        its own composite, so re-applying them would double-count.
+      • pre_earnings reduction (-30%) is applied when F7's earnings gate
+        is active (F4 has no earnings awareness on its own).
+      • index_modifier remains 0 (no signal source).
     """
-    import asyncio
+    from atlas.services.options_flow_service import OptionsFlowService
+
+    # Suppress unused-arg warnings — kept for backward-compatible signature
+    # used by callers that pass through all keys (regime_modifier_service,
+    # leaps_service, etc.).
+    _ = (polygon_api_key, av_api_key)
 
     warnings: list[str] = []
-    modifiers_skipped: list[str] = []
+    modifiers_skipped: list[str] = ["put_call", "dark_pool", "index"]
     modifiers: dict[str, int] = {
         "put_call": 0,
         "dark_pool": 0,
@@ -643,50 +648,46 @@ async def evaluate_framework9(
     _client: httpx.AsyncClient = client if client is not None else httpx.AsyncClient()
 
     try:
-        # Step 1 — Fetch all three sources concurrently.
-        (uw_data, uw_status), (dp_data, polygon_status), adv = await asyncio.gather(
-            fetch_unusual_whales_flow(ticker, uw_api_key, _client),
-            fetch_polygon_dark_pool(ticker, polygon_api_key, _client),
-            get_30_day_adv(ticker, polygon_api_key, _client),
-        )
-
-        vol_data, av_status = await fetch_options_volume(
-            ticker, polygon_api_key, av_api_key, polygon_status, _client
-        )
-
-        # Step 2 — Build data gap details.
-        gaps, severity, f1_badge, f1_msg, f1_tip = build_data_gap_details(
-            uw_status, polygon_status, av_status, uw_data, dp_data, vol_data
-        )
-
-        # Step 3 — Framework 7 gate check (internal service call).
-        gate_active = False
+        # Step 1 — Reuse F4 (OptionsFlowService) as the single source of truth.
+        f4_service = OptionsFlowService(api_key=uw_api_key)
         try:
-            from datetime import date
-
-            from atlas.config import get_settings
-            from atlas.services.framework7_service import (
-                calculate_gate_close_date,
-                get_earnings_date,
-            )
-
-            settings = get_settings()
-            earnings_date_str = await get_earnings_date(ticker, settings.alphavantage_api_key)
-            if earnings_date_str:
-                earnings_date = date.fromisoformat(earnings_date_str)
-                gate_close = calculate_gate_close_date(earnings_date)
-                gate_active = date.today() >= gate_close
+            f4 = await f4_service.compute_options_flow(ticker)
+            f4_available = True
         except Exception as exc:
-            warnings.append(
-                "Could not verify earnings gate — pre-earnings modifier not applied"
-            )
-            logger.debug(
-                "Framework 7 gate check failed",
+            logger.warning(
+                "F4 OptionsFlowService failed — F9 will degrade to neutral baseline",
                 extra={"ticker": ticker, "error": repr(exc)},
             )
+            f4 = None
+            f4_available = False
 
-        # Step 4 — Critical failure short-circuit.
-        if severity == "CRITICAL":
+        # Step 2 — Map F4 → F9 fields, or build degraded response.
+        gaps: list[DataGapDetail] = []
+        severity: str = "NONE"
+        f1_badge: str | None = None
+        f1_msg: str | None = None
+        f1_tip: str | None = None
+
+        if not f4_available or f4 is None:
+            # F4 unavailable — graceful degradation. Mirror F4's own
+            # behaviour: never fabricate a score, surface the gap clearly.
+            gaps.append(
+                DataGapDetail(
+                    field="f4_options_flow",
+                    source="OptionsFlowService (Unusual Whales)",
+                    reason="F4 service call failed",
+                    impact="F4 score unavailable; F9 cannot evaluate flow.",
+                    default_used="f4_score = 55 neutral baseline",
+                )
+            )
+            severity = "MAJOR"
+            f1_badge = "F4 SERVICE UNAVAILABLE"
+            f1_msg = (
+                "Options flow service unavailable. F4 score defaulting to "
+                "neutral 55. Verify manually before acting."
+            )
+            f1_tip = "OptionsFlowService.compute_options_flow() raised an exception."
+
             return Framework9Result(
                 ticker=ticker,
                 f4_score=_SCORE_TIER5_BASELINE,
@@ -711,9 +712,9 @@ async def evaluate_framework9(
                 conflicting_signals=False,
                 low_liquidity=False,
                 potential_index_flow=False,
-                uw_status=uw_status,
-                polygon_status=polygon_status,
-                av_status=av_status,
+                uw_status=DataSourceStatus.OFFLINE,
+                polygon_status=DataSourceStatus.OFFLINE,
+                av_status=DataSourceStatus.OFFLINE,
                 data_gaps=gaps,
                 data_gap_severity=severity,
                 f1_propagation_badge=f1_badge,
@@ -721,183 +722,97 @@ async def evaluate_framework9(
                 f1_propagation_tooltip=f1_tip,
                 modifiers_skipped=["all"],
                 warning_level="RED",
-                warning_messages=["All options data sources offline. F4 defaulting to neutral 55."],
+                warning_messages=[
+                    "Options flow service offline — F4 score unavailable. "
+                    "F9 returning neutral baseline 55."
+                ],
                 breakdown={},
             )
 
-        # Step 5 — Minimum threshold validation.
-        largest_print: float = float(uw_data.get("largest_print_usd") or 0)
-        num_prints: int = int(dp_data.get("num_prints") or 0)
-        total_volume: float = float(vol_data.get("total_volume") or 0)
+        # ----- F4 succeeded — derive F9 fields from F4's response. -----
+        base_score: float = float(f4.f4_score)
+        cp_ratio: float | None = f4.call_put_ratio.ratio
+        largest_premium: float = float(f4.whale_block.largest_premium or 0.0)
+        largest_dp: float | None = f4.dark_pool.largest_print
+        dp_count: int = f4.dark_pool.print_count or 0
 
-        volume_vs_adv: float | None = (
-            total_volume / adv if adv and adv > 0 and total_volume else None
+        # Flow direction is implied by F4's call/put ratio (it has no explicit
+        # bull/bear field). Thresholds match F4's own _score_cp_ratio bands.
+        if cp_ratio is None:
+            uw_direction: str = "NEUTRAL"
+        elif cp_ratio > 1.5:
+            uw_direction = "BULLISH"
+        elif cp_ratio < 0.7:
+            uw_direction = "BEARISH"
+        else:
+            uw_direction = "NEUTRAL"
+
+        # Map F4's signal hierarchy (GOLD/BLUE/GREEN/YELLOW/GREY/WHITE) onto
+        # F9's tier enum so downstream UI keeps working unchanged.
+        f4_tier_str = (
+            f4.signal_tier.value
+            if hasattr(f4.signal_tier, "value")
+            else str(f4.signal_tier)
         )
+        f4_to_f9_tier: dict[str, SignalTier] = {
+            "GOLD": SignalTier.TIER_1_WHALE,
+            "BLUE": SignalTier.TIER_1_WHALE,
+            "GREEN": SignalTier.TIER_2_INSTITUTIONAL,
+            "YELLOW": SignalTier.TIER_3_UNUSUAL,
+            "GREY": SignalTier.TIER_4_WEAK,
+            "WHITE": SignalTier.TIER_5_NONE,
+        }
+        tier: SignalTier = f4_to_f9_tier.get(f4_tier_str, SignalTier.TIER_5_NONE)
 
-        threshold_a = num_prints >= _MIN_PRINTS_COUNT
-        threshold_b = (
-            volume_vs_adv is not None and volume_vs_adv >= _MIN_ADV_FRACTION
-        )
-        threshold_c = largest_print >= _MIN_SESSION_USD
-        threshold_met = threshold_a or threshold_b or threshold_c
+        # Step 3 — F7 earnings gate check (timing only — F4 has no earnings awareness).
+        gate_active = False
+        try:
+            from datetime import date
 
-        # Step 6 — Low liquidity check.
-        if adv is not None and adv < _LOW_LIQUIDITY_ADV:
-            flags["low_liquidity"] = True
+            from atlas.config import get_settings
+            from atlas.services.framework7_service import (
+                calculate_gate_close_date,
+                get_earnings_date,
+            )
+
+            settings = get_settings()
+            earnings_date_str = await get_earnings_date(
+                ticker, settings.alphavantage_api_key
+            )
+            if earnings_date_str:
+                earnings_date = date.fromisoformat(earnings_date_str)
+                gate_close = calculate_gate_close_date(earnings_date)
+                gate_active = date.today() >= gate_close
+        except Exception as exc:
             warnings.append(
-                "Low liquidity — signals may be unreliable. F4 capped at 70."
+                "Could not verify earnings gate — pre-earnings modifier not applied"
+            )
+            logger.debug(
+                "Framework 7 gate check failed",
+                extra={"ticker": ticker, "error": repr(exc)},
             )
 
-        # Step 7 — Assign signal tier and base score.
-        uw_direction: str = str(uw_data.get("flow_direction") or "NEUTRAL").upper()
-        spread_pos: float | None = dp_data.get("avg_spread_position")
-
-        if not threshold_met:
-            tier = SignalTier.TIER_5_NONE
-            base_score: float = _SCORE_TIER5_BASELINE
-            warnings.append(
-                "Signal below minimum threshold — using neutral baseline 55"
-            )
-
-        elif (
-            uw_status not in (DataSourceStatus.OFFLINE, DataSourceStatus.RATE_LIMITED)
-            and largest_print >= _WHALE_THRESHOLD_USD
-        ):
-            tier = SignalTier.TIER_1_WHALE
-            base_score = (
-                _SCORE_TIER1_BULLISH if uw_direction == "BULLISH" else _SCORE_TIER1_BEARISH
-            )
-
-        elif (
-            polygon_status not in (DataSourceStatus.OFFLINE, DataSourceStatus.RATE_LIMITED)
-            and dp_data.get("total_usd", 0) >= _INST_DARK_POOL_USD
-            and spread_pos is not None
-            and spread_pos > 0.6
-            and threshold_b
-        ):
-            tier = SignalTier.TIER_2_INSTITUTIONAL
-            base_score = _SCORE_TIER2_BASE
-
-        elif volume_vs_adv is not None and volume_vs_adv >= 2.0:
-            tier = SignalTier.TIER_3_UNUSUAL
-            base_score = _SCORE_TIER3_BASE
-
-        elif volume_vs_adv is not None and volume_vs_adv >= 1.0:
-            tier = SignalTier.TIER_4_WEAK
-            base_score = _SCORE_TIER4_BASE
-
-        else:
-            tier = SignalTier.TIER_5_NONE
-            base_score = _SCORE_TIER5_BASELINE
-
-        # Step 8 — Covered call exception.
-        if uw_direction == "BEARISH":
-            if polygon_status == DataSourceStatus.OFFLINE:
-                flags["covered_call_unverifiable"] = True
-                warnings.append(
-                    "Cannot verify covered call exception — "
-                    "dark pool data unavailable. Bearish signal applied."
-                )
-            elif spread_pos is not None and spread_pos > 0.6:
-                flags["covered_call"] = True
-                base_score = max(base_score, _SCORE_TIER5_BASELINE)
-                warnings.append(
-                    f"Covered call exception applied — dark pool buy-side confirmed "
-                    f"(spread={spread_pos:.2f})"
-                )
-
-        # Step 9 — Conflicting signals check.
-        dp_direction: str
-        if spread_pos is not None and spread_pos > 0.6:
-            dp_direction = "BULLISH"
-        elif spread_pos is not None and spread_pos < 0.4:
-            dp_direction = "BEARISH"
-        else:
-            dp_direction = "NEUTRAL"
-
-        if (
-            spread_pos is not None
-            and uw_direction != "NEUTRAL"
-            and dp_direction != "NEUTRAL"
-            and uw_direction != dp_direction
-        ):
-            flags["conflicting"] = True
-            base_score = (base_score + _SCORE_TIER5_BASELINE) / 2.0
-            warnings.append(
-                f"Conflicting signals — UW: {uw_direction} vs "
-                f"Dark pool: {dp_direction}. Score averaged down."
-            )
-
-        # Step 10 — Put/call modifier.
-        put_call: float | None = vol_data.get("put_call_ratio")
-        prev_put_call: float | None = vol_data.get("previous_put_call_ratio")
-
-        if put_call is None:
-            modifiers["put_call"] = 0
-            modifiers_skipped.append("put_call")
-            warnings.append(
-                "Put/call modifier not applied — ratio data unavailable"
-            )
-        elif prev_put_call is not None and prev_put_call > 1.3 and put_call < 0.8:
-            modifiers["put_call"] = +5
-        elif put_call > 1.3:
-            modifiers["put_call"] = -3
-        elif put_call < 0.7:
-            modifiers["put_call"] = -5
-        else:
-            modifiers["put_call"] = 0
-
-        # Step 11 — Dark pool modifier.
-        if polygon_status == DataSourceStatus.OFFLINE:
-            modifiers["dark_pool"] = 0
-            modifiers_skipped.append("dark_pool")
-            warnings.append(
-                "Dark pool modifier not applied — Polygon unavailable"
-            )
-        elif spread_pos is None:
-            modifiers["dark_pool"] = 0
-            modifiers_skipped.append("dark_pool")
-            warnings.append(
-                "Dark pool modifier not applied — spread position unavailable"
-            )
-        elif spread_pos > 0.6 and threshold_met:
-            modifiers["dark_pool"] = +3
-        elif spread_pos < 0.4:
-            modifiers["dark_pool"] = -3
-        else:
-            modifiers["dark_pool"] = 0
-
-        # Step 12 — Pre-earnings modifier.
+        # Step 4 — Apply pre-earnings reduction (the only modifier F9 layers on F4).
         if gate_active:
             flags["pre_earnings"] = True
             reduction = int(base_score * 0.30)
             modifiers["pre_earnings"] = -reduction
             warnings.append(
                 f"Pre-earnings reduction applied — "
-                f"-{reduction} points (30% of {base_score:.0f})"
+                f"-{reduction} points (30% of F4 score {base_score:.0f})"
             )
 
-        # Step 13 — Low liquidity cap.
-        if flags["low_liquidity"]:
-            base_score = min(base_score, _LOW_LIQUIDITY_CAP)
+        # Step 5 — Final F4 score.
+        f4_score = max(0.0, min(100.0, base_score + modifiers["pre_earnings"]))
 
-        # Step 14 — Final F4 score.
-        f4_raw = (
-            base_score
-            + modifiers["put_call"]
-            + modifiers["dark_pool"]
-            + modifiers["pre_earnings"]
-            + modifiers["index"]
-        )
-        f4_score = max(0.0, min(100.0, float(f4_raw)))
+        # Step 6 — Threshold/validity flags carried over from F4's data.
+        threshold_met = base_score >= _GRADE_BUY_MIN  # F4 BUY-or-better => actionable
+        threshold_a = dp_count >= _MIN_PRINTS_COUNT
+        threshold_b = False  # volume-vs-ADV not computed when reusing F4
+        threshold_c = largest_premium >= _MIN_SESSION_USD
 
-        # Step 15 — Warning level.
-        if severity in ("MAJOR", "CRITICAL"):
-            warning_level = "RED"
-        elif severity == "PARTIAL" or flags["conflicting"]:
-            warning_level = "AMBER"
-        else:
-            warning_level = "NONE"
+        # Step 7 — Warning level (no MAJOR/CRITICAL when F4 is healthy).
+        warning_level = "AMBER" if flags["pre_earnings"] else "NONE"
 
         # Resolve flow direction enum safely.
         try:
@@ -912,32 +827,26 @@ async def evaluate_framework9(
             f4_contribution=round(f4_score * 0.15, 2),
             signal_tier=tier,
             flow_direction=flow_dir,
-            largest_print_usd=largest_print or None,
-            dark_pool_spread_position=(
-                round(spread_pos, 4) if spread_pos is not None else None
-            ),
-            dark_pool_direction=dp_direction,
-            put_call_ratio=(
-                round(put_call, 2) if put_call is not None else None
-            ),
-            put_call_modifier=modifiers["put_call"],
-            dark_pool_modifier=modifiers["dark_pool"],
+            largest_print_usd=largest_dp,
+            dark_pool_spread_position=None,  # not exposed by F4
+            dark_pool_direction=None,
+            put_call_ratio=(round(cp_ratio, 2) if cp_ratio is not None else None),
+            put_call_modifier=0,
+            dark_pool_modifier=0,
             pre_earnings_modifier=modifiers["pre_earnings"],
-            index_modifier=modifiers["index"],
-            options_volume_vs_adv=(
-                round(volume_vs_adv, 4) if volume_vs_adv is not None else None
-            ),
+            index_modifier=0,
+            options_volume_vs_adv=None,
             signal_valid=threshold_met,
             minimum_threshold_met=threshold_met,
-            covered_call_exception=flags["covered_call"],
-            covered_call_unverifiable=flags["covered_call_unverifiable"],
+            covered_call_exception=False,
+            covered_call_unverifiable=False,
             pre_earnings_reduction=flags["pre_earnings"],
-            conflicting_signals=flags["conflicting"],
-            low_liquidity=flags["low_liquidity"],
-            potential_index_flow=flags["index_flow"],
-            uw_status=uw_status,
-            polygon_status=polygon_status,
-            av_status=av_status,
+            conflicting_signals=False,
+            low_liquidity=False,
+            potential_index_flow=False,
+            uw_status=DataSourceStatus.ONLINE,
+            polygon_status=DataSourceStatus.ONLINE,
+            av_status=DataSourceStatus.ONLINE,
             data_gaps=gaps,
             data_gap_severity=severity,
             f1_propagation_badge=f1_badge,
@@ -949,10 +858,12 @@ async def evaluate_framework9(
             breakdown={
                 "base_score": base_score,
                 "tier": tier.value,
-                "whale_block_usd": largest_print,
-                "spread_position": spread_pos,
-                "put_call_ratio": put_call,
-                "volume_vs_adv": volume_vs_adv,
+                "f4_source_score": f4.f4_score,
+                "f4_signal_tier": f4_tier_str,
+                "whale_block_usd": largest_premium,
+                "dark_pool_largest_usd": largest_dp,
+                "dark_pool_count": dp_count,
+                "put_call_ratio": cp_ratio,
                 "modifiers": modifiers,
                 "flags": flags,
                 "thresholds": {

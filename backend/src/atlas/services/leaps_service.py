@@ -64,6 +64,20 @@ logger = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS: Final[int] = 300  # 5 minutes
 
+# CRITICAL — single source of truth for the conviction score read by LEAPS.
+# Always read this attribute from the regime-modifier response. It is the
+# post-regime conviction score: F1-F5 weighted → F8 cap on F5 → regime
+# modifier applied. NEVER read pre-regime fields (e.g. ``final_score`` from
+# FrameworkScoreResponse, ``raw_total``, ``f1_score``..``f5_score``,
+# ``pre_regime_score``) for LEAPS decisions. If this constant changes, every
+# read site updates with one edit.
+F1_SCORE_FIELD: Final[str] = "adjusted_score"
+
+# Valid range for a conviction score; anything outside is treated as invalid
+# input and forces ``leaps_eligible=None`` with a defensive block reason.
+_SCORE_MIN: Final[int] = 0
+_SCORE_MAX: Final[int] = 100
+
 # Tier score thresholds.
 _TIER_1_SCORE_MIN: Final[int] = 85
 _TIER_2_SCORE_MIN: Final[int] = 70
@@ -111,6 +125,112 @@ def _cache_set(ticker: str, result: LeapsEligibility) -> None:
 def _cache_invalidate(ticker: str) -> None:
     """Remove cached result for ticker."""
     _cache.pop(ticker, None)
+
+
+# ---------------------------------------------------------------------------
+# Score resolution helper
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_current_score(
+    ticker: str,
+    *,
+    polygon_api_key: str,
+    uw_api_key: str,
+    alphavantage_api_key: str,
+    sec_api_key: str,
+    transcript_api_key: str,
+    benzinga_api_key: str,
+    session: AsyncSession,
+) -> tuple[int | None, str | None, object]:
+    """Compute the current post-regime conviction score for ``ticker``.
+
+    Returns ``(score, tier, f7_result)`` where:
+      • ``score`` is the validated post-regime conviction score
+        (``RegimeModifierResponse.adjusted_score``) or ``None`` if any
+        upstream input was unavailable / out of range.
+      • ``tier`` is the tier string for ``score`` or ``None`` when score
+        is ``None``.
+      • ``f7_result`` is the F7 earnings-gate response (or the raised
+        ``BaseException``) so the caller can reuse it without making a
+        second F7 call.
+
+    This helper is invoked **before** the LEAPS cache lookup so the cache
+    can be score-keyed: a cached entry whose ``score`` differs from the
+    current resolved score is treated as stale and re-evaluated.
+    """
+    # Local imports avoid circular-import risk at module load.
+    from atlas.services.framework7_service import Framework7Service
+    from atlas.services.regime_modifier_service import RegimeModifierService
+
+    f7_service = Framework7Service(
+        alphavantage_api_key=alphavantage_api_key,
+        polygon_api_key=polygon_api_key,
+        transcript_api_key=transcript_api_key,
+        benzinga_api_key=benzinga_api_key,
+        unusual_whales_api_key=uw_api_key,
+        sec_api_key=sec_api_key,
+    )
+
+    f7_result: object
+    try:
+        f7_result = await f7_service.compute(ticker)
+    except BaseException as exc:
+        logger.warning(
+            "F7 fetch failed during LEAPS score resolution",
+            extra={"ticker": ticker, "error": repr(exc)},
+        )
+        return None, None, exc
+
+    f7_final_score = getattr(f7_result, "final_score", None)
+    if f7_final_score is None:
+        return None, None, f7_result
+
+    regime_service = RegimeModifierService(
+        polygon_api_key=polygon_api_key,
+        alphavantage_api_key=alphavantage_api_key,
+        transcript_api_key=transcript_api_key,
+        benzinga_api_key=benzinga_api_key,
+        unusual_whales_api_key=uw_api_key,
+        sec_api_key=sec_api_key,
+        session=session,
+    )
+    try:
+        regime_resp = await regime_service.compute_regime_modifier(
+            ticker,
+            geopolitical_state="NONE",
+            provided_base_score=int(f7_final_score),
+        )
+        raw_score = getattr(regime_resp, F1_SCORE_FIELD, None)
+    except Exception as exc:
+        logger.warning(
+            "Regime modifier fetch failed for LEAPS — score unavailable",
+            extra={"ticker": ticker, "error": repr(exc)},
+        )
+        return None, None, f7_result
+
+    # Defensive validation — score must be a number inside [0, 100].
+    if raw_score is None:
+        return None, None, f7_result
+    if not isinstance(raw_score, (int, float)):
+        logger.error(
+            "Regime modifier returned non-numeric score",
+            extra={"ticker": ticker, "value": repr(raw_score)},
+        )
+        return None, None, f7_result
+    if not (_SCORE_MIN <= float(raw_score) <= _SCORE_MAX):
+        logger.error(
+            "Regime modifier returned out-of-range score",
+            extra={
+                "ticker": ticker,
+                "value": float(raw_score),
+                "expected_range": [_SCORE_MIN, _SCORE_MAX],
+            },
+        )
+        return None, None, f7_result
+
+    score = round(float(raw_score))
+    return score, _determine_tier(score), f7_result
 
 
 # ---------------------------------------------------------------------------
@@ -452,11 +572,45 @@ async def check_leaps_eligibility(
     """
     normalised = ticker.strip().upper()
 
+    # ------------------------------------------------------------------
+    # Score-keyed cache validation (Section 4.4 — Precedence of Truth).
+    # ------------------------------------------------------------------
+    # The LEAPS result includes the post-regime conviction score. F1's
+    # score path (FrameworkScore → Regime) is uncached and tracks live
+    # VIX / Brent / F4 on every call, so it can move *between* writes to
+    # this cache. To prevent serving a stale score when an upstream
+    # source (e.g. F4 / UW / Polygon / AV) recovers and pushes F1 to a
+    # new value, we compute the *current* post-regime score first and
+    # only honour a cached entry when its ``score`` field matches.
+    #
+    # Cost: cache hits now pay one F7 (earnings) + one regime call
+    # (~500 ms). All other heavy fetches (F9, F29, F30, IV) are still
+    # served from the cached result. On score change, the entry is
+    # invalidated and a full re-evaluation runs.
+    current_score, current_tier, prefetched_f7 = await _resolve_current_score(
+        normalised,
+        polygon_api_key=polygon_api_key,
+        uw_api_key=uw_api_key,
+        alphavantage_api_key=alphavantage_api_key,
+        sec_api_key=sec_api_key,
+        transcript_api_key=transcript_api_key,
+        benzinga_api_key=benzinga_api_key,
+        session=session,
+    )
+
     cached, age_minutes = _cache_get(normalised)
-    if cached is not None and age_minutes <= _CACHE_TTL_SECONDS / 60.0:
+    if (
+        cached is not None
+        and age_minutes <= _CACHE_TTL_SECONDS / 60.0
+        and cached.score == current_score
+    ):
         return LeapsEligibility(
             **{**cached.model_dump(), "cache_hit": True}
         )
+    if cached is not None:
+        # Either TTL expired or the conviction score moved. Drop the
+        # entry so a fresh evaluation is persisted below.
+        _cache_invalidate(normalised)
 
     # 1. Fetch F29 gate status (from cache or evaluate).
     from atlas.services.framework29_service import (
@@ -493,9 +647,17 @@ async def check_leaps_eligibility(
     # 4. F9 score for dark pool flow (use module cache).
     from atlas.services.framework9_service import evaluate_framework9
 
-    # 5. Run parallel tasks where possible.
+    # 5. Run parallel tasks where possible. F7 was already computed by
+    # ``_resolve_current_score`` above; reuse it instead of refetching.
+    async def _replay_f7() -> object:
+        return prefetched_f7
+
     async with httpx.AsyncClient() as client:
-        f7_task = f7_service.compute(normalised)
+        f7_task = (
+            _replay_f7()
+            if not isinstance(prefetched_f7, BaseException)
+            else f7_service.compute(normalised)
+        )
         f9_task = evaluate_framework9(normalised, uw_api_key, polygon_api_key, alphavantage_api_key)
         iv_task = _fetch_iv_from_uw(normalised, uw_api_key, client)
 
@@ -523,22 +685,17 @@ async def check_leaps_eligibility(
 
     f7_result, f9_result, iv_result, f29_result_raw, f30_result_raw = results
 
-    # Unwrap results safely.
+    # Conviction score — already resolved (and validated) by
+    # ``_resolve_current_score`` before the cache check above. This is the
+    # POST-regime conviction score (RegimeModifierResponse.adjusted_score)
+    # — the only score LEAPS may use.
+    score = current_score
+    tier = current_tier
+
+    # Unwrap remaining gate/flow results safely.
     gate_f7_active: bool | None = None
     if not isinstance(f7_result, BaseException):
-        gate_f7_active = f7_result.gate_active
-
-    # --- Conviction score from F1 (embedded in F7 EarningsGate response) ---
-    # Rule: final_score is the post-regime conviction score for ALL LEAPS decisions.
-    # NEVER read factor sub-scores (f4_score, f1_score, raw_total, etc.) as the
-    # conviction score — they do not include regime modifier or F8 cap.
-    score: int | None = None
-    tier: str | None = None
-
-    if not isinstance(f7_result, BaseException):
-        score = f7_result.final_score
-        if score is not None:
-            tier = _determine_tier(score)
+        gate_f7_active = f7_result.gate_active  # type: ignore[attr-defined]
 
     # --- Dark pool flow from F9 (Tier 2 confirmation only) ---
     # F9 is used exclusively for the $500K dark pool flow check.

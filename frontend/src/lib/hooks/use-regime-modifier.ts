@@ -28,17 +28,23 @@ export function useRegimeModifier(
   error: Error | null;
 } {
   const queryClient = useQueryClient();
+  // Read the current framework-score from cache so we can (a) include the
+  // `final_score` in the regime queryKey — making the regime query
+  // automatically refetch when F1 updates — and (b) pass it through to the
+  // backend as `base_score` so the regime endpoint skips its internal F1
+  // recompute and uses the exact same score F1 is displaying. This is what
+  // keeps F1 (post-regime headline) and F6/F7/F10 in lock-step regardless of
+  // F8 cap timing or any sub-factor cache races.
+  const cached = queryClient.getQueryData<FrameworkScoreResponse>([
+    'framework-score',
+    ticker,
+  ]);
+  const baseScore = cached?.final_score;
 
   return useQuery({
-    queryKey: ['regime-modifier', ticker, geopoliticalState],
-    queryFn: () => {
-      const cached = queryClient.getQueryData<FrameworkScoreResponse>([
-        'framework-score',
-        ticker,
-      ]);
-      return fetchRegimeModifier(ticker, geopoliticalState, cached?.final_score);
-    },
-    enabled: ticker.trim().length >= 1,
+    queryKey: ['regime-modifier', ticker, geopoliticalState, baseScore ?? null],
+    queryFn: () => fetchRegimeModifier(ticker, geopoliticalState, baseScore),
+    enabled: ticker.trim().length >= 1 && baseScore !== undefined,
     staleTime: 0,
     retry: 1,
   });

@@ -1,1149 +1,742 @@
-"""Section 16 Exit Rules service.
+"""Section 16 — Entry Gatekeeper service.
 
-Evaluates all four exit rules for a given ticker using only canonical
-data sources:
-  F1  (conviction score)  — GET /api/v1/framework-score/{ticker}
-  F7  (earnings gate)     — GET /api/v1/framework7/{ticker}
-  F9  (options flow)      — GET /api/v1/framework9/{ticker}
-  F30 (portfolio nav)     — GET /api/v1/framework30/portfolio
-  Polygon.io              — ONLY source for current/open prices
-  atlas_config DB         — ONLY source for threshold constants
-  exit_rule_cycles DB     — ONLY source for cycle state
-  gap_down_events DB      — ONLY source for gap-down records
-  grok_scores DB          — ONLY source for Grok scores
-  geo_flag_history DB     — ONLY source for historic geo flag state
+ALL market data is fetched LIVE on every evaluation.  No caching of any
+market data.  No storing of prices, signals, or rule-evaluation results.
 
-Single source of truth rules:
-  - conviction score = F1 final_score only.
-  - NAV = F30 total_nav only.
-  - earnings days = F7 days_to_earnings only.
-  - bearish flow = F9 largest_print_usd (put flow only) only.
-  - NO dummy data: missing source → null result + explicit missing_sources list.
+Stored state (persisted in DB):
+  - ticker_track_assignment   : which Track each ticker uses
+  - rule4_portfolio_fit       : operator's daily YES/NO for portfolio fit
+  - override_usage_tracking   : has the override been used this earnings cycle
+
+Live data sources (HTTP fetched per evaluation):
+  - Framework 7  (/api/v1/framework7/{ticker})       earnings date / days
+  - Framework 9  (/api/v1/framework9/{ticker})       options-flow + dark-pool
+  - Framework 30 (/api/v1/framework30/drawdown)      live NAV
+  - Polygon REST                                      365-day price history
+
+All thresholds, day counts, and percentages come from atlas_config — never
+hardcoded in this module.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Final
+from typing import Any, Final
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from atlas.config import get_settings
 from atlas.models.atlas_config import AtlasConfig
-from atlas.models.decision_trace import DecisionTrace
-from atlas.models.exit_rule_cycle import ExitRuleCycle
-from atlas.models.gap_down_event import GapDownEvent
-from atlas.models.grok_score import GrokScore
+from atlas.models.override_usage_tracking import OverrideUsageTracking
+from atlas.models.rule4_portfolio_fit import Rule4PortfolioFit
+from atlas.models.ticker_track_assignment import TickerTrackAssignment
+from atlas.config import get_settings
 from atlas.schemas.section16 import (
-    ActiveCycleEntry,
-    ActiveCyclesSummary,
-    Rule161Result,
-    Rule162Result,
-    Rule163Result,
-    Rule164ConditionDetail,
-    Rule164Result,
-    Section16OverallStatus,
+    GateResult,
+    OverrideResult,
+    Rule1Result,
+    Rule2Result,
+    Rule3Result,
+    Rule4Result,
     Section16Result,
+    TrackType,
 )
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Internal request timeout for localhost framework calls.
-# ---------------------------------------------------------------------------
-_HTTP_TIMEOUT_SECONDS: Final[float] = 10.0
-
-# Base URL for intra-service calls — only localhost in V1.
-_BASE_URL: Final[str] = "http://localhost:8000"
-
-# Polygon.io daily aggs endpoint template for open/close prices.
-_POLYGON_DAILY_URL: Final[str] = (
-    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{date}/{date}"
+# Internal HTTP base for service-to-service framework calls (no auth needed).
+_INTERNAL_BASE_URL: Final[str] = os.environ.get(
+    "ATLAS_INTERNAL_BASE_URL", "http://localhost:8000",
 )
+_HTTP_TIMEOUT_SECONDS: Final[float] = 10.0
+# Polygon 365-day agg fetch involves more data than internal service calls;
+# give it extra headroom before treating the request as failed.
+_POLYGON_TIMEOUT_SECONDS: Final[float] = 20.0
+_POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
 
-# ---------------------------------------------------------------------------
-# Date helpers
-# ---------------------------------------------------------------------------
+# Config key constants — values themselves come from DB.
+_KEY_P1_EARN_DAYS: Final[str] = "s16_priority1_earnings_days"
+_KEY_P2_EARN_MIN: Final[str] = "s16_priority2_earnings_min_days"
+_KEY_P2_EARN_MAX: Final[str] = "s16_priority2_earnings_max_days"
+_KEY_P1_DARK_USD: Final[str] = "s16_priority1_dark_pool_usd"
+_KEY_P1_FLOW_USD: Final[str] = "s16_priority1_flow_usd"
+_KEY_P2_DARK_USD: Final[str] = "s16_priority2_dark_pool_usd"
+_KEY_P2_FLOW_USD: Final[str] = "s16_priority2_flow_usd"
+_KEY_P3_DARK_USD: Final[str] = "s16_priority3_dark_pool_usd"
+_KEY_P3_FLOW_USD: Final[str] = "s16_priority3_flow_usd"
+_KEY_CATALYST_MAX_DAYS: Final[str] = "s16_catalyst_max_days"
+_KEY_PARABOLIC_DAYS: Final[str] = "s16_parabolic_catalyst_days"
+_KEY_RULE3_NEAR_HIGH: Final[str] = "s16_rule3_near_high_pct"
+_KEY_RULE3_PULLBACK: Final[str] = "s16_rule3_pullback_pct"
+_KEY_OVR_DARK_USD: Final[str] = "s16_override_dark_pool_usd"
+_KEY_OVR_FLOW_USD: Final[str] = "s16_override_flow_usd"
+_KEY_OVR_LOOKBACK: Final[str] = "s16_override_lookback_days"
 
-# Weekday numbers — Monday=0, Friday=4.
-_FRIDAY: Final[int] = 4
+_TRACK_A: Final[str] = "TRACK_A"
+_TRACK_B: Final[str] = "TRACK_B"
+_UNASSIGNED: Final[str] = "UNASSIGNED"
 
-
-def get_last_friday_date(
-    today: date | None = None,
-    after_close: bool = False,
-) -> date:
-    """Return the most recent completed Friday rescore date.
-
-    A Friday rescore is considered complete once the market is closed
-    (16:00 ET or later on Fridays).  Pass ``after_close=True`` on a
-    Friday afternoon to treat today as the completed rescore date.
-
-    Args:
-        today:       Override for today's date (used in tests).
-        after_close: True when called after 16:00 ET on a Friday.
-
-    Returns:
-        The most recent Friday date that has a completed rescore.
-    """
-    if today is None:
-        today = date.today()
-
-    if today.weekday() == _FRIDAY and after_close:
-        return today
-
-    # Walk backwards until we land on a Friday.
-    days_since_friday = (today.weekday() - _FRIDAY) % 7
-    if days_since_friday == 0:
-        # Today is Friday but before close — go back 7 days.
-        days_since_friday = 7
-    return today - timedelta(days=days_since_friday)
-
-
-def add_trading_days(start: date, days: int) -> date:
-    """Return a date that is ``days`` trading days after ``start``.
-
-    Skips Saturday (5) and Sunday (6).  Public holidays not tracked in V1.
-    Pure function — no I/O.
-    """
-    result = start
-    added = 0
-    while added < days:
-        result += timedelta(days=1)
-        if result.weekday() < 5:
-            added += 1
-    return result
+# Polygon: number of calendar days back to fetch for the 365-day high.
+_POLYGON_HISTORY_DAYS: Final[int] = 365
 
 
 # ---------------------------------------------------------------------------
-# Config reader
+# Config helpers — typed accessors over atlas_config key/value store.
 # ---------------------------------------------------------------------------
 
 
-async def _get_config_decimal(key: str, session: AsyncSession) -> Decimal:
-    """Read a Decimal value from atlas_config. Raises RuntimeError if missing."""
-    row = await session.get(AtlasConfig, key)
+async def _config_lookup(key: str, session: AsyncSession) -> str:
+    row = await session.execute(select(AtlasConfig).where(AtlasConfig.key == key))
+    cfg = row.scalar_one_or_none()
+    if cfg is None:
+        raise KeyError(f"Missing required atlas_config key: {key}")
+    return cfg.value
+
+
+async def _cfg_int(key: str, session: AsyncSession) -> int:
+    return int(await _config_lookup(key, session))
+
+
+async def _cfg_float(key: str, session: AsyncSession) -> float:
+    return float(await _config_lookup(key, session))
+
+
+# ---------------------------------------------------------------------------
+# Stored-state accessors — track, rule4, override.
+# ---------------------------------------------------------------------------
+
+
+async def get_track_assignment(ticker: str, session: AsyncSession) -> str:
+    """Return the assigned track string, or 'UNASSIGNED' when no row exists."""
+    res = await session.execute(
+        select(TickerTrackAssignment).where(TickerTrackAssignment.ticker == ticker),
+    )
+    row = res.scalar_one_or_none()
+    return row.track if row is not None else _UNASSIGNED
+
+
+async def upsert_track_assignment(
+    ticker: str, track: str, assigned_by: str,
+    notes: str | None, session: AsyncSession,
+) -> TickerTrackAssignment:
+    res = await session.execute(
+        select(TickerTrackAssignment).where(TickerTrackAssignment.ticker == ticker),
+    )
+    row = res.scalar_one_or_none()
     if row is None:
-        raise RuntimeError(
-            f"atlas_config key '{key}' not found — run 'alembic upgrade head'."
+        row = TickerTrackAssignment(
+            ticker=ticker, track=track, assigned_by=assigned_by, notes=notes,
         )
-    return Decimal(row.value)
-
-
-async def _get_config_int(key: str, session: AsyncSession) -> int:
-    """Read an int value from atlas_config. Raises RuntimeError if missing."""
-    return int(await _get_config_decimal(key, session))
-
-
-# ---------------------------------------------------------------------------
-# Internal data fetchers — each returns a plain dict, never raises on
-# upstream failures (returns None fields instead).
-# ---------------------------------------------------------------------------
-
-
-async def _fetch_conviction_score(ticker: str) -> dict[str, object]:
-    """Fetch F1 final_score from the framework-score endpoint.
-
-    Returns:
-        {"score": float | None, "error": str | None}
-    """
-    url = f"{_BASE_URL}/api/v1/framework-score/{ticker}"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            score = data.get("final_score")
-            return {"score": float(score) if score is not None else None, "error": None}
-        except Exception as exc:
-            logger.warning("F1 fetch failed for %s: %s", ticker, exc)
-            return {"score": None, "error": str(exc)}
-
-
-async def _fetch_earnings_days(ticker: str) -> dict[str, object]:
-    """Fetch F7 days_to_earnings from the framework7 endpoint.
-
-    Returns:
-        {"days_to_earnings": int | None, "error": str | None}
-    """
-    url = f"{_BASE_URL}/api/v1/framework7/{ticker}"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            days = data.get("days_to_earnings")
-            return {"days_to_earnings": int(days) if days is not None else None, "error": None}
-        except Exception as exc:
-            logger.warning("F7 fetch failed for %s: %s", ticker, exc)
-            return {"days_to_earnings": None, "error": str(exc)}
-
-
-async def _fetch_bearish_flow(ticker: str) -> dict[str, object]:
-    """Fetch F9 largest bearish print from the framework9 endpoint.
-
-    Returns:
-        {"put_flow_usd": Decimal | None, "error": str | None}
-    """
-    url = f"{_BASE_URL}/api/v1/framework9/{ticker}"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            largest_print = data.get("largest_print_usd")
-            return {
-                "put_flow_usd": Decimal(str(largest_print)) if largest_print is not None else None,
-                "error": None,
-            }
-        except Exception as exc:
-            logger.warning("F9 fetch failed for %s: %s", ticker, exc)
-            return {"put_flow_usd": None, "error": str(exc)}
-
-
-async def _fetch_total_nav() -> dict[str, object]:
-    """Fetch total_nav from the portfolio summary endpoint.
-
-    Returns:
-        {"total_nav": Decimal | None, "error": str | None}
-    """
-    url = f"{_BASE_URL}/api/v1/portfolio/summary"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            nav = data.get("total_nav")
-            return {
-                "total_nav": Decimal(str(nav)) if nav is not None else None,
-                "error": None,
-            }
-        except Exception as exc:
-            logger.warning("F30 fetch failed: %s", exc)
-            return {"total_nav": None, "error": str(exc)}
-
-
-async def _fetch_position_value(ticker: str) -> dict[str, object]:
-    """Fetch current position market value from Polygon.io.
-
-    Returns:
-        {"position_value": Decimal | None, "error": str | None}
-    """
-    settings = get_settings()
-    today_str = date.today().isoformat()
-    url = _POLYGON_DAILY_URL.format(ticker=ticker, date=today_str)
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(
-                url, params={"apiKey": settings.polygon_api_key}
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if not results:
-                return {"position_value": None, "error": "Polygon returned no price data"}
-            close_price = Decimal(str(results[0].get("c", 0)))
-            return {"position_value": close_price, "error": None}
-        except Exception as exc:
-            logger.warning("Polygon fetch failed for %s: %s", ticker, exc)
-            return {"position_value": None, "error": str(exc)}
-
-
-# ---------------------------------------------------------------------------
-# Rule 16.1 — Score-Based Exit (pure logic, injectable inputs)
-# ---------------------------------------------------------------------------
-
-
-async def evaluate_rule_161(
-    *,
-    ticker: str,
-    current_friday_score: float,
-    cycle_record: dict[str, object] | None,
-    f12_no_fly_active: bool,
-    reconciliation_pending: bool,
-    session: AsyncSession,
-) -> dict[str, object]:
-    """Evaluate Rule 16.1 (two-cycle score-based exit) and return a result dict.
-
-    Args:
-        ticker:                  Ticker symbol.
-        current_friday_score:    F1 final_score from this Friday's rescore.
-        cycle_record:            Existing cycle DB record as a plain dict, or None.
-        f12_no_fly_active:       True when F12 has an active catalyst no-fly.
-        reconciliation_pending:  True when Claude vs Grok gap exceeds threshold.
-        session:                 AsyncSession for config reads.
-
-    Returns plain dict matching Rule161Result fields.
-    """
-    score_55 = int(await _get_config_int("s16_score_below_55_threshold", session))
-    score_45 = int(await _get_config_int("s16_score_below_45_threshold", session))
-    trim_days = int(await _get_config_int("s16_trim_window_trading_days", session))
-    exit_days = int(await _get_config_int("s16_full_exit_trading_days", session))
-    trim_pct = await _get_config_decimal("s16_trim_pct_cycle_two", session)
-
-    score = int(current_friday_score)
-
-    # Score < 45 → immediate full exit regardless of cycle state.
-    if score < score_45:
-        return {
-            "status": "FULL_EXIT_TRIGGERED",
-            "cycle_count": 0 if cycle_record is None else _current_cycle_count(cycle_record),
-            "trim_triggered": False,
-            "full_exit_triggered": True,
-            "exit_window_trading_days": exit_days,
-            "trim_window_trading_days": None,
-            "trim_pct": None,
-            "deferred_reason": None,
-            "deferred_until": None,
-            "reconciliation_pending": reconciliation_pending,
-            "claude_score": Decimal(str(current_friday_score)),
-            "grok_score": None,
-            "score_gap": None,
-            "triggering_score": Decimal(str(current_friday_score)),
-            "triggering_date": get_last_friday_date(),
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    # Score ≥ 55 → clear any existing cycle.
-    if score >= score_55:
-        return {
-            "status": "CLEAR",
-            "cycle_count": 0,
-            "trim_triggered": False,
-            "full_exit_triggered": False,
-            "exit_window_trading_days": None,
-            "trim_window_trading_days": None,
-            "trim_pct": None,
-            "deferred_reason": None,
-            "deferred_until": None,
-            "reconciliation_pending": False,
-            "claude_score": Decimal(str(current_friday_score)),
-            "grok_score": None,
-            "score_gap": None,
-            "triggering_score": None,
-            "triggering_date": None,
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    # Score is below 55 — determine cycle progression.
-    existing_status = (
-        cycle_record.get("cycle_status", "CLEAR") if cycle_record is not None else "CLEAR"
-    )
-    paused = bool(cycle_record.get("reconciliation_pause", False)) if cycle_record else False
-    deferred_until = cycle_record.get("deferred_until") if cycle_record else None
-
-    # Reconciliation pause: clock does not advance.
-    if reconciliation_pending or paused:
-        return {
-            "status": "CYCLE_ONE_PAUSED",
-            "cycle_count": 1,
-            "trim_triggered": False,
-            "full_exit_triggered": False,
-            "exit_window_trading_days": None,
-            "trim_window_trading_days": None,
-            "trim_pct": None,
-            "deferred_reason": "RECONCILIATION_PENDING",
-            "deferred_until": None,
-            "reconciliation_pending": True,
-            "claude_score": Decimal(str(current_friday_score)),
-            "grok_score": None,
-            "score_gap": None,
-            "triggering_score": Decimal(str(current_friday_score)),
-            "triggering_date": get_last_friday_date(),
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    is_cycle_one = existing_status in ("CYCLE_ONE", "CYCLE_ONE_PAUSED")
-
-    if is_cycle_one:
-        # Cycle two would fire — check for F12 deferral first.
-        if f12_no_fly_active:
-            return {
-                "status": "DEFERRED",
-                "cycle_count": 1,
-                "trim_triggered": False,
-                "full_exit_triggered": False,
-                "exit_window_trading_days": None,
-                "trim_window_trading_days": None,
-                "trim_pct": None,
-                "deferred_reason": "F12_NO_FLY_ACTIVE",
-                "deferred_until": deferred_until,
-                "reconciliation_pending": False,
-                "claude_score": Decimal(str(current_friday_score)),
-                "grok_score": None,
-                "score_gap": None,
-                "triggering_score": Decimal(str(current_friday_score)),
-                "triggering_date": get_last_friday_date(),
-                "data_available": True,
-                "missing_sources": [],
-            }
-
-        return {
-            "status": "CYCLE_TWO",
-            "cycle_count": 2,
-            "trim_triggered": True,
-            "full_exit_triggered": False,
-            "exit_window_trading_days": None,
-            "trim_window_trading_days": trim_days,
-            "trim_pct": trim_pct,
-            "deferred_reason": None,
-            "deferred_until": None,
-            "reconciliation_pending": False,
-            "claude_score": Decimal(str(current_friday_score)),
-            "grok_score": None,
-            "score_gap": None,
-            "triggering_score": Decimal(str(current_friday_score)),
-            "triggering_date": get_last_friday_date(),
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    # No existing cycle → this is cycle one.
-    return {
-        "status": "CYCLE_ONE",
-        "cycle_count": 1,
-        "trim_triggered": False,
-        "full_exit_triggered": False,
-        "exit_window_trading_days": None,
-        "trim_window_trading_days": None,
-        "trim_pct": None,
-        "deferred_reason": None,
-        "deferred_until": None,
-        "reconciliation_pending": False,
-        "claude_score": Decimal(str(current_friday_score)),
-        "grok_score": None,
-        "score_gap": None,
-        "triggering_score": Decimal(str(current_friday_score)),
-        "triggering_date": get_last_friday_date(),
-        "data_available": True,
-        "missing_sources": [],
-    }
-
-
-def _current_cycle_count(cycle_record: dict[str, object]) -> int:
-    """Return the numeric cycle count from a cycle_record dict."""
-    status = cycle_record.get("cycle_status", "CLEAR")
-    if status in ("CYCLE_TWO", "TRIM_TRIGGERED", "DEFERRED"):
-        return 2
-    if status in ("CYCLE_ONE", "CYCLE_ONE_PAUSED"):
-        return 1
-    return 0
-
-
-# ---------------------------------------------------------------------------
-# Rule 16.2 — Gap-Down (pure logic)
-# ---------------------------------------------------------------------------
-
-
-def evaluate_rule_162(
-    *,
-    ticker: str,
-    prev_close: Decimal,
-    open_price: Decimal,
-    event_timestamp: datetime,
-    gap_down_threshold_pct: Decimal,
-    hold_hours: int,
-    rescore_hours: int = 72,
-) -> dict[str, object]:
-    """Evaluate Rule 16.2 gap-down logic.  Pure function — no I/O.
-
-    Args:
-        ticker:                 Ticker symbol (used in result for traceability).
-        prev_close:             Prior session close price.
-        open_price:             Current session open price.
-        event_timestamp:        UTC datetime of the gap-down event.
-        gap_down_threshold_pct: Percent threshold above which gap triggers rule.
-        hold_hours:             Hours to hold before taking action.
-        rescore_hours:          Hours after event to rescore.
-
-    Returns plain dict matching Rule162Result fields.
-    """
-    # Gap-down percentage: positive value means price fell.
-    gap_pct = ((prev_close - open_price) / prev_close) * Decimal("100")
-
-    if gap_pct <= gap_down_threshold_pct:
-        return {
-            "gap_triggered": False,
-            "status": "CLEAR",
-            "gap_down_pct": gap_pct,
-            "prev_close": prev_close,
-            "open_price": open_price,
-            "event_date": event_timestamp.date(),
-            "hold_until": None,
-            "rescore_at": None,
-            "rescore_score": None,
-            "resolved_at": None,
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    hold_until = event_timestamp + timedelta(hours=hold_hours)
-    rescore_at = event_timestamp + timedelta(hours=rescore_hours)
-
-    return {
-        "gap_triggered": True,
-        "status": "HOLDING",
-        "gap_down_pct": gap_pct,
-        "prev_close": prev_close,
-        "open_price": open_price,
-        "event_date": event_timestamp.date(),
-        "hold_until": hold_until,
-        "rescore_at": rescore_at,
-        "rescore_score": None,
-        "resolved_at": None,
-        "data_available": True,
-        "missing_sources": [],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Rule 16.3 — Appreciation Trim (pure logic)
-# ---------------------------------------------------------------------------
-
-
-def evaluate_rule_163(
-    *,
-    ticker: str,
-    position_value: Decimal,
-    total_nav: Decimal,
-    soft_cap_pct: Decimal,
-    hard_cap_pct: Decimal,
-    trim_pct: Decimal,
-) -> dict[str, object]:
-    """Evaluate Rule 16.3 appreciation/concentration trim.  Pure function.
-
-    Args:
-        ticker:         Ticker symbol.
-        position_value: Current market value of the position.
-        total_nav:      Total portfolio NAV (from F30).
-        soft_cap_pct:   Percent of NAV above which no new capital is deployed.
-        hard_cap_pct:   Percent of NAV above which trim is considered.
-        trim_pct:       Percent of position to trim at hard cap.
-
-    Returns plain dict matching Rule163Result fields.
-    """
-    position_pct = (position_value / total_nav) * Decimal("100")
-
-    if position_pct > hard_cap_pct:
-        return {
-            "status": "CONSIDER_TRIM",
-            "no_new_capital": True,
-            "consider_trim": True,
-            "position_pct_of_nav": position_pct,
-            "position_value": position_value,
-            "total_nav": total_nav,
-            "trim_pct": trim_pct,
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    if position_pct > soft_cap_pct:
-        return {
-            "status": "NO_NEW_CAPITAL",
-            "no_new_capital": True,
-            "consider_trim": False,
-            "position_pct_of_nav": position_pct,
-            "position_value": position_value,
-            "total_nav": total_nav,
-            "trim_pct": None,
-            "data_available": True,
-            "missing_sources": [],
-        }
-
-    return {
-        "status": "CLEAR",
-        "no_new_capital": False,
-        "consider_trim": False,
-        "position_pct_of_nav": position_pct,
-        "position_value": position_value,
-        "total_nav": total_nav,
-        "trim_pct": None,
-        "data_available": True,
-        "missing_sources": [],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Rule 16.4 — Put Protection (pure logic)
-# ---------------------------------------------------------------------------
-
-
-def evaluate_rule_164(
-    *,
-    ticker: str,
-    bearish_flow_usd: Decimal | None,
-    earnings_days_away: int | None,
-    gain_from_cost_pct: Decimal | None,
-    current_score: float | None,
-    put_flow_threshold_usd: Decimal,
-    put_earnings_days: int,
-    score_tier3_threshold: int,
-) -> dict[str, object]:
-    """Evaluate Rule 16.4 put-protection.  Pure function — no I/O.
-
-    All four conditions must be True to recommend protective puts.
-    Any None input → status UNKNOWN with missing_sources populated.
-
-    Args:
-        ticker:                  Ticker symbol.
-        bearish_flow_usd:        Largest bearish dark pool print (F9).
-        earnings_days_away:      Days until earnings (F7).
-        gain_from_cost_pct:      Unrealised gain pct from cost basis.
-        current_score:           Current F1 conviction score.
-        put_flow_threshold_usd:  Minimum bearish flow for condition 1.
-        put_earnings_days:       Max days-to-earnings for condition 2.
-        score_tier3_threshold:   Score below which condition 4 is satisfied.
-
-    Returns plain dict matching Rule164Result fields.
-    """
-    missing: list[str] = []
-
-    cond1: bool | None = None
-    if bearish_flow_usd is None:
-        missing.append("F9")
+        session.add(row)
     else:
-        cond1 = bearish_flow_usd >= put_flow_threshold_usd
-
-    cond2: bool | None = None
-    if earnings_days_away is None:
-        missing.append("F7")
-    else:
-        cond2 = earnings_days_away <= put_earnings_days
-
-    cond3: bool | None = None
-    if gain_from_cost_pct is None:
-        missing.append("PORTFOLIO_COST_BASIS")
-    else:
-        # "Up significantly" — proxy: gain > 20%
-        _gain_significant_pct: Final[Decimal] = Decimal("20")
-        cond3 = gain_from_cost_pct > _gain_significant_pct
-
-    cond4: bool | None = None
-    if current_score is None:
-        missing.append("F1")
-    else:
-        cond4 = int(current_score) < score_tier3_threshold
-
-    conditions = [
-        Rule164ConditionDetail(
-            condition_number=1,
-            description="Institutional bearish options flow > $500K in a single session",
-            met=cond1,
-            value=f"${bearish_flow_usd:,.0f}" if bearish_flow_usd is not None else None,
-            threshold=f"${put_flow_threshold_usd:,.0f}",
-        ),
-        Rule164ConditionDetail(
-            condition_number=2,
-            description="Earnings binary event within 20 days",
-            met=cond2,
-            value=f"{earnings_days_away}d" if earnings_days_away is not None else None,
-            threshold=f"{put_earnings_days}d",
-        ),
-        Rule164ConditionDetail(
-            condition_number=3,
-            description="Name is up significantly from cost basis (protecting unrealised gains)",
-            met=cond3,
-            value=f"{gain_from_cost_pct:.1f}%" if gain_from_cost_pct is not None else None,
-            threshold="20%",
-        ),
-        Rule164ConditionDetail(
-            condition_number=4,
-            description="Score has dropped or is trending toward Tier 3 or Watchlist",
-            met=cond4,
-            value=str(current_score) if current_score is not None else None,
-            threshold=f"< {score_tier3_threshold}",
-        ),
-    ]
-
-    if missing:
-        return {
-            "recommend_puts": None,
-            "status": "UNKNOWN",
-            "conditions_met": sum(1 for c in [cond1, cond2, cond3, cond4] if c is True),
-            "conditions": conditions,
-            "data_available": False,
-            "missing_sources": missing,
-        }
-
-    all_met = all([cond1, cond2, cond3, cond4])
-    conditions_met = sum(1 for c in [cond1, cond2, cond3, cond4] if c is True)
-
-    return {
-        "recommend_puts": all_met,
-        "status": "PUT_PROTECTION_RECOMMENDED" if all_met else "NOT_TRIGGERED",
-        "conditions_met": conditions_met,
-        "conditions": conditions,
-        "data_available": True,
-        "missing_sources": [],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Top-level evaluator
-# ---------------------------------------------------------------------------
-
-
-async def evaluate_section16(ticker: str, session: AsyncSession) -> Section16Result:
-    """Run all four Section 16 exit rules for a single ticker.
-
-    All rules are evaluated in parallel via asyncio.gather.
-    Data fetches that fail return None inputs — the rule returns UNKNOWN
-    with a populated missing_sources list.  No exception is raised for
-    upstream failures.
-
-    Args:
-        ticker:  Ticker symbol (normalised to uppercase by caller).
-        session: AsyncSession for DB reads/writes.
-
-    Returns:
-        Section16Result with all four rule evaluations embedded.
-    """
-    normalised = ticker.upper()
-
-    # ------------------------------------------------------------------
-    # Parallel HTTP fetches (safe to gather — independent connections)
-    # DB reads must be sequential on a single AsyncSession (asyncpg limitation).
-    # ------------------------------------------------------------------
-    (
-        f1_data,
-        f7_data,
-        f9_data,
-        f30_data,
-    ) = await asyncio.gather(
-        _fetch_conviction_score(normalised),
-        _fetch_earnings_days(normalised),
-        _fetch_bearish_flow(normalised),
-        _fetch_total_nav(),
-    )
-
-    cycle_row = await _fetch_cycle_record(normalised, session)
-    grok_row = await _fetch_latest_grok_score(normalised, session)
-
-    # Check for human override — overrides suppress all rule signals.
-    if cycle_row is not None and cycle_row.get("override_active"):
-        return _build_override_result(normalised, cycle_row)
-
-    # ------------------------------------------------------------------
-    # Config reads (needed by multiple rules — fetch once)
-    # ------------------------------------------------------------------
-    recon_gap = int(await _get_config_int("s16_reconciliation_gap_threshold", session))
-    put_flow_threshold = await _get_config_decimal("s16_put_flow_threshold_usd", session)
-    put_earnings_days = await _get_config_int("s16_put_earnings_days", session)
-    soft_cap_pct = await _get_config_decimal("s16_appreciation_soft_cap_pct", session)
-    hard_cap_pct = await _get_config_decimal("s16_appreciation_hard_cap_pct", session)
-    trim_size_pct = await _get_config_decimal("s16_appreciation_trim_size_pct", session)
-
-    f1_score: float | None = f1_data.get("score")  # type: ignore[assignment]
-
-    # ------------------------------------------------------------------
-    # Reconciliation check (Claude vs Grok gap)
-    # ------------------------------------------------------------------
-    reconciliation_pending = False
-    if f1_score is not None and grok_row is not None:
-        grok_val: float = float(grok_row.get("grok_score", 0.0))  # type: ignore[arg-type]
-        gap = abs(f1_score - grok_val)
-        reconciliation_pending = gap > recon_gap
-
-    # ------------------------------------------------------------------
-    # F12 no-fly check (intra-service call)
-    # ------------------------------------------------------------------
-    f12_no_fly = await _fetch_f12_no_fly(normalised)
-
-    # ------------------------------------------------------------------
-    # Rule 16.1
-    # ------------------------------------------------------------------
-    if f1_score is not None:
-        r161_dict = await evaluate_rule_161(
-            ticker=normalised,
-            current_friday_score=f1_score,
-            cycle_record=cycle_row,
-            f12_no_fly_active=f12_no_fly,
-            reconciliation_pending=reconciliation_pending,
-            session=session,
-        )
-    else:
-        r161_dict = {
-            "status": "UNKNOWN",
-            "cycle_count": 0,
-            "trim_triggered": False,
-            "full_exit_triggered": False,
-            "exit_window_trading_days": None,
-            "trim_window_trading_days": None,
-            "trim_pct": None,
-            "deferred_reason": None,
-            "deferred_until": None,
-            "reconciliation_pending": False,
-            "claude_score": None,
-            "grok_score": None,
-            "score_gap": None,
-            "triggering_score": None,
-            "triggering_date": None,
-            "data_available": False,
-            "missing_sources": ["F1"],
-        }
-    rule_161 = Rule161Result(**r161_dict)  # type: ignore[arg-type]
-
-    # ------------------------------------------------------------------
-    # Rule 16.2 — fetch current open/prev_close from Polygon
-    # ------------------------------------------------------------------
-    rule_162 = await _evaluate_rule162_with_db(normalised, session)
-
-    # ------------------------------------------------------------------
-    # Rule 16.3 — position value from DB, NAV from F30
-    # ------------------------------------------------------------------
-    position_value = await _fetch_position_market_value(normalised, session)
-    total_nav: Decimal | None = f30_data.get("total_nav")  # type: ignore[assignment]
-
-    if position_value is not None and total_nav is not None:
-        r163_dict = evaluate_rule_163(
-            ticker=normalised,
-            position_value=position_value,
-            total_nav=total_nav,
-            soft_cap_pct=soft_cap_pct,
-            hard_cap_pct=hard_cap_pct,
-            trim_pct=trim_size_pct,
-        )
-    else:
-        missing_163: list[str] = []
-        if position_value is None:
-            missing_163.append("PORTFOLIO_POSITION")
-        if total_nav is None:
-            missing_163.append("PORTFOLIO_NAV")
-        r163_dict = {
-            "status": "UNKNOWN",
-            "no_new_capital": False,
-            "consider_trim": False,
-            "position_pct_of_nav": None,
-            "position_value": position_value,
-            "total_nav": total_nav,
-            "trim_pct": None,
-            "data_available": False,
-            "missing_sources": missing_163,
-        }
-    rule_163 = Rule163Result(**r163_dict)  # type: ignore[arg-type]
-
-    # ------------------------------------------------------------------
-    # Rule 16.4 — gain from cost basis requires portfolio DB
-    # ------------------------------------------------------------------
-    gain_pct = await _fetch_gain_from_cost_pct(normalised, session)
-    from atlas.core.scoring import TIER_2_MIN as _TIER_2_MIN
-
-    r164_dict = evaluate_rule_164(
-        ticker=normalised,
-        bearish_flow_usd=f9_data.get("put_flow_usd"),  # type: ignore[arg-type]
-        earnings_days_away=f7_data.get("days_to_earnings"),  # type: ignore[arg-type]
-        gain_from_cost_pct=gain_pct,
-        current_score=f1_score,
-        put_flow_threshold_usd=put_flow_threshold,
-        put_earnings_days=put_earnings_days,
-        score_tier3_threshold=_TIER_2_MIN,
-    )
-    rule_164 = Rule164Result(**r164_dict)  # type: ignore[arg-type]
-
-    # ------------------------------------------------------------------
-    # Overall status
-    # ------------------------------------------------------------------
-    any_exit_signal = bool(
-        rule_161.trim_triggered
-        or rule_161.full_exit_triggered
-        or rule_164.recommend_puts
-    )
-
-    all_data_available = all([
-        rule_161.data_available,
-        rule_162.data_available,
-        rule_163.data_available,
-        rule_164.data_available,
-    ])
-
-    if any_exit_signal:
-        overall: Section16OverallStatus = "EXIT_ACTIVE"
-    elif not all_data_available:
-        overall = "PARTIAL_DATA"
-    else:
-        overall = "ALL_CLEAR"
-
-    return Section16Result(
-        ticker=normalised,
-        available=True,
-        overall_status=overall,
-        rule_161=rule_161,
-        rule_162=rule_162,
-        rule_163=rule_163,
-        rule_164=rule_164,
-        any_exit_signal=any_exit_signal,
-        override_active=False,
-        evaluated_at=datetime.now(tz=UTC),
-    )
-
-
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
-
-async def _fetch_cycle_record(
-    ticker: str, session: AsyncSession
-) -> dict[str, object] | None:
-    """Fetch the current exit_rule_cycles row for ticker as a plain dict."""
-    row = (
-        await session.execute(
-            select(ExitRuleCycle).where(ExitRuleCycle.ticker == ticker)
-        )
-    ).scalars().first()
-    if row is None:
-        return None
-    return {
-        "cycle_status": row.cycle_status,
-        "cycle_one_date": row.cycle_one_date,
-        "cycle_one_score": row.cycle_one_score,
-        "cycle_two_date": row.cycle_two_date,
-        "cycle_two_score": row.cycle_two_score,
-        "reconciliation_pause": row.reconciliation_pause,
-        "grok_score": row.grok_score,
-        "claude_score": row.claude_score,
-        "trim_triggered": row.trim_triggered,
-        "full_exit_triggered": row.full_exit_triggered,
-        "deferred_until": row.deferred_until,
-        "override_active": row.override_active,
-        "override_reason": row.override_reason,
-        "override_set_by": row.override_set_by,
-        "override_set_at": row.override_set_at,
-    }
-
-
-async def _fetch_latest_grok_score(
-    ticker: str, session: AsyncSession
-) -> dict[str, object] | None:
-    """Fetch the most recent grok_scores row for ticker."""
-    row = (
-        await session.execute(
-            select(GrokScore)
-            .where(GrokScore.ticker == ticker)
-            .order_by(GrokScore.score_date.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-    if row is None:
-        return None
-    return {
-        "grok_score": float(row.grok_score),
-        "score_date": row.score_date,
-    }
-
-
-async def _evaluate_rule162_with_db(
-    ticker: str, session: AsyncSession
-) -> Rule162Result:
-    """Check gap_down_events for an active HOLDING event for this ticker."""
-    row = (
-        await session.execute(
-            select(GapDownEvent)
-            .where(GapDownEvent.ticker == ticker)
-            .where(GapDownEvent.status == "HOLDING")
-            .order_by(GapDownEvent.created_at.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    if row is None:
-        return Rule162Result(
-            gap_triggered=False,
-            status="CLEAR",
-            data_available=True,
-        )
-
-    return Rule162Result(
-        gap_triggered=True,
-        status="HOLDING",
-        gap_down_pct=row.gap_down_pct,
-        prev_close=row.prev_close,
-        open_price=row.open_price,
-        event_date=row.event_date,
-        hold_until=row.hold_until,
-        rescore_at=row.rescore_at,
-        rescore_score=row.rescore_score,
-        resolved_at=row.resolved_at,
-        data_available=True,
-    )
-
-
-async def _fetch_position_market_value(
-    ticker: str, session: AsyncSession
-) -> Decimal | None:
-    """Return shares * current_price from the tickers table."""
-    from atlas.models.ticker import Ticker
-
-    row = (
-        await session.execute(
-            select(Ticker).where(Ticker.ticker == ticker)
-        )
-    ).scalars().first()
-
-    if row is None or row.current_price is None or row.shares is None:
-        return None
-    return Decimal(str(row.shares)) * Decimal(str(row.current_price))
-
-
-async def _fetch_gain_from_cost_pct(
-    ticker: str, session: AsyncSession
-) -> Decimal | None:
-    """Return (current_price - cost_basis) / cost_basis * 100 from portfolio DB.
-
-    Returns None when cost basis is unavailable.
-    Cost basis is approximated as portfolio_config.cost_basis_per_share when present.
-    """
-    from atlas.models.ticker import Ticker
-
-    ticker_row = (
-        await session.execute(
-            select(Ticker).where(Ticker.ticker == ticker)
-        )
-    ).scalars().first()
-
-    if ticker_row is None or ticker_row.current_price is None:
-        return None
-
-    config_row = await session.get(AtlasConfig, f"cost_basis_{ticker}")
-
-    if config_row is None:
-        return None
-
-    try:
-        cost_basis = Decimal(str(config_row.value))
-        current = Decimal(str(ticker_row.current_price))
-        return ((current - cost_basis) / cost_basis) * Decimal("100")
-    except Exception:
-        return None
-
-
-async def _fetch_f12_no_fly(ticker: str) -> bool:
-    """Check F12 catalyst no-fly status via intra-service call.
-
-    Returns True only if F12 is explicitly ACTIVE.
-    Returns False on any failure (fail-open: do not silently block exits).
-    """
-    url = f"{_BASE_URL}/api/v1/framework12/{ticker}/status"
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        try:
-            resp = await client.get(url)
-            if resp.status_code == 404:
-                return False
-            resp.raise_for_status()
-            data = resp.json()
-            return bool(data.get("blocked", False))
-        except Exception as exc:
-            logger.warning("F12 status fetch failed for %s: %s", ticker, exc)
-            return False
-
-
-def _build_override_result(
-    ticker: str, cycle_row: dict[str, object]
-) -> Section16Result:
-    """Return a Section16Result with all rules suppressed due to human override."""
-    now = datetime.now(tz=UTC)
-    clear_161 = Rule161Result(
-        status="CLEAR",
-        cycle_count=0,
-        trim_triggered=False,
-        full_exit_triggered=False,
-    )
-    clear_162 = Rule162Result(gap_triggered=False, status="CLEAR")
-    clear_163 = Rule163Result(
-        status="CLEAR", no_new_capital=False, consider_trim=False
-    )
-    clear_164 = Rule164Result(
-        recommend_puts=False,
-        status="NOT_TRIGGERED",
-        conditions_met=0,
-        conditions=[],
-    )
-    return Section16Result(
-        ticker=ticker,
-        available=True,
-        overall_status="ALL_CLEAR",
-        rule_161=clear_161,
-        rule_162=clear_162,
-        rule_163=clear_163,
-        rule_164=clear_164,
-        any_exit_signal=False,
-        override_active=True,
-        override_reason=str(cycle_row.get("override_reason")),
-        override_set_by=(
-            str(cycle_row.get("override_set_by"))
-            if cycle_row.get("override_set_by")
-            else None
-        ),
-        override_set_at=cycle_row.get("override_set_at"),  # type: ignore[arg-type]
-        evaluated_at=now,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Active cycles summary
-# ---------------------------------------------------------------------------
-
-
-async def get_active_cycles(session: AsyncSession) -> ActiveCyclesSummary:
-    """Return all tickers with non-CLEAR exit rule cycle state."""
-    rows = (
-        await session.execute(
-            select(ExitRuleCycle).where(ExitRuleCycle.cycle_status != "CLEAR")
-        )
-    ).scalars().all()
-
-    entries = [
-        ActiveCycleEntry(
-            ticker=row.ticker,
-            cycle_status=row.cycle_status,
-            cycle_one_date=row.cycle_one_date,
-            cycle_one_score=row.cycle_one_score,
-            trim_triggered=row.trim_triggered,
-            full_exit_triggered=row.full_exit_triggered,
-            deferred_until=row.deferred_until,
-            override_active=row.override_active,
-        )
-        for row in rows
-    ]
-
-    return ActiveCyclesSummary(cycles=entries, total_active=len(entries))
-
-
-# ---------------------------------------------------------------------------
-# Decision trace writer
-# ---------------------------------------------------------------------------
-
-
-async def _log_section16_trace(
-    *,
-    session: AsyncSession,
-    ticker: str,
-    signal_type: str,
-    trigger: str,
-    resolution: str,
-) -> None:
-    """Append one immutable entry to decision_trace for a Section 16 event."""
-    entry = DecisionTrace(
-        timestamp_utc=datetime.now(tz=UTC),
-        trigger=trigger,
-        signal_type=signal_type,
-        ticker=ticker,
-        catalyst_type=None,
-        catalyst_date=None,
-        days_to_catalyst=None,
-        actions_blocked=None,
-        framework_states={"section16": resolution},
-        regime_snapshot=None,
-        data_freshness=None,
-        human_override=False,
-        override_reason=None,
-    )
-    session.add(entry)
+        row.track = track
+        row.assigned_by = assigned_by
+        row.notes = notes
     await session.flush()
+    return row
+
+
+async def get_rule4_today(
+    ticker: str, session: AsyncSession,
+) -> Rule4PortfolioFit | None:
+    today = datetime.now(tz=UTC).date()
+    res = await session.execute(
+        select(Rule4PortfolioFit).where(
+            Rule4PortfolioFit.ticker == ticker,
+            Rule4PortfolioFit.fit_date == today,
+        ),
+    )
+    return res.scalar_one_or_none()
+
+
+async def upsert_rule4_today(
+    ticker: str, fits_portfolio: bool, set_by: str,
+    cluster_gap: str | None, redundancy_check: str | None,
+    notes: str | None, session: AsyncSession,
+) -> Rule4PortfolioFit:
+    today = datetime.now(tz=UTC).date()
+    existing = await get_rule4_today(ticker, session)
+    if existing is None:
+        row = Rule4PortfolioFit(
+            ticker=ticker, fit_date=today,
+            fits_portfolio=fits_portfolio, set_by=set_by,
+            cluster_gap=cluster_gap, redundancy_check=redundancy_check,
+            notes=notes,
+        )
+        session.add(row)
+        await session.flush()
+        return row
+    existing.fits_portfolio = fits_portfolio
+    existing.set_by = set_by
+    existing.cluster_gap = cluster_gap
+    existing.redundancy_check = redundancy_check
+    existing.notes = notes
+    await session.flush()
+    return existing
+
+
+def _earnings_cycle_window(today: date, earnings_date: date | None) -> tuple[date, date]:
+    """Compute the (start, end) of the current earnings cycle.
+
+    When the next earnings date is known, the cycle ends on that date and
+    starts ~90 days prior (one quarter).  When unknown, the cycle is the
+    last 90 days ending today.
+    """
+    one_quarter_days = 90  # ~1 quarter — used only for cycle bookkeeping.
+    if earnings_date is None:
+        return today - timedelta(days=one_quarter_days), today
+    return earnings_date - timedelta(days=one_quarter_days), earnings_date
+
+
+async def is_override_used_in_cycle(
+    ticker: str, earnings_date: date | None, session: AsyncSession,
+) -> bool:
+    today = datetime.now(tz=UTC).date()
+    cycle_start, cycle_end = _earnings_cycle_window(today, earnings_date)
+    res = await session.execute(
+        select(OverrideUsageTracking).where(
+            OverrideUsageTracking.ticker == ticker,
+            OverrideUsageTracking.earnings_cycle_start == cycle_start,
+        ),
+    )
+    row = res.scalar_one_or_none()
+    if row is None:
+        # Track presence implicitly — if no row, override has not been used.
+        return False
+    _ = cycle_end  # cycle_end is held in DB row already
+    return bool(row.override_used)
+
+
+async def mark_override_used(
+    ticker: str, used_by: str, earnings_date: date | None,
+    notes: str | None, session: AsyncSession,
+) -> OverrideUsageTracking:
+    today = datetime.now(tz=UTC).date()
+    cycle_start, cycle_end = _earnings_cycle_window(today, earnings_date)
+    res = await session.execute(
+        select(OverrideUsageTracking).where(
+            OverrideUsageTracking.ticker == ticker,
+            OverrideUsageTracking.earnings_cycle_start == cycle_start,
+        ),
+    )
+    row = res.scalar_one_or_none()
+    now_utc = datetime.now(tz=UTC)
+    if row is None:
+        row = OverrideUsageTracking(
+            ticker=ticker,
+            earnings_cycle_start=cycle_start,
+            earnings_cycle_end=cycle_end,
+            override_used=True,
+            override_used_at=now_utc,
+            override_used_by=used_by,
+            notes=notes,
+        )
+        session.add(row)
+    else:
+        row.override_used = True
+        row.override_used_at = now_utc
+        row.override_used_by = used_by
+        row.notes = notes
+    await session.flush()
+    return row
+
+
+# ---------------------------------------------------------------------------
+# Live data fetchers — every evaluation hits the network.  No caching.
+# ---------------------------------------------------------------------------
+
+
+async def _http_get_json(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    return data if isinstance(data, dict) else {}
+
+
+async def fetch_f7_live(ticker: str) -> dict[str, Any]:
+    """Fetch Framework 7 (Earnings Gate) live for one ticker."""
+    return await _http_get_json(f"{_INTERNAL_BASE_URL}/api/v1/framework7/{ticker}")
+
+
+async def fetch_f9_live(ticker: str) -> dict[str, Any]:
+    """Fetch Framework 9 (Options Flow / Dark Pool) live for one ticker."""
+    return await _http_get_json(f"{_INTERNAL_BASE_URL}/api/v1/framework9/{ticker}")
+
+
+async def fetch_f30_live() -> dict[str, Any]:
+    """Fetch Framework 30 (NAV / drawdown) live."""
+    return await _http_get_json(f"{_INTERNAL_BASE_URL}/api/v1/framework30/drawdown")
+
+
+async def fetch_polygon_aggs(ticker: str, days_back: int) -> list[dict[str, Any]]:
+    """Fetch daily aggregates from Polygon for the trailing `days_back` days.
+
+    Returns the raw list of bar dicts (``{"t","o","h","l","c","v"}``).
+    Returns an empty list on network or API error so callers can degrade.
+    Retries up to 3 times with exponential backoff to handle transient
+    rate-limit (429) responses from Polygon when parallel requests fire.
+    """
+    import asyncio as _asyncio
+
+    api_key = get_settings().polygon_api_key or os.environ.get("POLYGON_API_KEY", "")
+    if not api_key:
+        logger.warning("POLYGON_API_KEY not set; cannot fetch %s aggs", ticker)
+        return []
+    today = datetime.now(tz=UTC).date()
+    start = today - timedelta(days=days_back)
+    url = (
+        f"{_POLYGON_BASE_URL}/v2/aggs/ticker/{ticker}/range/1/day/"
+        f"{start.isoformat()}/{today.isoformat()}"
+    )
+    _MAX_RETRIES: int = 3
+    for attempt in range(_MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=_POLYGON_TIMEOUT_SECONDS) as client:
+                resp = await client.get(url, params={"adjusted": "true", "apiKey": api_key})
+                resp.raise_for_status()
+                raw = resp.json()
+                data = raw if isinstance(raw, dict) else {}
+            results = data.get("results")
+            if isinstance(results, list) and len(results) > 0:
+                return list(results)
+            # Polygon returns status="OK" but empty results on rate-limit sometimes;
+            # treat an empty result on non-final attempts as retriable.
+            logger.warning(
+                "Polygon aggs empty for %s on attempt %d/%d (status=%s)",
+                ticker, attempt + 1, _MAX_RETRIES, data.get("status"),
+            )
+            if attempt < _MAX_RETRIES - 1:
+                wait = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
+                await _asyncio.sleep(wait)
+                continue
+            return list(results) if isinstance(results, list) else []
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
+                wait = 1.0 * (2 ** attempt)  # 1s, 2s, 4s on rate-limit
+                logger.warning(
+                    "Polygon 429 rate-limit for %s on attempt %d/%d; retrying in %.1fs",
+                    ticker, attempt + 1, _MAX_RETRIES, wait,
+                )
+                await _asyncio.sleep(wait)
+            else:
+                logger.warning("Polygon aggs fetch failed for %s: %s", ticker, exc)
+                return []
+        except httpx.HTTPError as exc:
+            logger.warning("Polygon aggs fetch failed for %s: %s", ticker, exc)
+            return []
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Signal extractors — pull the few fields we need from F9 payload.
+# ---------------------------------------------------------------------------
+
+
+def _extract_dark_pool_usd(f9: dict[str, Any]) -> float | None:
+    val = f9.get("largest_print_usd")
+    return float(val) if val is not None else None
+
+
+def _extract_flow_usd(f9: dict[str, Any]) -> float | None:
+    """Bullish call-side flow USD for the day from F9.
+
+    F9 exposes `largest_print_usd` for dark-pool prints; for options flow we
+    use the same magnitude proxy when flow_direction is bullish.  When F9
+    reports BEARISH or no flow, return None so Rule 1 fails cleanly.
+    """
+    direction = (f9.get("flow_direction") or "").upper()
+    if direction not in {"BULLISH", "STRONG_BULLISH"}:
+        return None
+    val = f9.get("largest_print_usd")
+    return float(val) if val is not None else None
+
+
+def _is_underweight(f9: dict[str, Any]) -> bool:
+    """Treat F9 signal_tier ∈ {LOW, NEUTRAL} or missing as underweight."""
+    tier = (f9.get("signal_tier") or "").upper()
+    return tier in {"LOW", "NEUTRAL", ""}
+
+
+def _is_strong_flow(f9: dict[str, Any]) -> bool:
+    tier = (f9.get("signal_tier") or "").upper()
+    direction = (f9.get("flow_direction") or "").upper()
+    return tier in {"HIGH", "STRONG"} and direction in {"BULLISH", "STRONG_BULLISH"}
+
+
+# ---------------------------------------------------------------------------
+# Rule evaluators — each returns its own structured result.
+# ---------------------------------------------------------------------------
+
+
+async def evaluate_rule1(
+    ticker: str, f9: dict[str, Any], f7: dict[str, Any],
+    session: AsyncSession,
+) -> Rule1Result:
+    """Rule 1 — catalyst conviction (priority-based signal threshold)."""
+    p1_days = await _cfg_int(_KEY_P1_EARN_DAYS, session)
+    p2_min = await _cfg_int(_KEY_P2_EARN_MIN, session)
+    p2_max = await _cfg_int(_KEY_P2_EARN_MAX, session)
+    p1_dark = await _cfg_float(_KEY_P1_DARK_USD, session)
+    p1_flow = await _cfg_float(_KEY_P1_FLOW_USD, session)
+    p2_dark = await _cfg_float(_KEY_P2_DARK_USD, session)
+    p2_flow = await _cfg_float(_KEY_P2_FLOW_USD, session)
+    p3_dark = await _cfg_float(_KEY_P3_DARK_USD, session)
+    p3_flow = await _cfg_float(_KEY_P3_FLOW_USD, session)
+
+    days = f7.get("days_to_earnings")
+    dark_usd = _extract_dark_pool_usd(f9)
+    flow_usd = _extract_flow_usd(f9)
+
+    # Priority 1: earnings within P1 window AND (dark>=P1 OR flow>=P1).
+    if isinstance(days, int) and 0 <= days <= p1_days and (
+        (dark_usd is not None and dark_usd >= p1_dark)
+        or (flow_usd is not None and flow_usd >= p1_flow)
+    ):
+        return Rule1Result(
+            result="PASS", priority_matched="PRIORITY_1",
+            dark_pool_usd=dark_usd, flow_usd=flow_usd,
+            days_to_earnings=days,
+            threshold_dark_pool_usd=p1_dark, threshold_flow_usd=p1_flow,
+            reason=f"Priority 1 met (earnings in {days}d).",
+        )
+
+    # Priority 2: earnings within P2 window AND (dark>=P2 OR flow>=P2).
+    if isinstance(days, int) and p2_min <= days <= p2_max and (
+        (dark_usd is not None and dark_usd >= p2_dark)
+        or (flow_usd is not None and flow_usd >= p2_flow)
+    ):
+        return Rule1Result(
+            result="PASS", priority_matched="PRIORITY_2",
+            dark_pool_usd=dark_usd, flow_usd=flow_usd,
+            days_to_earnings=days,
+            threshold_dark_pool_usd=p2_dark, threshold_flow_usd=p2_flow,
+            reason=f"Priority 2 met (earnings in {days}d).",
+        )
+
+    # Priority 3: no earnings constraint, requires BOTH dark AND flow above P3.
+    if (dark_usd is not None and dark_usd >= p3_dark) and (
+        flow_usd is not None and flow_usd >= p3_flow
+    ):
+        return Rule1Result(
+            result="PASS", priority_matched="PRIORITY_3",
+            dark_pool_usd=dark_usd, flow_usd=flow_usd,
+            days_to_earnings=days if isinstance(days, int) else None,
+            threshold_dark_pool_usd=p3_dark, threshold_flow_usd=p3_flow,
+            reason="Priority 3 met (strong dark-pool AND flow).",
+        )
+
+    return Rule1Result(
+        result="FAIL", priority_matched="NO_MATCH",
+        dark_pool_usd=dark_usd, flow_usd=flow_usd,
+        days_to_earnings=days if isinstance(days, int) else None,
+        threshold_dark_pool_usd=p1_dark, threshold_flow_usd=p1_flow,
+        reason=f"No priority matched for {ticker}.",
+    )
+
+
+async def evaluate_rule2(
+    f7: dict[str, Any], track: str, session: AsyncSession,
+) -> Rule2Result:
+    """Rule 2 — catalyst horizon (earnings within max-days window)."""
+    catalyst_max = await _cfg_int(_KEY_CATALYST_MAX_DAYS, session)
+    parabolic_window = await _cfg_int(_KEY_PARABOLIC_DAYS, session)
+
+    days = f7.get("days_to_earnings")
+    raw_date = f7.get("earnings_date")
+    earnings_dt: date | None = None
+    if isinstance(raw_date, str):
+        try:
+            earnings_dt = date.fromisoformat(raw_date[:10])
+        except ValueError:
+            earnings_dt = None
+
+    if not isinstance(days, int) or days < 0:
+        return Rule2Result(
+            result="UNKNOWN", days_to_earnings=None, earnings_date=earnings_dt,
+            catalyst_max_days=catalyst_max,
+            reason="No earnings date available from F7.",
+        )
+
+    is_parabolic = track == _TRACK_B and days <= parabolic_window
+    if days <= catalyst_max:
+        return Rule2Result(
+            result="PASS", days_to_earnings=days, earnings_date=earnings_dt,
+            catalyst_max_days=catalyst_max, parabolic_window=is_parabolic,
+            reason=f"Earnings in {days}d (≤ {catalyst_max}).",
+        )
+    return Rule2Result(
+        result="FAIL", days_to_earnings=days, earnings_date=earnings_dt,
+        catalyst_max_days=catalyst_max, parabolic_window=is_parabolic,
+        reason=f"Earnings in {days}d (> {catalyst_max}).",
+    )
+
+
+def _high_and_current_from_aggs(aggs: list[dict[str, Any]]) -> tuple[float | None, float | None]:
+    if not aggs:
+        return None, None
+    high = max((float(b.get("h", 0.0)) for b in aggs), default=None)
+    current = float(aggs[-1].get("c", 0.0)) if aggs else None
+    return high, current
+
+
+async def evaluate_rule3(
+    aggs: list[dict[str, Any]], session: AsyncSession,
+) -> Rule3Result:
+    """Rule 3 — price-position (block entries near 365d high without pullback)."""
+    near_high_pct = await _cfg_float(_KEY_RULE3_NEAR_HIGH, session)
+    pullback_pct = await _cfg_float(_KEY_RULE3_PULLBACK, session)
+
+    high, current = _high_and_current_from_aggs(aggs)
+    if high is None or current is None or high <= 0:
+        return Rule3Result(
+            result="UNKNOWN", current_price=current, high_365d=high,
+            pct_below_high=None, near_high_pct_threshold=near_high_pct,
+            pullback_pct_required=pullback_pct, pullback_pct_actual=None,
+            reason="Insufficient price history from Polygon.",
+        )
+
+    pct_below_high = (high - current) / high * 100.0
+    pullback_actual = pct_below_high
+
+    if pct_below_high < near_high_pct:
+        return Rule3Result(
+            result="FAIL", current_price=current, high_365d=high,
+            pct_below_high=pct_below_high,
+            near_high_pct_threshold=near_high_pct,
+            pullback_pct_required=pullback_pct,
+            pullback_pct_actual=pullback_actual,
+            reason=(
+                f"Price within {pct_below_high:.2f}% of 365d high "
+                f"(< {near_high_pct}% threshold)."
+            ),
+        )
+    if pct_below_high >= pullback_pct:
+        return Rule3Result(
+            result="PASS", current_price=current, high_365d=high,
+            pct_below_high=pct_below_high,
+            near_high_pct_threshold=near_high_pct,
+            pullback_pct_required=pullback_pct,
+            pullback_pct_actual=pullback_actual,
+            reason=(
+                f"Pullback of {pct_below_high:.2f}% from 365d high "
+                f"(≥ {pullback_pct}% required)."
+            ),
+        )
+    return Rule3Result(
+        result="PASS", current_price=current, high_365d=high,
+        pct_below_high=pct_below_high,
+        near_high_pct_threshold=near_high_pct,
+        pullback_pct_required=pullback_pct,
+        pullback_pct_actual=pullback_actual,
+        reason=(
+            f"Price {pct_below_high:.2f}% below 365d high "
+            f"(neutral zone)."
+        ),
+    )
+
+
+async def evaluate_rule4(ticker: str, session: AsyncSession) -> Rule4Result:
+    """Rule 4 — operator's portfolio-fit YES/NO must be set TODAY."""
+    row = await get_rule4_today(ticker, session)
+    if row is None:
+        return Rule4Result(
+            result="FAIL", fit_date=None, fits_portfolio=None,
+            reason="No portfolio-fit decision recorded for today.",
+        )
+    if not row.fits_portfolio:
+        return Rule4Result(
+            result="FAIL", fit_date=row.fit_date,
+            fits_portfolio=False, set_by=row.set_by,
+            cluster_gap=row.cluster_gap,
+            redundancy_check=row.redundancy_check,
+            reason="Operator marked ticker as not fitting portfolio.",
+        )
+    return Rule4Result(
+        result="PASS", fit_date=row.fit_date,
+        fits_portfolio=True, set_by=row.set_by,
+        cluster_gap=row.cluster_gap,
+        redundancy_check=row.redundancy_check,
+        reason="Operator confirmed portfolio fit for today.",
+    )
+
+
+async def evaluate_override(
+    ticker: str, f9: dict[str, Any], f7: dict[str, Any],
+    session: AsyncSession,
+) -> OverrideResult:
+    """Track-A-only override path — stronger flow within lookback window."""
+    ovr_dark = await _cfg_float(_KEY_OVR_DARK_USD, session)
+    ovr_flow = await _cfg_float(_KEY_OVR_FLOW_USD, session)
+    lookback = await _cfg_int(_KEY_OVR_LOOKBACK, session)
+
+    earnings_dt: date | None = None
+    raw_date = f7.get("earnings_date")
+    if isinstance(raw_date, str):
+        try:
+            earnings_dt = date.fromisoformat(raw_date[:10])
+        except ValueError:
+            earnings_dt = None
+
+    used = await is_override_used_in_cycle(ticker, earnings_dt, session)
+    dark_usd = _extract_dark_pool_usd(f9)
+    flow_usd = _extract_flow_usd(f9)
+
+    qualifies = (
+        (dark_usd is not None and dark_usd >= ovr_dark)
+        or (flow_usd is not None and flow_usd >= ovr_flow)
+    )
+
+    if used:
+        reason = "Override already consumed for this earnings cycle."
+    elif not qualifies:
+        reason = "Override thresholds not met by current F9 signals."
+    else:
+        reason = "Override available and qualifies."
+
+    return OverrideResult(
+        available=not used,
+        used_in_cycle=used,
+        qualifies=qualifies and not used,
+        dark_pool_usd=dark_usd,
+        flow_usd=flow_usd,
+        threshold_dark_pool_usd=ovr_dark,
+        threshold_flow_usd=ovr_flow,
+        lookback_days=lookback,
+        reason=reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Top-level orchestrator.
+# ---------------------------------------------------------------------------
+
+
+def _combine_track_a_gate(
+    rule1: Rule1Result, rule2: Rule2Result,
+    rule3: Rule3Result, rule4: Rule4Result,
+    override: OverrideResult,
+) -> tuple[GateResult, bool]:
+    """Return (gate, override_used) for Track A."""
+    rule1_pass = rule1.result == "PASS"
+    if not rule1_pass and override.qualifies:
+        rule1_pass = True
+        override_used = True
+    else:
+        override_used = False
+
+    all_pass = (
+        rule1_pass
+        and rule2.result == "PASS"
+        and rule3.result == "PASS"
+        and rule4.result == "PASS"
+    )
+    if all_pass:
+        return "PASS", override_used
+    if "UNKNOWN" in {rule2.result, rule3.result}:
+        return "UNKNOWN", override_used
+    return "FAIL", override_used
+
+
+def _combine_track_b_gate(
+    rule2: Rule2Result, rule4: Rule4Result,
+) -> GateResult:
+    """Track B uses only Rules 2 & 4 (with parabolic exception baked into Rule 2)."""
+    if rule2.result == "PASS" and rule4.result == "PASS":
+        return "PASS"
+    if "UNKNOWN" in {rule2.result, rule4.result}:
+        return "UNKNOWN"
+    return "FAIL"
+
+
+async def evaluate_section16(
+    ticker: str, session: AsyncSession,
+) -> Section16Result:
+    """Top-level entry-gate evaluation for one ticker.
+
+    Fetches F7, F9 in parallel + Polygon aggs (Track A only), then runs the
+    rule evaluators.  No data is cached — every call is a fresh evaluation.
+    """
+    track_str = await get_track_assignment(ticker, session)
+    track: TrackType
+    if track_str == _TRACK_A:
+        track = "TRACK_A"
+    elif track_str == _TRACK_B:
+        track = "TRACK_B"
+    else:
+        track = "UNASSIGNED"
+    now_utc = datetime.now(tz=UTC)
+
+    if track == "UNASSIGNED":
+        return Section16Result(
+            ticker=ticker, track="UNASSIGNED", gate="FAIL",
+            evaluated_at=now_utc,
+            notes="No track assignment recorded for this ticker.",
+        )
+
+    # Live fetches — F7 and F9 in parallel; Polygon only for Track A (Rule 3).
+    if track == "TRACK_A":
+        f7, f9, aggs = await asyncio.gather(
+            fetch_f7_live(ticker),
+            fetch_f9_live(ticker),
+            fetch_polygon_aggs(ticker, _POLYGON_HISTORY_DAYS),
+            return_exceptions=False,
+        )
+    else:
+        f7, f9 = await asyncio.gather(
+            fetch_f7_live(ticker),
+            fetch_f9_live(ticker),
+            return_exceptions=False,
+        )
+        aggs = []
+
+    rule2 = await evaluate_rule2(f7, track, session)
+    rule4 = await evaluate_rule4(ticker, session)
+
+    if track == "TRACK_A":
+        rule1 = await evaluate_rule1(ticker, f9, f7, session)
+        rule3 = await evaluate_rule3(aggs, session)
+        override = await evaluate_override(ticker, f9, f7, session)
+        gate_a, override_used = _combine_track_a_gate(
+            rule1, rule2, rule3, rule4, override,
+        )
+        return Section16Result(
+            ticker=ticker, track="TRACK_A", gate=gate_a,
+            rule1=rule1, rule2=rule2, rule3=rule3, rule4=rule4,
+            override=override, override_used=override_used,
+            evaluated_at=now_utc,
+        )
+
+    gate_b = _combine_track_b_gate(rule2, rule4)
+    return Section16Result(
+        ticker=ticker, track="TRACK_B", gate=gate_b,
+        rule2=rule2, rule4=rule4,
+        evaluated_at=now_utc,
+        notes="Track B: Rules 2 & 4 only (parabolic exception in Rule 2).",
+    )
+
+
+__all__ = [
+    "Decimal",  # re-export so type-checkers see the import is used
+    "evaluate_override",
+    "evaluate_rule1",
+    "evaluate_rule2",
+    "evaluate_rule3",
+    "evaluate_rule4",
+    "evaluate_section16",
+    "fetch_f7_live",
+    "fetch_f9_live",
+    "fetch_f30_live",
+    "fetch_polygon_aggs",
+    "get_rule4_today",
+    "get_track_assignment",
+    "is_override_used_in_cycle",
+    "mark_override_used",
+    "upsert_rule4_today",
+    "upsert_track_assignment",
+]

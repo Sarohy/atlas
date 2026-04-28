@@ -118,9 +118,9 @@ Cash Floor Enforcer
 Portfolio cash must remain above the currently-active regime floor per Section 14.1 (CLEAR 8-10%, SOFT CAUTION 15%, CAUTION 20%, CRISIS HALT 30%+). Supersedes prior hardcoded 15% floor.
 If cash < regime floor: no new buys until cash restored via sells or distributions
 12
-Catalyst No-Fly Zone
-Active catalyst event within 7 days on any holding
-No covered calls, no partial sells, no trims on affected names
+Catalyst No-Fly Zone + Section 16 Gatekeeper
+Active catalyst event within 7 days on any holding (No-Fly); all new adds must pass Section 16 two-track gatekeeper (Track A core names / Track B satellite names) and Framework 12 Decision Matrix before execution
+No covered calls, no partial sells, no trims on affected names within 7-day catalyst window. All buys must clear Section 16 gatekeeper rules and Decision Matrix sizing before execution. High-Conviction Underweight Override may waive Rule 3 for Track A names once per earnings cycle when dark pool ≥$25M OR options flow ≥$3.5M bullish AND allocation <5% NAV or below cluster target. See Section 16 for full Track A / Track B rules and Decision Matrix.
 13
 Concentration Gate
 Single name >8% NAV at market value (soft cap). Single name >10% NAV at market value (hard review). Grandfathering: positions above 8% soft cap at time of v7.2 framework adoption (April 2026) are grandfathered as HOLD — no forced sell, but no new adds. Grandfathered status expires if position grows beyond 125% of its current weight (e.g., MU at 13.6% today → grandfathered status expires if MU reaches 17.0%). Above 125% growth, standard trim rules apply.
@@ -1632,13 +1632,51 @@ Qualified at CAUTION threshold: SIVEF (59+), AEHR (owned), SIVE (57). Watchlist 
 
 
 
-Section 16: Exit Rules (v2.2 — Precedence of Truth Level 2)
+Section 16: Exit Rules + Framework 12 Gatekeeper (v2.3 — Updated April 24, 2026)
 PRECEDENCE OF TRUTH CLASSIFICATION: EXIT RULES ARE LEVEL 2 (FRAMEWORK BLOCK)
 Exit rules are classified as Level 2 (Framework Block) in the Section 4.4 Precedence of Truth hierarchy. This means they can be overridden by human written override with reason logged in Decision Trace, but they CANNOT be silently bypassed. Framework #12 (Catalyst No-Fly Zone) is also Level 2, creating a same-level conflict when an exit rule fires within 7 days of a catalyst. Resolution: Framework #12 defers the exit rule trim window by up to 10 trading days post-catalyst, but does NOT cancel the exit rule. The clock pauses, then resumes. This was verified by backtest — NBIS exit rule firing during April 29 earnings window is correctly deferred to post-earnings, not cancelled.
 
 
 THESE RULES WERE MISSING FROM ALL PRIOR VERSIONS
 The original ATLAS framework had no defined exit rules. The Opus 4.7 adversarial audit identified this as the most significant structural gap. Without defined exit rules, positions held based on entry logic alone with no systematic trigger for review. This section adds the missing exit layer.
+
+
+Section 16 – Gatekeeper (Two Tracks) — Framework 12 Entry Rules (v2.3, April 24, 2026)
+All new adds and incremental adds must clear the applicable track gatekeeper before the Framework 12 Decision Matrix determines sizing and timing.
+
+Track A – Core Resilient Names (AVGO, MRVL, LITE, MU, TSM, CIEN, VRT, COHR, FN, and similar)
+Must pass ALL 4 rules unless the High-Conviction Underweight Override applies:
+Rule 1 – Institutional Conviction
+  Priority 1 (earnings ≤ 14 days): Dark pool ≥ $15M OR Options flow ≥ $2M bullish
+  Priority 2 (earnings 15–45 days): Dark pool ≥ $20M OR Options flow ≥ $3M bullish
+  Priority 3 (no near-term earnings): Dark pool ≥ $40M AND options flow bullish
+Rule 2 – Catalyst Timing: Earnings or major event ≤ 45 days away (Alpha Vantage calendar)
+Rule 3 – Risk/Reward (Core Names): Stock is not within 5% of its 52-week high OR has already pulled back ≥ 8% from its recent high
+Rule 4 – Portfolio Fit: Fills a clear gap in existing clusters (power, optics, packaging, custom silicon, materials) and does not create redundancy
+
+High-Conviction Underweight Override (Track A Core Names Only)
+If BOTH conditions are met:
+  Exceptional institutional conviction: Dark pool ≥ $25M OR Options flow ≥ $3.5M bullish (last 5 trading days)
+  Portfolio is underweight: Current allocation < 5% of NAV OR below defined cluster target
+Then: Rule 3 is automatically waived for that trading day. Higher incremental add sizing applies (see Override rows in Decision Matrix). This override may be used ONCE per name per earnings cycle.
+
+Track B – Satellite / High-Beta Names (POET, AXTI, SIVE, FUWAY, SMTC, MXL, NVTS, VECO, and similar)
+No dark pool requirement (Rule 1 waived).
+No Rule 3 (Risk/Reward) requirement (waived).
+Must pass only Rules 2 and 4.
+Allowed even with zero dark pool flow and even if at or near all-time highs.
+High-Beta / Parabolic Exception (Track B, Priority 1b): If earnings or major catalyst ≤ 30 days and Rules 2 and 4 are passed, the name can be added even with zero dark pool.
+
+Framework 12 Decision Matrix (After Section 16 Gatekeeper Pass)
+Priority | Condition | Max Size (Incremental Add) | Timing Rule
+1-Override | Core Name + Earnings ≤ 14 days + Override conditions met | 1.75%–2.50% of NAV | Execute before the print
+2-Override | Core Name + Earnings 15–45 days + Override conditions met | 1.50%–2.00% of NAV | Immediately or on minor dip
+1 | Core Name + Earnings ≤ 14 days + passes Section 16 (no override) | 1.00%–1.50% of NAV | Execute before the print
+1b | Satellite/High-Beta name + earnings ≤ 30 days | 0.40%–0.60% of NAV | Execute before the print
+2 | Core Name + Earnings 15–45 days + underweight (no override) | 1.25%–1.75% of NAV | Only on dip to defined zone
+2b | Satellite + Earnings 15–45 days | 0.50%–0.75% of NAV | Only on dip to defined zone
+3 | Core Name + No immediate earnings but strong flow | 0.75%–1.00% of NAV | On 8–12% pullback
+4 | Passes Section 16 but extended or low urgency | 0% (watchlist only) | Set alerts, wait for deeper dip
 
 
 16.1 Score-Based Exit
@@ -1653,6 +1691,9 @@ Framework #12 deferral: If trim window falls within 7 days of an earnings or cat
 If any owned name gaps down more than 20% overnight: take NO action for 48 hours (prevent panic selling)
 Rescore at 72 hours using latest available data
 Apply score-based exit rule at 72 hours
+§16.1 cycle clock pauses during the 72h gap-down window, then resumes from where it paused.
+§16.4 protective puts are also frozen during the 48h window (buying puts post-gap locks in panic IV).
+Framework #12 catalyst deferral does NOT override §16.2 — even if the gap is caused by the catalyst, the 72h wait still applies.
 
 16.3 Appreciation Trim Rule
 No new capital deployed into any name already above 8% of combined NAV at market value

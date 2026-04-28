@@ -26,12 +26,13 @@ import { Framework29Card } from './framework29-card';
 import { Framework30Card } from './framework30-card';
 import { LeapsCard } from './leaps-card';
 import { Framework11Card } from './framework11-card';
-import { Framework12Card } from './framework12-card';
 import { Framework15Card } from './framework15-card';
 import { Framework17Card } from './framework17-card';
 import { Framework18Card } from './framework18-card';
 import { Framework19Card } from './framework19-card';
-import { Section16Panel } from './section16-panel';
+import { Section16Framework12Card } from './section16-framework12-card';
+import { TrackSelector } from './track-selector';
+import { FitSelector } from './fit-selector';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -84,7 +85,19 @@ export function FrameworksPanelsSection() {
   // the investor is seeing in the regime panel — no second independent fetch
   // (TanStack Query deduplicates: identical key, same cached response).
   const { data: regimeData } = useRegimeModifier(activeTicker, geopoliticalState);
-  const regimeRule = regimeData?.rule ?? 'NORMAL';
+  // Reject stale payloads from a previously selected ticker. TanStack Query
+  // keeps the previous result mounted during a refetch, so when the user
+  // switches dropdown selection the regime hook can briefly return the OLD
+  // ticker's data. Pairing that stale ``adjusted_score`` with the new
+  // ticker's ``final_score`` produces an impossible delta (e.g. MU's pre 77
+  // alongside TSEM's leftover adjusted 65 → −12 modifier, when the maximum
+  // by spec is −10). The response payload carries its own ticker; ignore
+  // anything that doesn't match the current selection.
+  const regimeForActive =
+    regimeData && regimeData.ticker.toUpperCase() === activeTicker.trim().toUpperCase()
+      ? regimeData
+      : null;
+  const regimeRule = regimeForActive?.rule ?? 'NORMAL';
 
   useEffect(() => {
     setActiveTicker(activeTicker);
@@ -138,17 +151,25 @@ export function FrameworksPanelsSection() {
             onChange={setSelectedTicker}
           />
         )}
+
+        {activeTicker !== EMPTY_TICKER && (
+          <>
+            <TrackSelector ticker={activeTicker} />
+            <FitSelector ticker={activeTicker} />
+          </>
+        )}
       </div>
 
       <div className="atlas-frameworks-secondary-row">
-        <Section16Panel ticker={activeTicker} />
+        <Section16Framework12Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-regime-panels-row">
         <FrameworkScorePanel
           ticker={activeTicker}
           onPreviewDetails={() => setDetailsOverlayOpen(true)}
-          regimeModifier={regimeData?.modifier ?? 0}
+          regimeModifier={regimeForActive?.modifier ?? 0}
+          regimeAdjustedScore={regimeForActive?.adjusted_score ?? null}
         />
 
         <RegimeModifierPanel
@@ -167,8 +188,8 @@ export function FrameworksPanelsSection() {
         <TrancheSizingPanel
           ticker={activeTicker}
           regimeRule={regimeRule}
-          brentPrice={regimeData?.brent_price ?? null}
-          brentConsecutiveBelow95Count={regimeData?.brent_consecutive_below_95_count ?? 0}
+          brentPrice={regimeForActive?.brent_price ?? null}
+          brentConsecutiveBelow95Count={regimeForActive?.brent_consecutive_below_95_count ?? 0}
           geopoliticalState={geopoliticalState}
         />
       </div>
@@ -187,7 +208,6 @@ export function FrameworksPanelsSection() {
         <Framework9Card ticker={activeTicker} />
         <LeapsCard ticker={activeTicker} />
         <Framework11Card />
-        <Framework12Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-frameworks-secondary-row">

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAnalyst } from '@/lib/hooks/use-analyst';
 import { useEarnings } from '@/lib/hooks/use-earnings';
@@ -9,6 +10,7 @@ import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import { useFramework9 } from '@/lib/hooks/use-framework9';
+import { useFramework8 } from '@/lib/hooks/use-framework8';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 
@@ -46,6 +48,15 @@ type FrameworkScorePanelProps = {
   onPreviewDetails: () => void;
   /** Score delta from Framework 2 regime modifier (-10, -5, 0, +5). */
   regimeModifier: number;
+  /**
+   * Authoritative post-regime conviction score from the backend
+   * (`/api/v1/regime-modifier/{ticker}.adjusted_score`). When provided this
+   * value is rendered as the headline score — same field every other
+   * F1-derived framework (F6/F7/F10) reads, guaranteeing display parity.
+   * Falls back to `clamp(final_score + regimeModifier)` when null/undefined
+   * (e.g. regime endpoint still loading or errored).
+   */
+  regimeAdjustedScore?: number | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -59,29 +70,138 @@ type FrameworkScorePanelProps = {
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
  */
-export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }: FrameworkScorePanelProps) {
-  const { data, isLoading, isError, error } = useFrameworkScore(ticker);
-  const { data: momentumData } = useMomentum(ticker);
-  const { data: earningsData } = useEarnings(ticker);
-  const { data: analystData } = useAnalyst(ticker);
-  const { data: optionsFlowData } = useOptionsFlow(ticker);
-  const { data: framework9Data } = useFramework9(ticker);
-  const { data: fundamentalData } = useFundamental(ticker);
+export function FrameworkScorePanel({
+  ticker,
+  onPreviewDetails,
+  regimeModifier,
+  regimeAdjustedScore = null,
+}: FrameworkScorePanelProps) {
+  const { data: rawData, isLoading, isError, error } = useFrameworkScore(ticker);
+  const { data: rawMomentum } = useMomentum(ticker);
+  const { data: rawEarnings } = useEarnings(ticker);
+  const { data: rawAnalyst } = useAnalyst(ticker);
+  const { data: rawOptionsFlow } = useOptionsFlow(ticker);
+  const { data: rawFramework9 } = useFramework9(ticker);
+  const { data: rawFundamental } = useFundamental(ticker);
+  const { data: rawFramework8 } = useFramework8(ticker);
+
+  // Guard against stale data from a previous ticker. TanStack Query keeps the
+  // last result mounted while the new ticker is fetching, so we must verify
+  // every payload carries the current ticker symbol before rendering it.
+  // Without this guard, factor scores from the previous ticker (e.g. SNDK)
+  // can leak into the freshly-selected ticker's panel — producing impossible
+  // pre/post-regime deltas like 75 → 73 (delta −2, while spec maximum is −10).
+  const tickerMatch = ticker.trim().toUpperCase();
+  const matchesActive = <T extends { ticker: string } | undefined | null>(
+    payload: T,
+  ): T | undefined =>
+    payload && payload.ticker.toUpperCase() === tickerMatch ? payload : undefined;
+
+  const data = matchesActive(rawData);
+  const momentumData = matchesActive(rawMomentum);
+  const earningsData = matchesActive(rawEarnings);
+  const analystData = matchesActive(rawAnalyst);
+  const optionsFlowData = matchesActive(rawOptionsFlow);
+  const framework9Data = matchesActive(rawFramework9);
+  const fundamentalData = matchesActive(rawFundamental);
+  const framework8Data = matchesActive(rawFramework8);
+
+  // ── Auto-refetch framework-score when F1-F5 OR F8 inputs change ─────────
+  // Per-factor hooks (F1 momentum, F2 earnings, F3 analyst, F4 options-flow /
+  // F9 override, F5 fundamental, F8 insider) own their own polling cadence.
+  // When any of them returns a different value than the last render, we
+  // invalidate the aggregate `framework-score` query so the backend
+  // recomputes raw_total / final_score / f5_capped with the fresh inputs.
+  // F8 is included so the panel re-renders when the insider flag toggles or
+  // the cap value changes (e.g. a new Form 4 just landed) even if no F1-F5
+  // score moved on its own. We compare against previously-seen values via a
+  // ref so we only fire on real changes (defined → different-defined), not
+  // on initial undefined → value transitions which would cause redundant
+  // fetches at mount.
+  const queryClient = useQueryClient();
+  const prevFactorScoresRef = useRef<{
+    f1: number | undefined;
+    f2: number | undefined;
+    f3: number | undefined;
+    f4: number | undefined;
+    f5: number | undefined;
+    f8FlagActive: boolean | undefined;
+    f8Cap: number | null | undefined;
+  }>({
+    f1: undefined,
+    f2: undefined,
+    f3: undefined,
+    f4: undefined,
+    f5: undefined,
+    f8FlagActive: undefined,
+    f8Cap: undefined,
+  });
+
+  const f1Score = momentumData?.f1_score ?? undefined;
+  const f2Score = earningsData?.f2_score ?? undefined;
+  const f3Score = analystData?.f3_score ?? undefined;
+  const f4Score = framework9Data?.f4_score ?? optionsFlowData?.f4_score ?? undefined;
+  const f5Score = fundamentalData?.f5_score ?? undefined;
+  const f8FlagActive = framework8Data?.flag_active ?? undefined;
+  const f8Cap = framework8Data?.f5_cap ?? undefined;
+
+  useEffect(() => {
+    const prev = prevFactorScoresRef.current;
+    const next = {
+      f1: f1Score,
+      f2: f2Score,
+      f3: f3Score,
+      f4: f4Score,
+      f5: f5Score,
+      f8FlagActive,
+      f8Cap,
+    };
+    const numericChanged = (['f1', 'f2', 'f3', 'f4', 'f5'] as const).some(
+      (k) => prev[k] !== undefined && next[k] !== undefined && prev[k] !== next[k],
+    );
+    const f8Changed =
+      (prev.f8FlagActive !== undefined &&
+        next.f8FlagActive !== undefined &&
+        prev.f8FlagActive !== next.f8FlagActive) ||
+      (prev.f8Cap !== undefined &&
+        next.f8Cap !== undefined &&
+        prev.f8Cap !== next.f8Cap);
+    prevFactorScoresRef.current = next;
+    if (numericChanged || f8Changed) {
+      void queryClient.invalidateQueries({ queryKey: ['framework-score', ticker] });
+    }
+  }, [
+    f1Score,
+    f2Score,
+    f3Score,
+    f4Score,
+    f5Score,
+    f8FlagActive,
+    f8Cap,
+    ticker,
+    queryClient,
+  ]);
+
+  // Gate the regime modifier on F8 having resolved. The backend's
+  // `final_score` (and its `regimeAdjustedScore`) reflects the F8 cap on F5,
+  // so applying the regime modifier before F8 has reported its flag/cap can
+  // briefly show a number computed from the wrong (uncapped) base. Once
+  // `framework8Data` lands, both the table values and the headline reflect
+  // the same cap state and we can safely subtract the regime modifier.
+  const f8Ready = framework8Data !== undefined;
+  const effectiveRegimeModifier = f8Ready ? regimeModifier : 0;
+  const effectiveRegimeAdjustedScore = f8Ready ? regimeAdjustedScore : null;
 
   const displayData = data
     ? buildDisplayFrameworkScore(
         data,
-        {
-          f1: momentumData?.f1_score,
-          f2: earningsData?.f2_score,
-          f3: analystData?.f3_score,
-          f4: framework9Data?.f4_score ?? optionsFlowData?.f4_score,
-          // When F8 cap is active, pass undefined so buildDisplayFactor leaves
-          // the API's already-capped factor.score (f5_cap_applied) untouched.
-          // Without this guard, fundamentalData.f5_score (raw) overwrites the cap.
-          f5: data.f5_capped ? undefined : fundamentalData?.f5_score,
-        },
-        regimeModifier,
+        // No per-factor overrides — trust the backend's authoritative
+        // `data.factors[].score` (F8 cap already applied when triggered) and
+        // `data.final_score`. The F5 row carries a "CAPPED BY F8" pill from
+        // `data.f5_capped` so the cap is visible without the panel having to
+        // recompute the score locally.
+        {},
+        effectiveRegimeModifier,
       )
     : undefined;
 
@@ -136,7 +256,8 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails, regimeModifier }
         {!isLoading && !isError && displayData && (
           <FrameworkScoreContent
             data={displayData}
-            regimeModifier={regimeModifier}
+            regimeModifier={effectiveRegimeModifier}
+            regimeAdjustedScore={effectiveRegimeAdjustedScore}
             f4GapBadge={data?.f4_data_gap_badge ?? null}
             f4GapMessage={data?.f4_data_gap_message ?? null}
           />
@@ -212,15 +333,24 @@ function DegradedBanner({
 function FrameworkScoreContent({
   data,
   regimeModifier,
+  regimeAdjustedScore,
   f4GapBadge,
   f4GapMessage,
 }: {
   data: FrameworkScoreResponse;
   regimeModifier: number;
+  regimeAdjustedScore: number | null;
   f4GapBadge: string | null;
   f4GapMessage: string | null;
 }) {
-  const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
+  // Headline = backend's authoritative `regimeAdjustedScore` (post-regime,
+  // post-F8 cap) when present, falling back to a local clamp(final_score +
+  // modifier) if the regime endpoint hasn't loaded yet. Both inputs reflect
+  // the same capped F5 so all three numbers (raw_total, pre-regime, headline)
+  // reconcile.
+  const adjustedScore =
+    regimeAdjustedScore ??
+    Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
 
   // Publish the exact score the investor sees so F6, F7, and any other panel
@@ -378,10 +508,8 @@ function buildDisplayFrameworkScore(
   const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
   const rawTotal = calculateRawTotal(factors);
   const finalScore = calculateFinalScore(rawTotal);
-  // Action label must match the DISPLAYED (regime-adjusted) score, not the
-  // pre-regime score. Using the pre-regime score here would make the label
-  // disagree with the number shown on screen (e.g. pre-regime 74 → GTC ADDS
-  // but displayed 69 which is Tier 3 → SMALL POSITION ONLY).
+  // F2 regime modifier RE-ENABLED — action label maps from regime-adjusted score
+  // so the pill matches the headline number.
   const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));
   const [action, actionTone] = mapAction(adjustedScore);
 

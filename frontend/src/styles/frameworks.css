@@ -8336,6 +8336,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.atlas-s16-f12-selectors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .atlas-s16-f12-body {
@@ -8356,9 +8364,9 @@
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #d6e1ec;
-  border-radius: 8px;
-  background: #fafcfe;
+  border: 1px solid #1e2d40;
+  border-radius: 5px;
+  background: #0b1623;
 }
 
 .atlas-s16-panel-header {
@@ -8377,15 +8385,15 @@
 .atlas-s16-panel-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #1a3050;
+  color: #e8edf5;
   margin: 0;
 }
 
 .atlas-s16-track-badge {
   font-size: 0.66rem;
   font-weight: 600;
-  color: #3d6080;
-  background: #e7eef6;
+  color: #94a3b8;
+  background: #1e2d40;
   padding: 2px 8px;
   border-radius: 10px;
   letter-spacing: 0.04em;
@@ -8402,18 +8410,21 @@
 }
 
 .is-s16-pass {
-  background: #d4f4dd;
-  color: #126c2c;
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .is-s16-fail {
-  background: #fddede;
-  color: #8a1a1a;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .is-s16-unknown {
-  background: #efe6c8;
-  color: #6a5510;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.35);
 }
 
 .atlas-s16-panel-body {
@@ -8424,14 +8435,14 @@
 
 .atlas-s16-state-msg {
   font-size: 0.72rem;
-  color: #3d6080;
+  color: #4b6070;
   padding: 12px 0;
   text-align: center;
   margin: 0;
 }
 
 .atlas-s16-state-msg--error {
-  color: #8a1a1a;
+  color: #ef4444;
 }
 
 /* --- per-rule chips --- */
@@ -8462,7 +8473,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #3d6080;
+  color: #94a3b8;
 }
 
 .atlas-s16-rule-chip-value {
@@ -8472,24 +8483,27 @@
 }
 
 .atlas-s16-rule-chip.is-s16-pass {
-  background: #d4f4dd;
-  color: #126c2c;
+  background: rgba(34, 197, 94, 0.10);
+  border-color: rgba(34, 197, 94, 0.30);
+  color: #22c55e;
 }
 
 .atlas-s16-rule-chip.is-s16-fail {
-  background: #fddede;
-  color: #8a1a1a;
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.30);
+  color: #ef4444;
 }
 
 .atlas-s16-rule-chip.is-s16-unknown {
-  background: #efe6c8;
-  color: #6a5510;
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.30);
+  color: #f59e0b;
 }
 
 .atlas-s16-rule-chip.is-s16-na {
-  background: #e8ecef;
-  border-color: #d0d8de;
-  color: #8a9ba8;
+  background: #1e2d40;
+  border-color: #334155;
+  color: #4b6070;
   opacity: 0.7;
 }
 
@@ -8498,16 +8512,18 @@
   align-self: flex-start;
   font-size: 0.7rem;
   font-weight: 600;
-  color: #2c5a8a;
+  color: #94a3b8;
   background: transparent;
-  border: 1px solid #c0d2e4;
+  border: 1px solid #1e2d40;
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-s16-detail-toggle:hover {
-  background: #eef4fa;
+  background: #0b1623;
+  border-color: #334155;
 }
 
 .atlas-s16-rule-details {
@@ -8521,14 +8537,15 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px;
-  background: #f3f7fb;
-  border-radius: 6px;
+  background: #070e18;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
 }
 
 .atlas-s16-rule-block-title {
   font-size: 0.7rem;
   font-weight: 700;
-  color: #1a3050;
+  color: #e8edf5;
 }
 
 .atlas-s16-rule-detail {
@@ -8539,8 +8556,9 @@
 
 .atlas-s16-rule-line {
   font-size: 0.7rem;
-  color: #3d6080;
+  color: #94a3b8;
   line-height: 1.35;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 /* --- override block --- */
@@ -8549,25 +8567,25 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  border: 1px dashed #b8a76a;
-  background: #fbf7e6;
-  border-radius: 6px;
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.06);
+  border-radius: 4px;
 }
 
 .atlas-s16-override-title {
   font-size: 0.72rem;
   font-weight: 700;
-  color: #6a5510;
+  color: #f59e0b;
 }
 
 .atlas-s16-override-reason {
   font-size: 0.7rem;
-  color: #6a5510;
+  color: #fde68a;
 }
 
 .atlas-s16-override-meta {
   font-size: 0.66rem;
-  color: #6a5510;
+  color: #f59e0b;
   opacity: 0.85;
 }
 
@@ -8577,7 +8595,7 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 8px;
-  border-top: 1px solid #e2eaf2;
+  border-top: 1px solid #1e2d40;
 }
 
 .atlas-s16-controls-row {
@@ -8590,24 +8608,28 @@
 .atlas-s16-controls-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #3d6080;
+  color: #94a3b8;
   margin-right: 4px;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-s16-btn {
   font-size: 0.68rem;
   font-weight: 600;
-  color: #1a3050;
-  background: #fff;
-  border: 1px solid #c0d2e4;
+  color: #94a3b8;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   letter-spacing: 0.04em;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-s16-btn:hover:not(:disabled) {
-  background: #eef4fa;
+  background: #111c2d;
+  border-color: #334155;
+  color: #e8edf5;
 }
 
 .atlas-s16-btn:disabled {
@@ -8616,9 +8638,9 @@
 }
 
 .atlas-s16-btn.is-s16-btn-active {
-  background: #2c5a8a;
-  color: #fff;
-  border-color: #2c5a8a;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
 }
 
 /* --- Framework 12 panel --- */
@@ -8627,9 +8649,9 @@
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #d6e1ec;
-  border-radius: 8px;
-  background: #fafcfe;
+  border: 1px solid #1e2d40;
+  border-radius: 5px;
+  background: #0b1623;
 }
 
 .atlas-f12-panel-header {
@@ -8642,7 +8664,7 @@
 .atlas-f12-panel-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #1a3050;
+  color: #e8edf5;
   margin: 0;
 }
 
@@ -8656,23 +8678,27 @@
 }
 
 .is-f12-sized {
-  background: #d4f4dd;
-  color: #126c2c;
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
 }
 
 .is-f12-watchlist {
-  background: #d8e6f5;
-  color: #1a3d6a;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
 .is-f12-blocked {
-  background: #fddede;
-  color: #8a1a1a;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 .is-f12-unknown {
-  background: #efe6c8;
-  color: #6a5510;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .atlas-f12-panel-body {
@@ -8683,14 +8709,14 @@
 
 .atlas-f12-state-msg {
   font-size: 0.72rem;
-  color: #3d6080;
+  color: #4b6070;
   padding: 12px 0;
   text-align: center;
   margin: 0;
 }
 
 .atlas-f12-state-msg--error {
-  color: #8a1a1a;
+  color: #ef4444;
 }
 
 .atlas-f12-blocked {
@@ -8698,19 +8724,21 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px;
-  background: #fdf3f3;
-  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 4px;
 }
 
 .atlas-f12-blocked-label {
   font-size: 0.74rem;
   font-weight: 700;
-  color: #8a1a1a;
+  color: #ef4444;
 }
 
 .atlas-f12-blocked-reason {
   font-size: 0.7rem;
-  color: #6a3030;
+  color: #fca5a5;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-sizing {
@@ -8728,16 +8756,19 @@
 .atlas-f12-priority-code {
   font-size: 0.74rem;
   font-weight: 700;
-  color: #2c5a8a;
-  background: #eef4fa;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.10);
+  border: 1px solid rgba(56, 189, 248, 0.25);
   padding: 2px 8px;
   border-radius: 4px;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-priority-label {
   font-size: 0.74rem;
   font-weight: 600;
-  color: #1a3050;
+  color: #e8edf5;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-size-block {
@@ -8745,20 +8776,23 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  background: #eef4fa;
-  border-radius: 6px;
+  background: #070e18;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
 }
 
 .atlas-f12-size-range {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #126c2c;
+  color: #22c55e;
   letter-spacing: 0.02em;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-size-pct {
   font-size: 0.7rem;
-  color: #3d6080;
+  color: #94a3b8;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-timing {
@@ -8773,13 +8807,15 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #3d6080;
+  color: #4b6070;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-timing-rule {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #1a3050;
+  color: #e8edf5;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-meta-row {
@@ -8790,11 +8826,12 @@
 
 .atlas-f12-meta {
   font-size: 0.66rem;
-  color: #3d6080;
+  color: #4b6070;
+  font-family: var(--font-ibm-plex-mono), monospace;
 }
 
 .atlas-f12-meta.is-f12-meta-warn {
-  color: #8a5510;
+  color: #f59e0b;
   font-weight: 600;
 }
 

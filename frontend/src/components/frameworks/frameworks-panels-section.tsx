@@ -31,8 +31,6 @@ import { Framework17Card } from './framework17-card';
 import { Framework18Card } from './framework18-card';
 import { Framework19Card } from './framework19-card';
 import { Section16Framework12Card } from './section16-framework12-card';
-import { TrackSelector } from './track-selector';
-import { FitSelector } from './fit-selector';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
 
@@ -152,16 +150,6 @@ export function FrameworksPanelsSection() {
           />
         )}
 
-        {activeTicker !== EMPTY_TICKER && (
-          <>
-            <TrackSelector ticker={activeTicker} />
-            <FitSelector ticker={activeTicker} />
-          </>
-        )}
-      </div>
-
-      <div className="atlas-frameworks-secondary-row">
-        <Section16Framework12Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-regime-panels-row">
@@ -208,6 +196,10 @@ export function FrameworksPanelsSection() {
         <Framework9Card ticker={activeTicker} />
         <LeapsCard ticker={activeTicker} />
         <Framework11Card />
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <Section16Framework12Card ticker={activeTicker} />
       </div>
 
       <div className="atlas-frameworks-secondary-row">

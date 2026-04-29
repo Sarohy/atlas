@@ -7,6 +7,8 @@ import {
   useSection16,
   useUseOverride,
 } from '@/lib/hooks/use-section16';
+import { FitSelector } from './fit-selector';
+import { TrackSelector } from './track-selector';
 import type { Framework12Result } from '@/lib/schemas/framework12';
 import type {
   GateResult,
@@ -405,6 +407,10 @@ export function Section16Framework12Card({ ticker }: Section16Framework12CardPro
           <span className="atlas-fws-subtitle">
             Section 16 → Framework 12 · {ticker}
           </span>
+        </div>
+        <div className="atlas-s16-f12-selectors">
+          <TrackSelector ticker={ticker} />
+          <FitSelector ticker={ticker} />
         </div>
       </header>
 

@@ -324,7 +324,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
           <p className="atlas-f15-status-headline">
             VIX data unavailable.
             {!data.polygon_available && ' Polygon.io feed offline.'}
-            {!data.f2_available && ' Framework 2 regime unavailable.'}
+            {!data.regime_available && ' Framework 2 regime unavailable.'}
             {' '}Orders blocked for safety.
           </p>
         )}
@@ -366,7 +366,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       )}
 
       {/* ── Section 5: Override panel (halt active, no override yet) ───── */}
-      {data.f15_active === true && !data.override_applied && (
+      {data.f15_active === true && !data.override_active && (
         <div className="atlas-f15-override-panel" data-testid="f15-override-panel">
           <h4 className="atlas-f15-section-heading">Human Override</h4>
           <p className="atlas-f15-override-warning">
@@ -386,16 +386,13 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       )}
 
       {/* ── Section 5b: Override already applied ──────────────────────── */}
-      {data.override_applied && (
+      {data.override_active && (
         <div className="atlas-f15-override-applied" data-testid="f15-override-applied">
           <span className="atlas-f15-override-badge">OVERRIDE APPLIED</span>
           {data.override_reason && (
             <p className="atlas-f15-override-reason">
               Reason: {data.override_reason}
             </p>
-          )}
-          {data.override_applied_at && (
-            <p className="atlas-f15-override-ts">At {data.override_applied_at}</p>
           )}
         </div>
       )}
@@ -418,14 +415,13 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       {/* ── Section 7: Data source badges ──────────────────────────────── */}
       <div className="atlas-f15-sources" data-testid="f15-sources">
         <DataSourceBadge label="POLYGON" available={data.polygon_available} />
-        <DataSourceBadge label="F2 REGIME" available={data.f2_available} />
-        <DataSourceBadge label="ORDER DB" available={data.order_db_available} />
+        <DataSourceBadge label="F2 REGIME" available={data.regime_available} />
       </div>
 
       {/* ── Warnings ───────────────────────────────────────────────────── */}
-      {data.warnings.length > 0 && (
+      {data.warning_messages.length > 0 && (
         <ul className="atlas-f15-warnings" data-testid="f15-warnings">
-          {data.warnings.map((w, i) => (
+          {data.warning_messages.map((w, i) => (
             <li key={i} className="atlas-f15-warning-item">
               {w}
             </li>

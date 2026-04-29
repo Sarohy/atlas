@@ -76,18 +76,15 @@ export const framework15ResultSchema = z.object({
   paused_orders_count: z.number(),
 
   // Override
-  override_applied: z.boolean(),
+  override_active: z.boolean(),
   override_reason: z.string().nullable(),
-  override_applied_at: z.string().nullable(),
 
   // Regime context
-  regime_at_trigger: z.string().nullable(),
+  regime: z.string().nullable(),
   regime_available: z.boolean(),
 
   // Data quality
   polygon_available: z.boolean(),
-  f2_available: z.boolean(),
-  order_db_available: z.boolean(),
   data_gap_severity: z.string(),
 
   // Market state
@@ -97,7 +94,7 @@ export const framework15ResultSchema = z.object({
   // Meta
   last_updated: z.string(),
   cache_hit: z.boolean(),
-  warnings: z.array(z.string()),
+  warning_messages: z.array(z.string()),
 });
 
 // ---------------------------------------------------------------------------

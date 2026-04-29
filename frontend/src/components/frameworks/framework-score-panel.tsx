@@ -190,17 +190,30 @@ export function FrameworkScorePanel({
   // the same cap state and we can safely subtract the regime modifier.
   const f8Ready = framework8Data !== undefined;
   const effectiveRegimeModifier = f8Ready ? regimeModifier : 0;
-  const effectiveRegimeAdjustedScore = f8Ready ? regimeAdjustedScore : null;
+
+  // Apply the F8 cap to the individual-hook F5 score so the summary table
+  // and the F5 detail card always show the same capped value.
+  const f5DisplayOverride =
+    f5Score !== undefined
+      ? f8FlagActive === true && typeof f8Cap === 'number'
+        ? Math.min(f5Score, f8Cap)
+        : f5Score
+      : undefined;
 
   const displayData = data
     ? buildDisplayFrameworkScore(
         data,
-        // No per-factor overrides — trust the backend's authoritative
-        // `data.factors[].score` (F8 cap already applied when triggered) and
-        // `data.final_score`. The F5 row carries a "CAPPED BY F8" pill from
-        // `data.f5_capped` so the cap is visible without the panel having to
-        // recompute the score locally.
-        {},
+        // Use individual-hook scores as overrides so the summary table rows
+        // always match the detail-card values — both now read from the same
+        // per-factor API calls rather than the aggregate endpoint's independent
+        // computation. F5 has the F8 cap applied above before being passed in.
+        {
+          f1: f1Score,
+          f2: f2Score,
+          f3: f3Score,
+          f4: f4Score,
+          f5: f5DisplayOverride,
+        },
         effectiveRegimeModifier,
       )
     : undefined;
@@ -257,7 +270,6 @@ export function FrameworkScorePanel({
           <FrameworkScoreContent
             data={displayData}
             regimeModifier={effectiveRegimeModifier}
-            regimeAdjustedScore={effectiveRegimeAdjustedScore}
             f4GapBadge={data?.f4_data_gap_badge ?? null}
             f4GapMessage={data?.f4_data_gap_message ?? null}
           />
@@ -333,24 +345,22 @@ function DegradedBanner({
 function FrameworkScoreContent({
   data,
   regimeModifier,
-  regimeAdjustedScore,
   f4GapBadge,
   f4GapMessage,
 }: {
   data: FrameworkScoreResponse;
   regimeModifier: number;
-  regimeAdjustedScore: number | null;
   f4GapBadge: string | null;
   f4GapMessage: string | null;
 }) {
-  // Headline = backend's authoritative `regimeAdjustedScore` (post-regime,
-  // post-F8 cap) when present, falling back to a local clamp(final_score +
-  // modifier) if the regime endpoint hasn't loaded yet. Both inputs reflect
-  // the same capped F5 so all three numbers (raw_total, pre-regime, headline)
-  // reconcile.
-  const adjustedScore =
-    regimeAdjustedScore ??
-    Math.max(0, Math.min(100, data.final_score + regimeModifier));
+  // Headline is always computed locally from the individual-hook-based
+  // `data.final_score` + the regime delta.  The backend `adjusted_score`
+  // from the regime endpoint is NOT used here because it is derived from
+  // the aggregate framework-score endpoint's base (a separate computation
+  // that can diverge from the per-factor hook values shown in the table).
+  // Using the local computation guarantees the three numbers reconcile:
+  //   factor rows → raw_total → pre-regime → headline.
+  const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
 
   // Publish the exact score the investor sees so F6, F7, and any other panel
@@ -513,6 +523,14 @@ function buildDisplayFrameworkScore(
   const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));
   const [action, actionTone] = mapAction(adjustedScore);
 
+  // When the individual-hook F5 score is used as an override and F8 is active,
+  // update f5_raw_score to reflect the hook's value so the cap note is accurate.
+  const f5Override = scoreOverrides['f5'];
+  const f5RawScore =
+    data.f5_capped && f5Override !== undefined && f5Override !== null
+      ? f5Override
+      : data.f5_raw_score;
+
   return {
     ...data,
     factors,
@@ -520,6 +538,7 @@ function buildDisplayFrameworkScore(
     final_score: finalScore,
     action,
     action_tone: actionTone,
+    f5_raw_score: f5RawScore,
   };
 }
 

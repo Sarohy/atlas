@@ -32,6 +32,7 @@ import { Framework18Card } from './framework18-card';
 import { Section16Framework12Card } from './section16-framework12-card';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
+import { useFramework8 } from '@/lib/hooks/use-framework8';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -95,6 +96,12 @@ export function FrameworksPanelsSection() {
       ? regimeData
       : null;
   const regimeRule = regimeForActive?.rule ?? 'NORMAL';
+
+  const { data: rawFramework8 } = useFramework8(activeTicker);
+  const framework8ForActive =
+    rawFramework8 && rawFramework8.ticker.toUpperCase() === activeTicker.trim().toUpperCase()
+      ? rawFramework8
+      : undefined;
 
   useEffect(() => {
     setActiveTicker(activeTicker);
@@ -261,7 +268,11 @@ export function FrameworksPanelsSection() {
               <F3AnalystPanel ticker={activeTicker} />
               <F4OptionsPanel ticker={activeTicker} />
             </div>
-            <F5FundamentalPanel ticker={activeTicker} />
+            <F5FundamentalPanel
+              ticker={activeTicker}
+              f8FlagActive={framework8ForActive?.flag_active}
+              f8Cap={framework8ForActive?.f5_cap}
+            />
           </div>
         </div>
       </div>

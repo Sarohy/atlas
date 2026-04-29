@@ -9,7 +9,6 @@ import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
-import { useFramework9 } from '@/lib/hooks/use-framework9';
 import { useFramework8 } from '@/lib/hooks/use-framework8';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
@@ -81,7 +80,6 @@ export function FrameworkScorePanel({
   const { data: rawEarnings } = useEarnings(ticker);
   const { data: rawAnalyst } = useAnalyst(ticker);
   const { data: rawOptionsFlow } = useOptionsFlow(ticker);
-  const { data: rawFramework9 } = useFramework9(ticker);
   const { data: rawFundamental } = useFundamental(ticker);
   const { data: rawFramework8 } = useFramework8(ticker);
 
@@ -102,7 +100,6 @@ export function FrameworkScorePanel({
   const earningsData = matchesActive(rawEarnings);
   const analystData = matchesActive(rawAnalyst);
   const optionsFlowData = matchesActive(rawOptionsFlow);
-  const framework9Data = matchesActive(rawFramework9);
   const fundamentalData = matchesActive(rawFundamental);
   const framework8Data = matchesActive(rawFramework8);
 
@@ -140,7 +137,10 @@ export function FrameworkScorePanel({
   const f1Score = momentumData?.f1_score ?? undefined;
   const f2Score = earningsData?.f2_score ?? undefined;
   const f3Score = analystData?.f3_score ?? undefined;
-  const f4Score = framework9Data?.f4_score ?? optionsFlowData?.f4_score ?? undefined;
+  // Match the F4 detail-card source exactly (useOptionsFlow). The F9 override
+  // is shown in its own card; mixing it into the summary table caused a
+  // mismatch between the F1 summary row and the F4 detail panel.
+  const f4Score = optionsFlowData?.f4_score ?? undefined;
   const f5Score = fundamentalData?.f5_score ?? undefined;
   const f8FlagActive = framework8Data?.flag_active ?? undefined;
   const f8Cap = framework8Data?.f5_cap ?? undefined;
@@ -546,14 +546,19 @@ function buildDisplayFactor(
   factor: FactorBreakdown,
   overrideScore: number | null | undefined,
 ): FactorBreakdown {
-  if (overrideScore === undefined || overrideScore === null || !factor.available) {
+  if (overrideScore === undefined || overrideScore === null) {
     return factor;
   }
 
+  // When a fresh per-factor hook score is available, use it even if the
+  // aggregate framework-score endpoint returned `available: false` for this
+  // factor (e.g. AV momentarily empty during the aggregate call). The hook
+  // has its own data, so the row is no longer unavailable.
   return {
     ...factor,
     score: overrideScore,
     contribution: overrideScore * factor.weight,
+    available: true,
   };
 }
 
@@ -599,15 +604,15 @@ function FactorRow({
   f5CapSource?: string | null;
 }) {
   const gradeTone =
-    factor.grade === 'STRONG BUY'
+    factor.grade === 'STRONG BUY' || factor.grade === 'STRONG'
       ? 'is-green'
-      : factor.grade === 'BUY'
+      : factor.grade === 'BUY' || factor.grade === 'GOOD'
         ? 'is-cyan'
         : factor.grade === 'NEUTRAL'
           ? 'is-yellow'
           : factor.grade === 'WEAK'
             ? 'is-orange'
-            : 'is-red';
+            : 'is-red'; // DISTRESSED / AVOID / unknown
 
   return (
     <div

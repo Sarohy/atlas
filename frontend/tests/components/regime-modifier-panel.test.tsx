@@ -1,144 +1,159 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RegimeModifierPanel } from '@/components/frameworks/regime-modifier-panel';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const useRegimeModifierMock = vi.fn();
 
-function createWrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return function Wrapper({ children }: { children: React.ReactNode }) {
-    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  };
-}
+vi.mock('@/lib/hooks/use-regime-modifier', () => ({
+  useRegimeModifier: (...args: unknown[]) => useRegimeModifierMock(...args),
+}));
 
 function renderPanel(ticker = 'AAPL') {
-  return render(<RegimeModifierPanel ticker={ticker} />, { wrapper: createWrapper() });
+  return render(
+    <RegimeModifierPanel
+      ticker={ticker}
+      geopoliticalState="ACTIVE_RISK"
+      onGeopoliticalStateChange={vi.fn()}
+    />,
+  );
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('RegimeModifierPanel', () => {
   it('renders the panel header', () => {
+    useRegimeModifierMock.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      error: null,
+    });
+
     renderPanel();
     expect(screen.getByText('Framework 2')).toBeInTheDocument();
   });
 
-  it('renders the war zone toggle button', () => {
-    renderPanel();
-    const toggle = screen.getByTestId('regime-war-toggle');
-    expect(toggle).toBeInTheDocument();
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    expect(toggle).toHaveTextContent('WAR ZONE');
-  });
-
   it('shows loading state while fetching', () => {
+    useRegimeModifierMock.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      error: null,
+    });
+
     renderPanel();
     expect(screen.getByTestId('regime-loading')).toBeInTheDocument();
   });
 
-  it('renders regime content after data resolves', async () => {
+  it('renders regime content after data resolves', () => {
+    mockLoadedRegime();
     renderPanel();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('regime-content')).toBeInTheDocument();
-    });
+    expect(screen.getByTestId('regime-content')).toBeInTheDocument();
   });
 
-  it('displays Brent crude price', async () => {
+  it('displays Brent crude price', () => {
+    mockLoadedRegime();
     renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
 
-    expect(screen.getByTestId('regime-brent')).toBeInTheDocument();
     expect(screen.getByTestId('regime-brent')).toHaveTextContent('$97.50');
   });
 
-  it('displays VIX value', async () => {
+  it('displays VIX value', () => {
+    mockLoadedRegime();
     renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
 
     expect(screen.getByTestId('regime-vix')).toHaveTextContent('27.30');
   });
 
-  it('displays the triggered rule badge', async () => {
+  it('shows the determination text', () => {
+    mockLoadedRegime();
     renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
 
-    expect(screen.getByTestId('regime-rule-badge')).toHaveTextContent('RULE 2 — CAUTION');
+    expect(screen.getByTestId('regime-determination')).toHaveTextContent('CAUTION regime from');
   });
 
-  it('shows the score delta label', async () => {
+  it('does NOT show GEO PENALTY ACTIVE badge when special_case_active is false', () => {
+    mockLoadedRegime();
     renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
 
-    expect(screen.getByTestId('regime-delta')).toHaveTextContent('−5 pts');
+    expect(screen.queryByTestId('regime-geo-penalty-badge')).not.toBeInTheDocument();
   });
 
-  it('displays only the human-readable regime value in the hero area', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
-
-    expect(screen.getByTestId('regime-rule-value')).toHaveTextContent('CAUTION');
-    expect(screen.queryByTestId('regime-base-score')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('regime-adjusted-score')).not.toBeInTheDocument();
-  });
-
-  it('shows cash guidance when a rule is triggered', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
-
-    expect(screen.getByTestId('regime-cash-block')).toBeInTheDocument();
-    expect(screen.getByTestId('regime-cash-pct')).toHaveTextContent('25%');
-    expect(screen.getByTestId('regime-cash-pct')).toHaveTextContent('35%');
-  });
-
-  it('shows USD cash guidance when ticker position value is available', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
-
-    expect(screen.getByTestId('regime-cash-usd')).toHaveTextContent('$25,000');
-    expect(screen.getByTestId('regime-cash-usd')).toHaveTextContent('$35,000');
-  });
-
-  it('shows output text instruction', async () => {
-    renderPanel();
-    await waitFor(() => screen.getByTestId('regime-content'));
-
-    expect(screen.getByTestId('regime-output-text')).toHaveTextContent('must stay in cash');
-  });
-
-  it('toggling war flag changes button state to active', async () => {
-    const user = userEvent.setup();
+  it('shows GEO PENALTY ACTIVE badge when special_case_active is true', () => {
+    mockLoadedRegimeEscalating();
     renderPanel();
 
-    const toggle = screen.getByTestId('regime-war-toggle');
-    await user.click(toggle);
-
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveTextContent('WAR ACTIVE');
-  });
-
-  it('shows WAR ACTIVE badge in market row when war is on', async () => {
-    const user = userEvent.setup();
-    renderPanel();
-
-    // Toggle war on, then wait for the refetch to settle
-    await user.click(screen.getByTestId('regime-war-toggle'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('regime-war-badge')).toBeInTheDocument();
-    });
+    expect(screen.getByTestId('regime-geo-penalty-badge')).toHaveTextContent('GEO PENALTY ACTIVE');
   });
 
   it('does not fetch when ticker is empty', () => {
+    useRegimeModifierMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
+
     renderPanel('');
-    // Loading state should not appear because query is disabled
     expect(screen.queryByTestId('regime-loading')).not.toBeInTheDocument();
   });
+
+  it('does not render a direct soft caution picker', () => {
+    mockLoadedRegime();
+    renderPanel();
+
+    expect(screen.queryByRole('button', { name: /soft caution/i })).not.toBeInTheDocument();
+  });
 });
+
+function mockLoadedRegime() {
+  useRegimeModifierMock.mockReturnValue({
+    data: {
+      brent_consecutive_below_95_count: 2,
+      brent_price: 97.5,
+      vix_value: 27.3,
+      rule: 'CAUTION',
+      effective_regime: 'CAUTION',
+      modifier: -5,
+      geopolitical_state: 'ACTIVE_RISK',
+      determination_text: 'CAUTION regime from Brent/VIX data. Brent streak below $95: 2. Geo flag: ACTIVE_RISK. Modifier: -5.',
+      brent_condition: '$97.50 — $95-110 (CAUTION trigger)',
+      vix_condition: '27.30 — 24-35 (CAUTION trigger)',
+      geo_condition: 'ACTIVE_RISK',
+      trigger_logic: 'OR — either Brent or VIX triggers',
+      modifier_reason: 'CAUTION + ACTIVE RISK → −5',
+      special_case_active: false,
+      cash_floor_pct: 0.20,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+  });
+}
+
+function mockLoadedRegimeEscalating() {
+  useRegimeModifierMock.mockReturnValue({
+    data: {
+      brent_consecutive_below_95_count: 0,
+      brent_price: 97.5,
+      vix_value: 27.3,
+      rule: 'CAUTION',
+      effective_regime: 'CAUTION',
+      modifier: -7,
+      geopolitical_state: 'ESCALATING',
+      determination_text: 'CAUTION regime from Brent/VIX data. Brent streak below $95: 0. Geo flag: ESCALATING. Modifier: -7. GEO PENALTY ACTIVE: CAUTION + ESCALATING geo → −7.',
+      brent_condition: '$97.50 — $95-110 (CAUTION trigger)',
+      vix_condition: '27.30 — 24-35 (CAUTION trigger)',
+      geo_condition: 'ESCALATING',
+      trigger_logic: 'OR — either Brent or VIX triggers',
+      modifier_reason: 'CAUTION + Escalating geo → −7',
+      special_case_active: true,
+      cash_floor_pct: 0.20,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+  });
+}
+
+

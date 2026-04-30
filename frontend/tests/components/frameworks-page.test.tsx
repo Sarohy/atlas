@@ -14,6 +14,14 @@ function wrapper(children: React.ReactNode) {
   );
 }
 
+function getOverviewCard(label: string) {
+  const card = screen.getByText(label).closest('article');
+  if (card === null) {
+    throw new Error(`Missing overview card for ${label}`);
+  }
+  return within(card);
+}
+
 describe('Frameworks page', () => {
   async function renderPage() {
     render(wrapper(await FrameworksPage()));
@@ -46,6 +54,18 @@ describe('Frameworks page', () => {
     expect(screen.queryByText('Live Diplomatic Signals')).not.toBeInTheDocument();
     expect(screen.queryByText('DEAL / EXTENSION')).not.toBeInTheDocument();
     expect(screen.queryByText('ESCALATION')).not.toBeInTheDocument();
+  });
+
+  it('shows coming soon placeholders in deferred overview cards', async () => {
+    await renderPage();
+
+    expect(getOverviewCard('Oil Map').getByText('Comming soon...')).toBeInTheDocument();
+    expect(getOverviewCard('Geopolitical').getByText('Comming soon...')).toBeInTheDocument();
+    expect(getOverviewCard('Capitulation').getByText('Comming soon...')).toBeInTheDocument();
+    expect(screen.queryByText('YLW/ORNG')).not.toBeInTheDocument();
+    expect(screen.queryByText('IRAN DAY 27')).not.toBeInTheDocument();
+    expect(screen.queryByText('3 / 5')).not.toBeInTheDocument();
+    expect(screen.queryByText('Brent $97 · spiking today +5%')).not.toBeInTheDocument();
   });
 
   it('opens a framework details overlay when the framework score eye icon is clicked', async () => {

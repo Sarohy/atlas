@@ -6,10 +6,10 @@ import type {
   AnalystCoverageIndicator,
   AnalystResponse,
   ConsensusRatingIndicator,
-  PtRevisionIndicator,
+  PtDirectionIndicator,
   PtUpsideIndicator,
+  RecentUpgradesIndicator,
 } from '@/lib/schemas/analyst';
-
 // ---------------------------------------------------------------------------
 // Named constants
 // ---------------------------------------------------------------------------
@@ -17,13 +17,15 @@ import type {
 /** Number of score bar segments representing the full 0-100 scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Map F3 grade string to CSS tone class name. */
+/** Map consensus label string to CSS tone class name. */
 const GRADE_TONE: Record<string, string> = {
   'STRONG BUY': 'is-green',
   BUY: 'is-cyan',
   NEUTRAL: 'is-yellow',
   WEAK: 'is-orange',
   AVOID: 'is-red',
+  HOLD: 'is-yellow',
+  SELL: 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -36,13 +38,12 @@ type F3AnalystPanelProps = {
 };
 
 /**
- * F3 Analyst Conviction panel — receives the active ticker from the shared
- * selector and shows analyst consensus, coverage count, price-target upside,
- * and PT revision direction plus the weighted F3 composite score.
+ * F3 Analyst Conviction panel — v7.3.4 base-score + modifier approach.
  *
- * Four sub-indicators per Factor_Mapping_Guide:
- *   Consensus Rating (35%) | Analyst Count (10%)
- *   PT vs Current Price (30%) | PT Revision Direction (25%)
+ * Five sub-indicators:
+ *   Consensus Rating (base score) | Analyst Coverage (modifier)
+ *   PT Direction (modifier) | Recent Upgrades (modifier)
+ *   PT Upside (adjustment)
  *
  * Data source: Benzinga (consensus + calendar ratings) + Polygon (price).
  */
@@ -114,7 +115,10 @@ function EmptyState({ ticker }: { ticker: string }) {
 // ---------------------------------------------------------------------------
 
 function AnalystContent({ data }: { data: AnalystResponse }) {
-  const gradeTone = GRADE_TONE[data.f3_grade] ?? 'is-yellow';
+  // Use consensus label (e.g. "BUY") for header display — NOT f3_grade which is
+  // derived from the numeric score alone and can disagree with the consensus label.
+  const consensusLabel = data.consensus_rating.label;
+  const gradeTone = GRADE_TONE[consensusLabel] ?? 'is-yellow';
 
   return (
     <div className="atlas-f3-content" data-testid="f3-content">
@@ -135,8 +139,13 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
             className={cn('atlas-frameworks-pill atlas-f3-grade-pill', gradeTone)}
             data-testid="f3-grade"
           >
-            {data.f3_grade}
+            {consensusLabel}
           </span>
+          {data.override_applied && (
+            <span className="atlas-f3-override-chip" data-testid="f3-override-chip">
+              HIGH CONSENSUS OVERRIDE
+            </span>
+          )}
           <span className="atlas-f3-label-sub">Analyst Conviction</span>
         </div>
       </div>
@@ -144,12 +153,13 @@ function AnalystContent({ data }: { data: AnalystResponse }) {
       {/* Score bar */}
       <ScoreBar score={data.f3_score} gradeTone={gradeTone} />
 
-      {/* Four weighted indicator cards */}
+      {/* Five indicator cards */}
       <div className="atlas-f3-indicators">
         <ConsensusRatingCard consensus={data.consensus_rating} />
         <AnalystCoverageCard coverage={data.analyst_coverage} />
+        <PtDirectionCard ptDirection={data.pt_direction} />
+        <RecentUpgradesCard recent={data.recent_upgrades} />
         <PtUpsideCard pt={data.pt_upside} />
-        <PtRevisionCard revision={data.pt_revision} />
       </div>
     </div>
   );
@@ -186,26 +196,21 @@ function ScoreBar({ score, gradeTone }: { score: number | null; gradeTone: strin
 
 type IndicatorCardProps = {
   label: string;
-  score: number | null;
-  maxScore: number;
+  modifier?: number | null;
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps) {
+function IndicatorCard({ label, modifier, children }: IndicatorCardProps) {
+  const testId = `f3-indicator-${label.toLowerCase().replace(/[\s/]+/g, '-')}`;
   return (
-    <article
-      className="atlas-f3-indicator"
-      data-testid={`f3-indicator-${label.toLowerCase().replace(/[\s/]+/g, '-')}`}
-    >
+    <article className="atlas-f3-indicator" data-testid={testId}>
       <header className="atlas-f3-indicator-header">
         <span className="atlas-f3-indicator-label">{label}</span>
-        <span className="atlas-f3-indicator-score">
-          {score !== null ? (
-            <>{score}<span className="atlas-f3-indicator-max">/{maxScore}</span></>
-          ) : (
-            <span className="atlas-f3-indicator-na">N/A</span>
-          )}
-        </span>
+        {modifier !== undefined && modifier !== null && (
+          <span className={cn('atlas-f3-indicator-modifier', modifier >= 0 ? 'is-cyan' : 'is-red')}>
+            {modifier >= 0 ? `+${modifier}` : modifier}
+          </span>
+        )}
       </header>
       <div className="atlas-f3-indicator-body">{children}</div>
     </article>
@@ -217,12 +222,10 @@ function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps)
 // ---------------------------------------------------------------------------
 
 function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicator }) {
-  const weightedScore = consensus.score !== null ? Math.round(consensus.score * consensus.weight) : null;
   return (
     <IndicatorCard
       label="Consensus Rating"
-      score={weightedScore}
-      maxScore={Math.round(consensus.weight * 100)}
+      modifier={consensus.base_score}
     >
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
@@ -276,21 +279,16 @@ function ConsensusRatingCard({ consensus }: { consensus: ConsensusRatingIndicato
 }
 
 function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator }) {
-  const weightedScore = coverage.score !== null ? Math.round(coverage.score * coverage.weight) : null;
   return (
-    <IndicatorCard
-      label="Analyst Count"
-      score={weightedScore}
-      maxScore={Math.round(coverage.weight * 100)}
-    >
+    <IndicatorCard label="Analyst Coverage" modifier={coverage.modifier}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Analysts</dt>
           <dd className={coverageTone(coverage.num_analysts)}>
-            {coverage.score !== null && coverage.num_analysts > 0 ? coverage.num_analysts : 'No data found'}
+            {coverage.num_analysts > 0 ? coverage.num_analysts : 'No data found'}
           </dd>
         </div>
-        {coverage.score !== null && (
+        {coverage.num_analysts > 0 && (
           <div className="atlas-f3-dl-row">
             <dt>Reliability</dt>
             <dd>{coverageLabel(coverage.num_analysts)}</dd>
@@ -301,21 +299,90 @@ function AnalystCoverageCard({ coverage }: { coverage: AnalystCoverageIndicator 
   );
 }
 
-function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
-  const weightedScore = pt.score !== null ? Math.round(pt.score * pt.weight) : null;
+function PtDirectionCard({ ptDirection }: { ptDirection: PtDirectionIndicator }) {
+  const isNoData = ptDirection.direction_label === 'NO_DATA';
   return (
-    <IndicatorCard
-      label="PT vs Current Price"
-      score={weightedScore}
-      maxScore={Math.round(pt.weight * 100)}
-    >
+    <IndicatorCard label="PT Direction" modifier={ptDirection.modifier}>
+      <dl className="atlas-f3-dl">
+        <div className="atlas-f3-dl-row">
+          <dt>Signal</dt>
+          <dd
+            className={isNoData ? 'is-muted' : ptDirectionTone(ptDirection.direction_label)}
+            data-testid="f3-pt-direction-label"
+          >
+            {isNoData ? 'No data found' : ptDirection.direction_label}
+          </dd>
+        </div>
+        {!isNoData && (
+          <>
+            <div className="atlas-f3-dl-row">
+              <dt>Raises (30d)</dt>
+              <dd
+                className={
+                  ptDirection.raises_30d >= 2
+                    ? 'is-green'
+                    : ptDirection.raises_30d === 1
+                      ? 'is-cyan'
+                      : ''
+                }
+              >
+                {ptDirection.raises_30d}
+              </dd>
+            </div>
+            <div className="atlas-f3-dl-row">
+              <dt>Lowers (30d)</dt>
+              <dd className={ptDirection.lowers_30d > 0 ? 'is-red' : ''}>
+                {ptDirection.lowers_30d}
+              </dd>
+            </div>
+          </>
+        )}
+      </dl>
+    </IndicatorCard>
+  );
+}
+
+function RecentUpgradesCard({ recent }: { recent: RecentUpgradesIndicator }) {
+  return (
+    <IndicatorCard label="Recent Upgrades" modifier={recent.modifier}>
+      <dl className="atlas-f3-dl">
+        <div className="atlas-f3-dl-row">
+          <dt>Net (30d)</dt>
+          <dd className={recent.net_upgrades_30d > 0 ? 'is-green' : recent.net_upgrades_30d < 0 ? 'is-red' : ''}>
+            {recent.net_upgrades_30d > 0 ? `+${recent.net_upgrades_30d}` : recent.net_upgrades_30d}
+          </dd>
+        </div>
+        <div className="atlas-f3-dl-row">
+          <dt>Upgrades / Downgrades</dt>
+          <dd>
+            {recent.upgrades_30d} / {recent.downgrades_30d}
+          </dd>
+        </div>
+      </dl>
+    </IndicatorCard>
+  );
+}
+
+function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
+  // Derive CSS class from the band token or band string — never from the sign
+  // of upside_pct. A negative upside (price above target) in the neutral zone
+  // must show grey, not red.
+  const upside_cls = upsideBandClass(pt.price_vs_target_band, pt.upside_color);
+  return (
+    <IndicatorCard label="PT Upside" modifier={pt.adjustment}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
           <dt>Upside</dt>
-          <dd className={upsideTone(pt.upside_pct)}>
+          <dd className={upside_cls}>
             {pt.upside_pct !== null ? formatPct(pt.upside_pct) : 'No data found'}
           </dd>
         </div>
+        {pt.price_vs_target_band != null && (
+          <div className="atlas-f3-dl-row">
+            <dt>Band</dt>
+            <dd className={cn('atlas-f3-pt-band', upside_cls)}>{pt.price_vs_target_band}</dd>
+          </div>
+        )}
         {pt.current_price !== null && (
           <div className="atlas-f3-dl-row">
             <dt>Current Price</dt>
@@ -327,45 +394,6 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
             <dt>Consensus PT</dt>
             <dd>{formatPrice(pt.consensus_pt)}</dd>
           </div>
-        )}
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function PtRevisionCard({ revision }: { revision: PtRevisionIndicator }) {
-  const isNoData = revision.revision_label === 'NO DATA';
-  const weightedScore = revision.score !== null ? Math.round(revision.score * revision.weight) : null;
-  return (
-    <IndicatorCard
-      label="PT Revision Direction"
-      score={weightedScore}
-      maxScore={Math.round(revision.weight * 100)}
-    >
-      <dl className="atlas-f3-dl">
-        <div className="atlas-f3-dl-row">
-          <dt>Signal</dt>
-          <dd className={isNoData ? 'is-muted' : revisionTone(revision.revision_label)} data-testid="f3-revision-label">
-            {isNoData ? 'No data found' : revision.revision_label}
-          </dd>
-        </div>
-        {!isNoData && (
-          <>
-            <div className="atlas-f3-dl-row">
-              <dt>Raises (30d)</dt>
-              <dd
-                className={
-                  revision.raises_30d >= 2 ? 'is-green' : revision.raises_30d === 1 ? 'is-cyan' : ''
-                }
-              >
-                {revision.raises_30d}
-              </dd>
-            </div>
-            <div className="atlas-f3-dl-row">
-              <dt>Lowers (30d)</dt>
-              <dd className={revision.lowers_30d > 0 ? 'is-red' : ''}>{revision.lowers_30d}</dd>
-            </div>
-          </>
         )}
       </dl>
     </IndicatorCard>
@@ -393,27 +421,52 @@ function consensusTone(label: string): string {
   return '';
 }
 
-function upsideTone(upside: number | null): string {
-  if (upside === null) return '';
-  if (upside > 30) return 'is-green';
-  if (upside >= 15) return 'is-cyan';
-  if (upside >= 5) return 'is-yellow';
-  if (upside >= 0) return 'is-orange';
-  return 'is-red';
+/**
+ * Map band token or band display string to a CSS class.
+ *
+ * Priority 1 — `upside_color` token from the API (e.g. 'NEUTRAL', 'GREEN').
+ * Priority 2 — `price_vs_target_band` display string from the API
+ *              (e.g. 'At target — neutral (0)').
+ *
+ * NEVER derives class from the sign of upside_pct.
+ * A negative upside inside the neutral band must return 'atlas-f3-upside-neutral'
+ * (grey), not any red class.
+ *
+ * CSS classes are defined in frameworks.css under the
+ * '/* Upside band colour classes *\/' block.
+ */
+function upsideBandClass(
+  band: string | null | undefined,
+  upsideColor?: string | null,
+): string {
+  // Priority 1: explicit upside_color token from the API
+  if (upsideColor === 'GREEN') return 'atlas-f3-upside-green';
+  if (upsideColor === 'LIGHT_GREEN') return 'atlas-f3-upside-light-green';
+  if (upsideColor === 'NEUTRAL') return 'atlas-f3-upside-neutral';
+  if (upsideColor === 'AMBER') return 'atlas-f3-upside-amber';
+  if (upsideColor === 'RED') return 'atlas-f3-upside-red';
+  // Priority 2: derive from the band display string
+  if (!band) return 'atlas-f3-upside-neutral';
+  if (band.startsWith('20%+ below')) return 'atlas-f3-upside-green';
+  if (band.startsWith('10-20% below')) return 'atlas-f3-upside-light-green';
+  if (band.startsWith('At target')) return 'atlas-f3-upside-neutral';
+  if (band.startsWith('10-20% above')) return 'atlas-f3-upside-amber';
+  if (band.startsWith('20%+ above')) return 'atlas-f3-upside-red';
+  return 'atlas-f3-upside-neutral';
 }
 
-function revisionTone(label: string): string {
-  if (label === 'MULTIPLE RAISES') return 'is-green';
-  if (label === '1 RAISE') return 'is-cyan';
-  if (label === 'NO CHANGE') return 'is-yellow';
-  return 'is-red'; // LOWERED
+function ptDirectionTone(label: string): string {
+  if (label === 'MULTIPLE_RAISES') return 'is-green';
+  if (label === 'SINGLE_RAISE') return 'is-cyan';
+  if (label === 'NO_CHANGE') return 'is-yellow';
+  return 'is-red';
 }
 
 function coverageTone(count: number): string {
   if (count > 20) return 'is-green';
   if (count >= 10) return 'is-cyan';
   if (count >= 5) return 'is-yellow';
-  return 'is-orange'; // <5 — capped at 40 pts
+  return 'is-orange';
 }
 
 function coverageLabel(count: number): string {

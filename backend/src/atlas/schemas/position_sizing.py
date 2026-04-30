@@ -8,16 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class PositionSizingResponse(BaseModel):
     """Response from the Framework 3 position-sizing endpoint.
 
-    Maps a Framework 1 conviction score to a human-readable position action
-    and a descriptive instruction string.
-
-    Score-to-action map (Factor_Mapping_Guide §Framework3):
-      > 90        MAXIMUM POSITION      — Add on every dip
-      80 – 90     HOLD FULL             — Eligible for adds
-      70 – 79     HOLD                  — No new adds
-      60 – 69     REDUCE 25-50%         — Reduce 25-50%
-      55 – 59     REDUCE AGGRESSIVELY   — Reduce aggressively
-      < 55        EXIT                  — Exit immediately
+    Score-to-action map (v7.3.4):
+      >= 85       TIER_1         — Core position, LEAPS eligible
+      78 - 84     TIER_2_GREY    - Grey zone, 3-model consensus required
+      70 - 77     TIER_2         - GTC adds permitted
+      55 - 69     TIER_3         - Small position only
+      < 55        WATCHLIST      — Exit rules active (see Framework 16)
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -28,13 +24,30 @@ class PositionSizingResponse(BaseModel):
         le=100,
         description="Framework 1 conviction score used as input (0-100).",
     )
-    action: str = Field(
+    tier: str = Field(
         description=(
-            "Position action derived from the conviction score: "
-            "'MAXIMUM POSITION' | 'HOLD FULL' | 'HOLD' | "
-            "'REDUCE 25-50%' | 'REDUCE AGGRESSIVELY' | 'EXIT'."
+            "Position tier: 'TIER_1' | 'TIER_2_GREY' | 'TIER_2' | 'TIER_3' | 'WATCHLIST'."
         ),
     )
-    instruction: str = Field(
-        description="Human-readable instruction for the action.",
+    action: str = Field(description="Short action label for the position tier.")
+    grey_zone: bool = Field(
+        description="True when the score falls in the 78-84 consensus-required band.",
+    )
+    consensus_required: bool = Field(
+        description="True when 3-model consensus is needed before adding.",
+    )
+    trigger_exit_rules: bool = Field(
+        description="True for WATCHLIST tier — see Framework 16 for exit rules.",
+    )
+    adds_permitted: bool = Field(
+        description=("True when new adds are permitted given tier, cap, and consensus state."),
+    )
+    leaps_eligible: bool = Field(
+        description="True for TIER_1 positions without a concentration cap block.",
+    )
+    display_message: str = Field(
+        description="Human-readable guidance sentence for the current position state.",
+    )
+    consensus_confirmed: bool = Field(
+        description=("True when the 3-model consensus gate has been confirmed for this ticker."),
     )

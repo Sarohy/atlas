@@ -117,4 +117,20 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('72');
     expect(screen.getByTestId('fws-score')).toHaveTextContent('72');
   });
+
+  it('shows both the pre-regime framework score and the post-regime displayed score', async () => {
+    render(
+      <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={-5} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-score')).toHaveTextContent('67');
+    expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('72');
+    expect(screen.getByTestId('fws-regime-adjusted-score')).toHaveTextContent('67');
+    expect(screen.getByText('Framework score before regime')).toBeInTheDocument();
+    expect(screen.getByText('Displayed after regime modifier')).toBeInTheDocument();
+  });
 });

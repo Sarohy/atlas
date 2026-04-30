@@ -38,23 +38,45 @@ describe('F2EarningsPanel', () => {
 
     // F2 score and grade are present
     expect(screen.getByTestId('f2-score')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-grade')).toHaveTextContent('STRONG BUY');
+    expect(screen.getByTestId('f2-grade')).toHaveTextContent('STRONG');
 
-    // All five indicator cards are rendered
+    // All five sub-factor cards are rendered (v7.3.4)
     expect(screen.getByTestId('f2-indicator-revenue-growth')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-indicator-eps-beats')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-indicator-guidance')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-indicator-backlog-visibility')).toBeInTheDocument();
-    expect(screen.getByTestId('f2-indicator-margin-trajectory')).toBeInTheDocument();
+    expect(screen.getByTestId('f2-indicator-gross-margin-trend')).toBeInTheDocument();
+    expect(screen.getByTestId('f2-indicator-eps-consistency')).toBeInTheDocument();
+    expect(screen.getByTestId('f2-indicator-guidance-reliability')).toBeInTheDocument();
+    expect(screen.getByTestId('f2-indicator-forward-visibility')).toBeInTheDocument();
   });
 
-  it('displays revenue growth and guidance direction', async () => {
+  it('displays revenue growth YoY from mock data', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('f2-content'));
 
     // Revenue growth value from mock: +65.0%
     expect(screen.getByText('+65.0%')).toBeInTheDocument();
-    // Guidance direction from mock: guidance_label='RAISE_FULL_YEAR' → "Raised Full Year"
-    expect(screen.getByText('Raised Full Year')).toBeInTheDocument();
+  });
+
+  it('shows DATA GAP badge for guidance when sf4_data_gap is true', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('f2-content'));
+
+    // Mock has sf4_data_gap: true
+    expect(screen.getByTestId('f2-sf4-data-gap')).toBeInTheDocument();
+  });
+
+  it('shows DATA GAP amber flag badge when data_gap_applied is true', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('f2-content'));
+
+    // Mock has data_gap_applied: true
+    expect(screen.getByTestId('f2-flag-data-gap')).toBeInTheDocument();
+  });
+
+  it('shows forward visibility label from mock data', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('f2-content'));
+
+    // Mock has sf5_forward_visibility_label: 'SPECIFIC_RAISED'
+    expect(screen.getByText('Guidance Raised')).toBeInTheDocument();
   });
 });

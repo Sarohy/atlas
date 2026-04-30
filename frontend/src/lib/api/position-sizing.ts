@@ -7,8 +7,13 @@ import {
 export function fetchPositionSizing(
   ticker: string,
   baseScore?: number,
+  concentrationCapActive?: boolean,
 ): Promise<PositionSizingResponse> {
   const path = `/api/v1/position-sizing/${encodeURIComponent(ticker.toUpperCase())}`;
-  const url = baseScore !== undefined ? `${path}?base_score=${baseScore}` : path;
+  const params = new URLSearchParams();
+  if (baseScore !== undefined) params.set('base_score', String(baseScore));
+  if (concentrationCapActive) params.set('concentration_cap_active', 'true');
+  const query = params.toString();
+  const url = query ? `${path}?${query}` : path;
   return apiFetch(url, positionSizingResponseSchema);
 }

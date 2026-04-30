@@ -107,6 +107,32 @@
   line-height: 1.7;
 }
 
+.atlas-briefing-geopolitical-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.atlas-briefing-geopolitical-option {
+  padding: 0.75rem 0.5rem;
+  border: 1px solid var(--atlas-portfolio-border);
+  border-radius: 4px;
+  background: #0b1623;
+  color: #94a3b8;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
+}
+
+.atlas-briefing-geopolitical-option.is-active {
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
 .atlas-briefing-trigger-row {
   padding: 0.38rem 0;
   border-bottom: 1px solid var(--atlas-portfolio-divider);

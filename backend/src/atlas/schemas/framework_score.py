@@ -115,5 +115,59 @@ class FrameworkScoreResponse(BaseModel):
     )
     degraded: bool = Field(
         default=False,
-        description="True when F2 or F5 used fallback scores due to an Alpha Vantage rate-limit. Do not cache this response.",
+        description=(
+            "True when F2 or F5 used fallback scores due to an Alpha Vantage "
+            "rate-limit. Do not cache this response."
+        ),
+    )
+    f4_data_gap_badge: str | None = Field(
+        default=None,
+        description=(
+            "Short badge label propagated from Framework 9 "
+            "when options data is incomplete."
+        ),
+    )
+    f4_data_gap_message: str | None = Field(
+        default=None,
+        description="Human-readable message explaining the F4 data gap.",
+    )
+    f4_data_gap_tooltip: str | None = Field(
+        default=None,
+        description="Detailed tooltip text for the F4 data gap badge.",
+    )
+
+    # --- Framework 8 insider cap sync fields ---
+    f5_raw_score: int | None = Field(
+        default=None,
+        description=(
+            "Raw F5 score before any Framework 8 insider cap is applied. "
+            "Null when F5 could not be computed."
+        ),
+    )
+    f5_capped: bool = Field(
+        default=False,
+        description=(
+            "True when Framework 8 insider flag is active and F5 raw score "
+            "exceeded the cap."
+        ),
+    )
+    f5_cap_applied: int | None = Field(
+        default=None,
+        description="The Framework 8 cap value that was applied to F5. Null when no cap active.",
+    )
+    f5_cap_source: str | None = Field(
+        default=None,
+        description="Human-readable description of why the F5 cap was applied.",
+    )
+    f8_available: bool = Field(
+        default=False,
+        description="True when Framework 8 was successfully fetched for this evaluation.",
+    )
+    f8_flag_active: bool | None = Field(
+        default=None,
+        description="Framework 8 insider flag status. Null when F8 was unavailable.",
+    )
+    f8_stale: bool = Field(
+        default=False,
+        description="True when Framework 8 data exceeded the staleness threshold.",
     )

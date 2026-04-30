@@ -2,23 +2,14 @@
 
 import { cn } from '@/lib/utils';
 import { useEarnings } from '@/lib/hooks/use-earnings';
-import type {
-  BacklogBtbIndicator,
-  EarningsResponse,
-  EpsBeatsIndicator,
-  GuidanceIndicator,
-  MarginTrajectoryIndicator,
-  RevenueGrowthIndicator,
-} from '@/lib/schemas/earnings';
+import type { EarningsResponse } from '@/lib/schemas/earnings';
 
 // ---------------------------------------------------------------------------
-// Named constants — UI labels and score thresholds
+// Named constants
 // ---------------------------------------------------------------------------
 
-/** Number of score bar segments representing the full 0-100 scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Map F2 grade string to CSS tone class name used across the design system. */
 const GRADE_TONE: Record<string, string> = {
   'STRONG BUY': 'is-green',
   BUY: 'is-cyan',
@@ -27,38 +18,20 @@ const GRADE_TONE: Record<string, string> = {
   AVOID: 'is-red',
 };
 
-/** Human-readable labels for the guidance_label categorical string. */
-const GUIDANCE_LABEL: Record<string, string> = {
-  RAISE_FULL_YEAR: 'Raised Full Year',
-  MAINTAIN: 'Maintained',
-  NARROW_RANGE: 'Narrowed Range',
-  LOWER: 'Lowered',
-  UNDETECTED: 'Unable to detect from transcript',
+const FWD_VIS_LABEL: Record<string, string> = {
+  SPECIFIC_RAISED: 'Guidance Raised',
+  SPECIFIC_MAINTAINED: 'Guidance Maintained',
+  DIRECTIONAL: 'Directional Only',
+  VAGUE_NONE: 'Vague / None',
+  WITHDRAWN_REDUCED: 'Withdrawn / Reduced',
 };
 
-/** CSS tone classes for the guidance_label categorical string. */
-const GUIDANCE_TONE: Record<string, string> = {
-  RAISE_FULL_YEAR: 'is-green',
-  MAINTAIN: 'is-cyan',
-  NARROW_RANGE: 'is-yellow',
-  LOWER: 'is-red',
-  UNDETECTED: 'is-muted',
-};
-
-/** Human-readable labels for the backlog_label categorical string. */
-const BACKLOG_LABEL: Record<string, string> = {
-  EXPLICIT_MULTI_QUARTER: 'Explicit Multi-Quarter',
-  STRONG: 'Strong Demand',
-  LIMITED: 'Limited Visibility',
-  NO_COMMENTARY: 'No Commentary',
-};
-
-/** CSS tone classes for the backlog_label categorical string. */
-const BACKLOG_TONE: Record<string, string> = {
-  EXPLICIT_MULTI_QUARTER: 'is-green',
-  STRONG: 'is-cyan',
-  LIMITED: 'is-yellow',
-  NO_COMMENTARY: 'is-red',
+const FWD_VIS_TONE: Record<string, string> = {
+  SPECIFIC_RAISED: 'is-green',
+  SPECIFIC_MAINTAINED: 'is-cyan',
+  DIRECTIONAL: 'is-yellow',
+  VAGUE_NONE: 'is-muted',
+  WITHDRAWN_REDUCED: 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -66,16 +39,9 @@ const BACKLOG_TONE: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 type F2EarningsPanelProps = {
-  /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
   ticker: string;
 };
 
-/**
- * F2 Earnings Quality panel — receives the active ticker from the shared
- * selector, calls the earnings API, and shows revenue growth (YoY), EPS beat
- * history (rolling 3Q), guidance direction, gross-margin trend, and
- * backlog/visibility, plus the weighted F2 composite score.
- */
 export function F2EarningsPanel({ ticker }: F2EarningsPanelProps) {
   const { data, isFetching, isError, error } = useEarnings(ticker);
 
@@ -93,7 +59,7 @@ export function F2EarningsPanel({ ticker }: F2EarningsPanelProps) {
           />
         )}
         {!isFetching && !isError && data && data.data_available === false && (
-          <DegradedBanner reason="Alpha Vantage rate limit reached — income statement and EPS data unavailable. Earnings score is a neutral fallback (not computed from real data). Try again in ~1 minute." />
+          <DegradedBanner reason="Alpha Vantage rate limit reached — income statement and EPS data unavailable. Earnings score is a neutral fallback. Try again in ~1 minute." />
         )}
         {!isFetching && !isError && data && <EarningsContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
@@ -107,11 +73,7 @@ export function F2EarningsPanel({ ticker }: F2EarningsPanelProps) {
 // ---------------------------------------------------------------------------
 
 function LoadingState() {
-  return (
-    <p className="atlas-f2-state-msg" data-testid="f2-loading">
-      Analysing earnings quality…
-    </p>
-  );
+  return <p className="atlas-f2-state-msg" data-testid="f2-loading">Analysing earnings quality…</p>;
 }
 
 function ErrorState({ message }: { message: string }) {
@@ -140,40 +102,90 @@ function DegradedBanner({ reason }: { reason: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main content — rendered when data is available
+// Main content
 // ---------------------------------------------------------------------------
 
+function qualityLabel(score: number): { label: string; tone: string } {
+  if (score >= 85) return { label: 'STRONG', tone: 'is-green' };
+  if (score >= 70) return { label: 'GOOD', tone: 'is-cyan' };
+  if (score >= 55) return { label: 'MODERATE', tone: 'is-yellow' };
+  return { label: 'WEAK', tone: 'is-red' };
+}
+
 function EarningsContent({ data }: { data: EarningsResponse }) {
-  const gradeTone = GRADE_TONE[data.f2_grade] ?? 'is-yellow';
+  const quality = qualityLabel(data.f2_score);
 
   return (
     <div className="atlas-f2-content" data-testid="f2-content">
-      {/* F2 Score hero */}
+      {/* Score hero */}
       <div className="atlas-f2-score-hero">
         <div className="atlas-f2-score-ring">
-          <span className={cn('atlas-f2-score-number', gradeTone)} data-testid="f2-score">
+          <span className={cn('atlas-f2-score-number', quality.tone)} data-testid="f2-score">
             {data.f2_score}
           </span>
           <span className="atlas-f2-score-denom">/100</span>
         </div>
         <div className="atlas-f2-score-meta">
           <span
-            className={cn('atlas-frameworks-pill atlas-f2-grade-pill', gradeTone)}
+            className={cn('atlas-frameworks-pill atlas-f2-grade-pill', quality.tone)}
             data-testid="f2-grade"
           >
-            {data.f2_grade}
+            {quality.label}
           </span>
           <span className="atlas-f2-label-sub">Earnings Quality</span>
         </div>
       </div>
 
-      {/* Indicator grid */}
+      {/* Flag badge chips */}
+      <div className="atlas-f2-flags">
+        {data.pre_profit_status && (
+          <span className="atlas-f2-flag is-amber" data-testid="f2-flag-pre-profit">
+            Pre-Profitability
+          </span>
+        )}
+        {data.data_gap_applied && (
+          <span className="atlas-f2-flag is-amber" data-testid="f2-flag-data-gap">
+            DATA GAP — Guidance
+          </span>
+        )}
+        {data.exit_flag && (
+          <span className="atlas-f2-flag is-red" data-testid="f2-flag-exit">
+            EXIT SIGNAL
+          </span>
+        )}
+        {data.guidance_concern && (
+          <span className="atlas-f2-flag is-red" data-testid="f2-flag-guidance-concern">
+            Guidance Concern
+          </span>
+        )}
+        {data.limited_history && (
+          <span className="atlas-f2-flag is-muted" data-testid="f2-flag-limited-history">
+            Limited History
+          </span>
+        )}
+      </div>
+
+      {/* Sub-factor grid */}
       <div className="atlas-f2-indicators">
-        <RevenueGrowthCard rev={data.revenue_growth} />
-        <EpsBeatsCard eps={data.eps_beats} />
-        <GuidanceCard guidance={data.guidance} />
-        <MarginTrajectoryCard margin={data.margin_trajectory} />
-        <BacklogVisibilityCard btb={data.backlog_btb} />
+        <Sf1RevenueGrowthCard data={data} />
+        <Sf2GrossMarginCard data={data} />
+        <Sf3EpsBeatsCard data={data} />
+        <Sf4GuidanceReliabilityCard data={data} />
+        <Sf5ForwardVisibilityCard data={data} />
+      </div>
+
+      {/* F2 composite — two separate labeled rows */}
+      <div className="atlas-f2-composite" data-testid="f2-composite">
+        <div className="atlas-f2-composite-row">
+          <span className="atlas-f2-composite-label">F2 Raw Score</span>
+          <span className="atlas-f2-composite-raw" data-testid="f2-raw">{data.f2_raw.toFixed(1)}</span>
+        </div>
+        <div className="atlas-f2-composite-row">
+          <span className="atlas-f2-composite-label">F2 Contribution (×0.25)</span>
+          <span className="atlas-f2-composite-contrib" data-testid="f2-contribution">
+            {data.f2_contribution.toFixed(1)}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -185,185 +197,145 @@ function EarningsContent({ data }: { data: EarningsResponse }) {
 
 function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
   const filled = Math.round((score / 100) * SCORE_BAR_SEGMENTS);
-
   return (
-    <div
-      className="atlas-f2-score-bar"
-      role="progressbar"
-      aria-valuenow={score}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
+    <div className="atlas-f2-score-bar" role="progressbar" aria-valuenow={score} aria-valuemin={0} aria-valuemax={100}>
       {Array.from({ length: SCORE_BAR_SEGMENTS }, (_, i) => (
-        <span
-          key={i}
-          className={cn('atlas-f2-score-bar-seg', i < filled ? gradeTone : 'is-empty')}
-        />
+        <span key={i} className={cn('atlas-f2-score-bar-seg', i < filled ? gradeTone : 'is-empty')} />
       ))}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Indicator cards
+// Sub-factor cards
 // ---------------------------------------------------------------------------
 
-type IndicatorCardProps = {
+type SubFactorCardProps = {
+  id: string;
   label: string;
   score: number | null;
-  maxScore: number;
+  weight: string;
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, maxScore, children }: IndicatorCardProps) {
+function SubFactorCard({ id, label, score, weight, children }: SubFactorCardProps) {
+  const tone = score === null ? 'is-muted' : scoreTone(score);
   return (
-    <article
-      className="atlas-f2-indicator"
-      data-testid={`f2-indicator-${label.toLowerCase().replace(/[\s/]+/g, '-')}`}
-    >
+    <article className="atlas-f2-indicator" data-testid={`f2-indicator-${id}`}>
       <header className="atlas-f2-indicator-header">
         <span className="atlas-f2-indicator-label">{label}</span>
-        <span className="atlas-f2-indicator-score">
-          {score !== null ? (
-            <>{score}<span className="atlas-f2-indicator-max">/{maxScore}</span></>
-          ) : (
-            <span className="atlas-f2-indicator-na">N/A</span>
-          )}
+        <span className="atlas-f2-indicator-weight">{weight}</span>
+        <span className={cn('atlas-f2-indicator-score', tone)}>
+          {score !== null ? score.toFixed(0) : 'N/A'}
+          <span className="atlas-f2-indicator-max">/100</span>
         </span>
       </header>
+      {score !== null && <ScoreBar score={score} gradeTone={tone} />}
       <div className="atlas-f2-indicator-body">{children}</div>
     </article>
   );
 }
 
-function RevenueGrowthCard({ rev }: { rev: RevenueGrowthIndicator }) {
-  if (rev.score === null) {
-    return (
-      <IndicatorCard label="Revenue Growth" score={null} maxScore={rev.max_score}>
-        <p className="atlas-f2-undetected-note">No revenue data available</p>
-        <p className="atlas-f2-undetected-sub">Excluded from F2 score</p>
-      </IndicatorCard>
-    );
-  }
-
+function Sf1RevenueGrowthCard({ data }: { data: EarningsResponse }) {
+  const pct = data.sf1_revenue_growth_pct;
   return (
-    <IndicatorCard label="Revenue Growth" score={rev.score} maxScore={rev.max_score}>
+    <SubFactorCard id="revenue-growth" label="Revenue Growth" score={data.sf1_score} weight="30%">
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
           <dt>YoY Growth</dt>
-          <dd className={growthTone(rev.yoy_pct)}>
-            {rev.yoy_pct !== null ? formatPct(rev.yoy_pct) : '—'}
+          <dd className={pct !== null ? growthTone(pct) : ''}>
+            {pct !== null ? formatPct(pct) : '—'}
           </dd>
         </div>
       </dl>
-    </IndicatorCard>
+    </SubFactorCard>
   );
 }
 
-function EpsBeatsCard({ eps }: { eps: EpsBeatsIndicator }) {
-  const beatsLabel =
-    eps.beats_in_3 !== null && eps.quarters_checked !== null
-      ? `${eps.beats_in_3}/${eps.quarters_checked}`
-      : '—';
-
+function Sf2GrossMarginCard({ data }: { data: EarningsResponse }) {
+  const bps = data.sf2_gross_margin_trend_bps;
   return (
-    <IndicatorCard label="EPS Beats" score={eps.score} maxScore={eps.max_score}>
+    <SubFactorCard id="gross-margin-trend" label="Gross Margin Trend" score={data.sf2_score} weight="20%">
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
-          <dt>Beats (Last 3Q)</dt>
-          <dd className={beatsTone(eps.beats_in_3)}>{beatsLabel}</dd>
-        </div>
-      </dl>
-      {eps.beats_in_3 !== null && eps.quarters_checked !== null && eps.quarters_checked > 0 && (
-        <div className="atlas-f2-beat-bar">
-          <span
-            className={cn('atlas-f2-beat-bar-fill', beatsTone(eps.beats_in_3))}
-            style={{ width: `${(eps.beats_in_3 / eps.quarters_checked) * 100}%` }}
-          />
-        </div>
-      )}
-    </IndicatorCard>
-  );
-}
-
-function GuidanceCard({ guidance }: { guidance: GuidanceIndicator }) {
-  const isUndetected = guidance.guidance_label === 'UNDETECTED';
-  const label = GUIDANCE_LABEL[guidance.guidance_label] ?? guidance.guidance_label;
-  const tone = GUIDANCE_TONE[guidance.guidance_label] ?? 'is-yellow';
-
-  return (
-    <IndicatorCard label="Guidance" score={guidance.score} maxScore={guidance.max_score}>
-      <dl className="atlas-f2-dl">
-        <div className="atlas-f2-dl-row">
-          <dt>Direction</dt>
-          <dd className={tone}>{label}</dd>
-        </div>
-        {!isUndetected && guidance.transcript_quarter !== null && (
-          <div className="atlas-f2-dl-row">
-            <dt>Source Quarter</dt>
-            <dd>{guidance.transcript_quarter}</dd>
-          </div>
-        )}
-        {isUndetected && (
-          <div className="atlas-f2-dl-row">
-            <dt>Impact</dt>
-            <dd className="is-muted">Excluded from F2 score</dd>
-          </div>
-        )}
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function MarginTrajectoryCard({ margin }: { margin: MarginTrajectoryIndicator }) {
-  return (
-    <IndicatorCard label="Margin Trajectory" score={margin.score} maxScore={margin.max_score}>
-      <dl className="atlas-f2-dl">
-        <div className="atlas-f2-dl-row">
-          <dt>Margin Change</dt>
-          <dd className={marginTone(margin.margin_change_pts)}>
-            {margin.margin_change_pts !== null
-              ? `${margin.margin_change_pts >= 0 ? '+' : ''}${margin.margin_change_pts.toFixed(2)} ppts`
-              : '—'}
+          <dt>YoY Change</dt>
+          <dd className={bps !== null ? bpsTone(bps) : ''}>
+            {bps !== null ? `${bps >= 0 ? '+' : ''}${bps.toFixed(0)} bps` : '—'}
           </dd>
         </div>
       </dl>
-      {margin.gross_margins.length > 0 && (
-        <div className="atlas-f2-margin-sparkline">
-          {margin.gross_margins.map((m, i) => (
-            <div key={i} className="atlas-f2-margin-bar-wrap">
-              <div
-                className={cn('atlas-f2-margin-bar', marginBarTone(m))}
-                style={{ height: `${Math.min(100, Math.max(5, m))}%` }}
-                title={`Q${i + 1}: ${m.toFixed(1)}%`}
-              />
-              <span className="atlas-f2-margin-bar-label">{m.toFixed(0)}%</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </IndicatorCard>
+    </SubFactorCard>
   );
 }
 
-function BacklogVisibilityCard({ btb }: { btb: BacklogBtbIndicator }) {
-  const label = BACKLOG_LABEL[btb.backlog_label] ?? btb.backlog_label;
-  const tone = BACKLOG_TONE[btb.backlog_label] ?? 'is-yellow';
+function Sf3EpsBeatsCard({ data }: { data: EarningsResponse }) {
+  if (data.sf3_excluded) {
+    return (
+      <SubFactorCard id="eps-consistency" label="EPS Beat Consistency" score={null} weight="20%">
+        <p className="atlas-f2-excluded-note" data-testid="f2-sf3-excluded">
+          Excluded — pre-profitability
+        </p>
+      </SubFactorCard>
+    );
+  }
 
+  const beats = data.sf3_eps_beats;
+  const avail = data.sf3_quarters_available;
   return (
-    <IndicatorCard label="Backlog Visibility" score={btb.score} maxScore={btb.max_score}>
+    <SubFactorCard id="eps-consistency" label="EPS Beat Consistency" score={data.sf3_score} weight="20%">
       <dl className="atlas-f2-dl">
         <div className="atlas-f2-dl-row">
-          <dt>Visibility</dt>
+          <dt>Beats (Last {avail}Q)</dt>
+          <dd className={beats !== null ? beatsTone(beats, avail) : ''}>
+            {beats !== null ? `${beats}/${avail}` : '—'}
+          </dd>
+        </div>
+      </dl>
+      {data.ipo_limited_history && (
+        <p className="atlas-f2-note is-muted" data-testid="f2-sf3-limited-history">
+          Limited history — scored proportionally
+        </p>
+      )}
+    </SubFactorCard>
+  );
+}
+
+function Sf4GuidanceReliabilityCard({ data }: { data: EarningsResponse }) {
+  return (
+    <SubFactorCard id="guidance-reliability" label="Guidance Reliability" score={data.sf4_score} weight="15%">
+      <dl className="atlas-f2-dl">
+        <div className="atlas-f2-dl-row">
+          <dt>Delivered (4Q)</dt>
+          <dd>
+            {data.sf4_data_gap ? (
+              <span className="is-muted" data-testid="f2-sf4-data-gap">DATA GAP (default 10)</span>
+            ) : (
+              <span>{data.sf4_guidance_delivered ?? '—'}/4</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </SubFactorCard>
+  );
+}
+
+function Sf5ForwardVisibilityCard({ data }: { data: EarningsResponse }) {
+  const label = FWD_VIS_LABEL[data.sf5_forward_visibility_label] ?? data.sf5_forward_visibility_label;
+  const tone = FWD_VIS_TONE[data.sf5_forward_visibility_label] ?? 'is-muted';
+  return (
+    <SubFactorCard id="forward-visibility" label="Forward Visibility" score={data.sf5_score} weight="15%">
+      <dl className="atlas-f2-dl">
+        <div className="atlas-f2-dl-row">
+          <dt>Signal</dt>
           <dd className={tone}>{label}</dd>
         </div>
       </dl>
-    </IndicatorCard>
+    </SubFactorCard>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Small formatting helpers — pure, no side effects
+// Formatting helpers
 // ---------------------------------------------------------------------------
 
 function formatPct(value: number): string {
@@ -371,33 +343,33 @@ function formatPct(value: number): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-function growthTone(value: number | null): string {
-  if (value === null) return '';
-  if (value >= 50) return 'is-green';
-  if (value >= 10) return 'is-cyan';
-  if (value >= 0) return 'is-yellow';
+function scoreTone(score: number): string {
+  if (score >= 80) return 'is-green';
+  if (score >= 65) return 'is-cyan';
+  if (score >= 40) return 'is-yellow';
+  if (score >= 20) return 'is-orange';
   return 'is-red';
 }
 
-function beatsTone(beats: number | null): string {
-  if (beats === null) return '';
-  if (beats >= 3) return 'is-green';
-  if (beats >= 2) return 'is-cyan';
-  if (beats >= 1) return 'is-yellow';
+function growthTone(pct: number): string {
+  if (pct >= 40) return 'is-green';
+  if (pct >= 15) return 'is-cyan';
+  if (pct >= 0) return 'is-yellow';
   return 'is-red';
 }
 
-function marginTone(changePts: number | null): string {
-  if (changePts === null) return '';
-  if (changePts > 3) return 'is-green';
-  if (changePts >= 1) return 'is-cyan';
-  if (changePts >= -1) return 'is-yellow';
+function bpsTone(bps: number): string {
+  if (bps > 100) return 'is-green';
+  if (bps >= -50) return 'is-yellow';
   return 'is-red';
 }
 
-function marginBarTone(margin: number): string {
-  if (margin >= 40) return 'is-green';
-  if (margin >= 25) return 'is-cyan';
-  if (margin >= 10) return 'is-yellow';
+function beatsTone(beats: number, avail: number): string {
+  if (avail === 0) return '';
+  const rate = beats / avail;
+  if (rate >= 1.0) return 'is-green';
+  if (rate >= 0.75) return 'is-cyan';
+  if (rate >= 0.5) return 'is-yellow';
   return 'is-red';
 }
+

@@ -102,7 +102,7 @@ async def test_create_ticker_adds_and_refreshes(
 
     mock_session.add.assert_called_once()
     mock_session.flush.assert_awaited_once()
-    assert isinstance(position, Position)
+    assert isinstance(position, Ticker)
     assert position.ticker == "NVDA"
 
 

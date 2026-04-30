@@ -1,10 +1,10 @@
-"""Unit tests for TickerService — Polygon API calls are mocked via httpx."""
+"""Unit tests for TickerSearchService — Polygon API calls are mocked via httpx."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from atlas.services.ticker_service import TickerService
+from atlas.services.ticker_search_service import TickerSearchService
 
 
 @pytest.fixture
@@ -14,8 +14,8 @@ def mock_client() -> AsyncMock:
 
 
 @pytest.fixture
-def service(mock_client: AsyncMock) -> TickerService:
-    return TickerService(api_key="test-key", client=mock_client)
+def service(mock_client: AsyncMock) -> TickerSearchService:
+    return TickerSearchService(api_key="test-key", client=mock_client)
 
 
 def _make_polygon_response(results: list[dict]) -> MagicMock:  # type: ignore[type-arg]
@@ -29,7 +29,9 @@ def _make_polygon_response(results: list[dict]) -> MagicMock:  # type: ignore[ty
 # ── search ────────────────────────────────────────────────────────────────────
 
 
-async def test_search_returns_ticker_list(service: TickerService, mock_client: AsyncMock) -> None:
+async def test_search_returns_ticker_list(
+    service: TickerSearchService, mock_client: AsyncMock
+) -> None:
     """search returns a TickerSearchResult for each Polygon result."""
     mock_client.get = AsyncMock(
         return_value=_make_polygon_response(
@@ -45,7 +47,7 @@ async def test_search_returns_ticker_list(service: TickerService, mock_client: A
 
 
 async def test_search_returns_empty_list_when_no_results(
-    service: TickerService, mock_client: AsyncMock
+    service: TickerSearchService, mock_client: AsyncMock
 ) -> None:
     """search returns [] when Polygon finds no matching tickers."""
     mock_client.get = AsyncMock(return_value=_make_polygon_response([]))
@@ -55,7 +57,7 @@ async def test_search_returns_empty_list_when_no_results(
 
 
 async def test_search_passes_query_and_api_key(
-    service: TickerService, mock_client: AsyncMock
+    service: TickerSearchService, mock_client: AsyncMock
 ) -> None:
     """search passes the query string and api key as query parameters."""
     mock_client.get = AsyncMock(return_value=_make_polygon_response([]))
@@ -67,10 +69,13 @@ async def test_search_passes_query_and_api_key(
     call_kwargs.kwargs.get("params") or call_kwargs.args[1] if len(call_kwargs.args) > 1 else {}
     # Params can be positional or keyword depending on how the service calls httpx
     all_params = call_kwargs.kwargs.get("params", {})
-    assert "nvidia" in str(all_params) or "nvidia" in str(call_kwargs)
+    # TickerSearchService uppercases the query before building range params
+    assert "NVIDIA" in str(all_params) or "NVIDIA" in str(call_kwargs)
 
 
-async def test_search_raises_on_http_error(service: TickerService, mock_client: AsyncMock) -> None:
+async def test_search_raises_on_http_error(
+    service: TickerSearchService, mock_client: AsyncMock
+) -> None:
     """search propagates HTTP errors raised by the httpx client."""
     import httpx
 

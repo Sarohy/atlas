@@ -130,6 +130,13 @@ class DarkPoolIndicator(BaseModel):
         None, description="Single largest dark pool print (USD)."
     )
     print_count: int = Field(default=0, description="Number of dark pool prints today.")
+    direction: str | None = Field(
+        default=None,
+        description=(
+            "'BULLISH' | 'BEARISH' | 'NEUTRAL' — inferred from call/put premium ratio. "
+            "None when premium data is unavailable."
+        ),
+    )
     score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
     weight: float = Field(default=0.15, description="Weight in F4 formula.")
 

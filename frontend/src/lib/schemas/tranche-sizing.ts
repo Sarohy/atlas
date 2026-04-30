@@ -1,28 +1,87 @@
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// Schema
+// Signal detail schema (Framework 29 AND gate)
+// ---------------------------------------------------------------------------
+
+export const signalDetailSchema = z.object({
+  /** Signal index (1-5). */
+  signal_index: z.number().int().min(1).max(5),
+  /** Human-readable signal name. */
+  name: z.string(),
+  /** Whether this signal is confirmed. */
+  confirmed: z.boolean(),
+});
+
+export type SignalDetail = z.infer<typeof signalDetailSchema>;
+
+// ---------------------------------------------------------------------------
+// Tranche sizing response schema (v7.3.4)
 // ---------------------------------------------------------------------------
 
 export const trancheSizingResponseSchema = z.object({
   /** Ticker symbol (upper-case). */
   ticker: z.string(),
 
-  /** T1 — 10-15% of available cash when initial catalyst confirmed, else Blocked. */
-  t1: z.string(),
+  // Concentration cap (Framework 14)
+  /** True when position weight >= 8% NAV (concentration cap active). */
+  cap_active: z.boolean(),
+  /** False when concentration cap suppresses all tranche rows. */
+  tranche_display: z.boolean(),
+  /** Current position weight as a fraction of NAV (e.g. 0.136 = 13.6%). */
+  position_weight: z.number(),
+  /** Human-readable status message; present when cap is active. */
+  message: z.string().nullable(),
 
-  /** T2 — 20-25% of available cash when regime is CAUTION, else Blocked. */
-  t2: z.string(),
+  // Beta cap (Framework 13)
+  /** True when Framework 13 beta cap is active for this position. */
+  beta_cap_active: z.boolean().default(false),
+  /** Human-readable reason when beta cap is active. */
+  beta_cap_reason: z.string().nullable().default(null),
 
-  /** T3 — 30-40% of available cash when regime is CLEAR, else Blocked. */
-  t3: z.string(),
+  // AND gate (Framework 29)
+  /** True when regime is CLEAR - AND gate applies to T3 and large decisions. */
+  and_gate_active: z.boolean(),
+  /** True when 3 or more of 5 capitulation signals are confirmed. */
+  and_gate_passed: z.boolean(),
+  /** Count of AND gate signals confirmed (0-5). */
+  signals_confirmed: z.number().int().min(0).max(5),
+  /** Per-signal confirmation status for all 5 Framework 29 signals. */
+  signals_detail: z.array(signalDetailSchema),
 
-  /** T4 — Remaining cash to floor when Iran Resolution confirmed, else Blocked. */
-  t4: z.string(),
+  // Tranche values (null when cap_active is true)
+  /** T1 - 10-15% of available cash when catalyst confirmed, Blocked, or null when suppressed. */
+  t1: z.string().nullable(),
+  /** T2 - 20-25% of available cash when CAUTION, Blocked, or null when suppressed. */
+  t2: z.string().nullable(),
+  /** T3 - 30-40% when CLEAR + AND gate passes, Blocked, or null when suppressed. */
+  t3: z.string().nullable(),
+  /** T4 - Remaining cash to floor when Iran confirmed, Blocked, or null when suppressed. */
+  t4: z.string().nullable(),
+
+  /** True when T1 has fired for this ticker. T2/T3/T4 are blocked until T1 fires. */
+  t1_fired: z.boolean(),
+
+  /** True when operator has confirmed the T2 deployment order (Framework 17). */
+  t2_fired: z.boolean(),
+  /** True when T2 conditions are met (T1 fired + Brent < $110) but not yet confirmed. */
+  t2_pending: z.boolean(),
+
+  /** True when operator has confirmed the T3 deployment order (Framework 17). */
+  t3_fired: z.boolean(),
+  /** True when T3 conditions are met (CLEAR + AND gate) but not yet confirmed. */
+  t3_pending: z.boolean(),
+
+  /**
+   * Single source of truth for CATALYST header display.
+   * Same value as t1_fired — both the header and T1 row must read this field.
+   */
+  catalyst_confirmed: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------
-// Derived type
+// Derived types
 // ---------------------------------------------------------------------------
 
 export type TrancheSizingResponse = z.infer<typeof trancheSizingResponseSchema>;
+

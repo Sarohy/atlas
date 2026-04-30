@@ -214,6 +214,30 @@ def _grade_from_score(score: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _derive_dark_pool_direction(
+    call_premium: float | None,
+    put_premium: float | None,
+) -> str:
+    """Infer dark pool direction from call/put premium ratio.
+
+    Thresholds:
+      ratio > 1.5  → 'BULLISH'
+      ratio < 0.67 → 'BEARISH'
+      otherwise    → 'NEUTRAL'
+
+    Returns 'NEUTRAL' when either premium is None or put_premium is zero.
+    Pure function — no I/O.
+    """
+    if call_premium is None or put_premium is None or put_premium == 0.0:
+        return "NEUTRAL"
+    ratio = call_premium / put_premium
+    if ratio >= 1.5:
+        return "BULLISH"
+    if ratio < 0.67:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
 def _build_response(
     ticker: str,
     largest_premium: float | None,
@@ -290,6 +314,7 @@ def _build_response(
             total_dark_pool_premium=total_dark_pool,
             largest_print=largest_dark_pool,
             print_count=dark_pool_count,
+            direction=_derive_dark_pool_direction(call_premium, put_premium),
             score=dp_score,
             weight=_W_DARK_POOL,
         ),

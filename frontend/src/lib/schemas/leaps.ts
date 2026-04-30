@@ -30,6 +30,20 @@ export const entryConditionSchema = z.object({
   detail: z.string().nullable(),
 });
 
+export const leapsExpiryGuidanceSchema = z.object({
+  preferred_expiries: z.array(z.string()),
+  otm_pct_low: z.number(),
+  otm_pct_high: z.number(),
+});
+
+export const sizeGuidanceSchema = z.object({
+  standard_max_pct: z.number(),
+  baseline_pct: z.number(),
+  baseline_max_pct: z.number(),
+  carveout_active: z.boolean(),
+  data_missing: z.boolean(),
+});
+
 // ---------------------------------------------------------------------------
 // Main result schemas
 // ---------------------------------------------------------------------------
@@ -55,12 +69,18 @@ export const leapsEligibilitySchema = z.object({
   iv_blocked: z.boolean().nullable(),
   iv_alert: ivAlertSchema,
 
+  iv_catalyst_wait_days_remaining: z.number().int().nullable(),
+  gap_detected: z.boolean().nullable(),
+
   entry_conditions: z.array(entryConditionSchema),
   conditions_met: z.number().int(),
   conditions_required: z.number().int(),
 
   block_reasons: z.array(z.string()),
   warning_messages: z.array(z.string()),
+
+  expiry_guidance: leapsExpiryGuidanceSchema,
+  size_guidance: sizeGuidanceSchema,
 
   data_age_minutes: z.number(),
   cache_hit: z.boolean(),
@@ -104,6 +124,8 @@ export const leapsBucketStatusSchema = z.object({
 export type IVAlert = z.infer<typeof ivAlertSchema>;
 export type EntryConditionStatus = z.infer<typeof entryConditionStatusSchema>;
 export type EntryCondition = z.infer<typeof entryConditionSchema>;
+export type LeapsExpiryGuidance = z.infer<typeof leapsExpiryGuidanceSchema>;
+export type SizeGuidance = z.infer<typeof sizeGuidanceSchema>;
 export type LeapsEligibility = z.infer<typeof leapsEligibilitySchema>;
 export type LeapsPosition = z.infer<typeof leapsPositionSchema>;
 export type LeapsBucketStatus = z.infer<typeof leapsBucketStatusSchema>;

@@ -7,10 +7,10 @@ Returns the insider activity analysis for a given ticker:
   - hard_pass:   True when pattern (many sales, zero buys) disqualifies ticker
   - filer_tier:  Seniority tier of the triggering filer
   - f5_cap:      Score cap to apply to Framework 5 (68 or 72)
-  - source:      "hardcoded" | "sec_edgar" | "default"
+  - source:      "sec_edgar" | "default"
 
-Hardcoded tickers (NBIS, CRDO, FN, COHR, CF) bypass the API.
-Returns 503 when SEC_API_KEY is not configured and ticker is not hardcoded.
+All tickers are evaluated live against SEC EDGAR's free public API
+(submissions + Form 4 XML). No API key is required.
 """
 
 from __future__ import annotations
@@ -19,20 +19,17 @@ from fastapi import APIRouter, HTTPException
 
 from atlas.config import get_settings
 from atlas.schemas.framework8 import Framework8Response
-from atlas.services.framework8_service import Framework8Service, InsiderTier
+from atlas.services.framework8_service import Framework8Service
 
 router = APIRouter(prefix="/framework8", tags=["framework8"])
-
-# Tickers that bypass the API (must mirror _HARDCODED_ACTIVE in the service).
-_HARDCODED_ACTIVE: frozenset[str] = frozenset({"NBIS", "CRDO", "FN", "COHR", "CF"})
 
 
 @router.get("/{ticker}", response_model=Framework8Response)
 async def get_framework8(ticker: str) -> Framework8Response:
     """Return the Framework 8 insider activity analysis for *ticker*.
 
-    Hardcoded tickers (NBIS, CRDO, FN, COHR, CF) are always available.
-    For other tickers, SEC_API_KEY must be configured; returns 503 otherwise.
+    All tickers are evaluated live against SEC EDGAR's free public API
+    (submissions + Form 4 XML). No API key is required.
     """
     normalised = ticker.strip().upper()
     if not normalised:

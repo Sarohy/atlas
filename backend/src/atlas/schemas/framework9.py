@@ -8,17 +8,22 @@ Framework 1 at 15% weight.  It aggregates three data sources:
   Source 3: Alpha Vantage  (options volume fallback, put/call backup)
 
 Five signal tiers in priority order:
-  TIER_1_WHALE         — Single print > $10M confirmed by Unusual Whales
-  TIER_2_INSTITUTIONAL — Dark pool > $500K + spread_position > 0.6 + vol > 2% ADV
-  TIER_3_UNUSUAL       -- Options volume > 2x 30-day ADV + P/C ratio reversal
-  TIER_4_WEAK          -- Volume elevated, below 2x ADV threshold
-  TIER_5_NONE          — No qualifying signal, or all data unavailable
+  TIER_1_WHALE         — Single print > $10M confirmed by Unusual Whales    (score 88-92)
+  TIER_2_INSTITUTIONAL — Dark pool > $500K + spread > 0.6 + vol > 2% ADV   (score 80-85)
+  TIER_3_UNUSUAL       — Options volume 150%+ above normal call volume       (score 78-82)
+  TIER_4_WEAK          — Moderate unusual call activity                      (score 72-76)
+  TIER_5_NONE          — Normal baseline activity                            (score 65-68)
+  TIER_1_BEARISH       — Genuine bearish put flow (not covered calls)        (score 55-65)
 
 Data gap severity levels:
   NONE     — All sources online, no missing fields
   PARTIAL  — Some fields missing but scoring still possible
   MAJOR    — At least one critical source offline, scoring degraded
-  CRITICAL — All sources offline, f4_score forced to neutral baseline 55
+  CRITICAL — All sources offline, f4_score forced to neutral baseline
+
+Pre-earnings adjustment:
+  Normal (0-7 days to earnings): 25% reduction
+  Exceptional Conviction (3-of-5 criteria): 0% reduction or +10% premium
 """
 
 from __future__ import annotations
@@ -84,6 +89,59 @@ class DataGapDetail(BaseModel):
     )
 
 
+class ExceptionalConvictionDetail(BaseModel):
+    """Exceptional Conviction evaluation — 3-of-5 criteria override pre-earnings reduction.
+
+    When active (count >= 3), the normal 25% pre-earnings reduction is replaced
+    by a 0% reduction or +10% premium applied to the F4 score.
+
+    Criteria 2-4 require manual / external confirmation and may be None when
+    not evaluated this session.  None counts as False toward the total.
+    """
+
+    dark_pool_multiple_blocks_gt_1m: bool = Field(
+        description=(
+            "Criterion 1: dark pool shows multiple (>=2) blocks >$1M premium "
+            "in the last 5 trading days."
+        )
+    )
+    transcript_conviction_language: bool | None = Field(
+        default=None,
+        description=(
+            "Criterion 2: transcript uses language like 'sold-out', "
+            "'100% committed', 'pricing power'. None = not evaluated."
+        ),
+    )
+    guidance_raised_above_high: bool | None = Field(
+        default=None,
+        description=(
+            "Criterion 3: guidance materially raised prior quarter; analysts "
+            "modeling above the high end. None = not evaluated."
+        ),
+    )
+    transcript_cross_references_ge5: bool | None = Field(
+        default=None,
+        description=(
+            "Criterion 4: >=5 transcript cross-references from other universe "
+            "names confirming the same thesis. None = not evaluated."
+        ),
+    )
+    bullish_skew_despite_elevated_iv: bool = Field(
+        description=(
+            "Criterion 5: options flow shows unusual bullish skew (call buying) "
+            "despite elevated IV (call/put ratio > 2.0 and BULLISH flow direction)."
+        )
+    )
+    count: int = Field(
+        ge=0,
+        le=5,
+        description="Number of criteria that evaluate to True (None counts as False).",
+    )
+    active: bool = Field(
+        description="True when count >= 3 — overrides the normal pre-earnings reduction."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level result
 # ---------------------------------------------------------------------------
@@ -104,8 +162,7 @@ class Framework9Result(BaseModel):
     f4_score: float = Field(ge=0.0, le=100.0, description="F4 Options Flow score (0-100).")
     f4_grade: str = Field(
         description=(
-            "Grade label derived from f4_score: "
-            "'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'WEAK' | 'AVOID'"
+            "Grade label derived from f4_score: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'WEAK' | 'AVOID'"
         )
     )
     f4_contribution: float = Field(ge=0.0, le=15.0, description="f4_score x 0.15.")
@@ -144,8 +201,7 @@ class Framework9Result(BaseModel):
     signal_valid: bool = Field(description="True when minimum signal threshold is met.")
     minimum_threshold_met: bool = Field(
         description=(
-            "True when at least one of: ≥10 prints, "
-            "single print > 2% ADV, session total > $500K."
+            "True when at least one of: ≥10 prints, single print > 2% ADV, session total > $500K."
         )
     )
     covered_call_exception: bool = Field(
@@ -160,7 +216,23 @@ class Framework9Result(BaseModel):
         description="True when Polygon is offline so the covered call check cannot run.",
     )
     pre_earnings_reduction: bool = Field(
-        default=False, description="True when the 30% pre-earnings reduction was applied."
+        default=False,
+        description=(
+            "True when the pre-earnings window (0-7 days) is active and a modifier "
+            "was applied. When Exceptional Conviction is active the modifier is +10%; "
+            "otherwise it is a 25% reduction."
+        ),
+    )
+    days_to_earnings: int | None = Field(
+        default=None,
+        description="Calendar days until next earnings date. None when unavailable.",
+    )
+    exceptional_conviction: ExceptionalConvictionDetail | None = Field(
+        default=None,
+        description=(
+            "Exceptional Conviction detail. Populated only when the pre-earnings "
+            "window is active. None when outside the window or when F4 is unavailable."
+        ),
     )
     conflicting_signals: bool = Field(
         default=False,
@@ -181,9 +253,7 @@ class Framework9Result(BaseModel):
 
     # ── Data gap propagation ─────────────────────────────────────────────────
     data_gaps: list[DataGapDetail] = Field(default_factory=list)
-    data_gap_severity: str = Field(
-        description="'NONE' | 'PARTIAL' | 'MAJOR' | 'CRITICAL'"
-    )
+    data_gap_severity: str = Field(description="'NONE' | 'PARTIAL' | 'MAJOR' | 'CRITICAL'")
 
     # Propagated to Framework 1 F4 row so the investor sees the gap in context.
     f1_propagation_badge: str | None = Field(

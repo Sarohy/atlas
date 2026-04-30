@@ -8,14 +8,21 @@ Covers:
   - _compute_eligibility: block-reason assembly and tristate output
   - Score source regression: conviction score must come from F1 final_score,
     not F4 options flow score (the original data-sync bug).
+  - _compute_iv_catalyst_wait: post-earnings IV cooldown window
+  - _detect_price_gap: gap-day detection
+  - _compute_eligibility with gap/IV-wait params
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 from atlas.services.leaps_service import (
     _check_iv_block,
     _check_regime_clears_leaps,
     _compute_eligibility,
+    _compute_iv_catalyst_wait,
+    _detect_price_gap,
     _determine_tier,
     _evaluate_entry_condition1,
     _evaluate_entry_condition2,
@@ -225,6 +232,7 @@ class TestComputeEligibilityScoreRegression:
             iv_percentile=0.30,
             entry_conditions=self._make_base_entry_conditions(86),
             data_age_minutes=0,
+            gap_detected=False,  # no gap today
         )
         assert result.leaps_eligible is True
         assert result.score == 86
@@ -273,3 +281,235 @@ class TestComputeEligibilityScoreRegression:
         assert result.leaps_eligible is None
         assert result.score is None
         assert result.eligibility_undetermined is True
+
+
+# ---------------------------------------------------------------------------
+# _compute_iv_catalyst_wait
+# ---------------------------------------------------------------------------
+
+
+class TestComputeIVCatalystWait:
+    """Post-earnings IV cooldown window (7 calendar days)."""
+
+    def test_catalyst_1_day_ago_returns_6_remaining(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 4, 29)  # 1 day ago
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 6
+
+    def test_catalyst_3_days_ago_returns_4_remaining(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 4, 27)  # 3 days ago
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 4
+
+    def test_catalyst_7_days_ago_returns_0(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 4, 23)  # exactly 7 days ago
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 0
+
+    def test_catalyst_8_days_ago_returns_0(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 4, 22)  # 8 days ago — wait over
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 0
+
+    def test_no_earnings_date_returns_none(self) -> None:
+        assert _compute_iv_catalyst_wait(None) is None
+
+    def test_earnings_in_future_returns_0(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 5, 5)  # future — not a past catalyst
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 0
+
+    def test_catalyst_today_returns_7(self) -> None:
+        today = date(2026, 4, 30)
+        earnings = date(2026, 4, 30)  # day-of earnings
+        assert _compute_iv_catalyst_wait(earnings, today=today) == 7
+
+
+# ---------------------------------------------------------------------------
+# _detect_price_gap
+# ---------------------------------------------------------------------------
+
+
+class TestDetectPriceGap:
+    """Price gap detection: open vs. previous close ≥ 2% gap threshold."""
+
+    def test_gap_up_above_threshold_returns_true(self) -> None:
+        # Open 3% above prev close — gap up
+        assert _detect_price_gap(103.0, 100.0) is True
+
+    def test_gap_down_above_threshold_returns_true(self) -> None:
+        # Open 2.5% below prev close — gap down
+        assert _detect_price_gap(97.5, 100.0) is True
+
+    def test_exact_threshold_returns_true(self) -> None:
+        # Exactly 2% — at threshold, should detect
+        assert _detect_price_gap(102.0, 100.0) is True
+
+    def test_small_diff_below_threshold_returns_false(self) -> None:
+        # Only 0.5% difference — not a gap
+        assert _detect_price_gap(100.5, 100.0) is False
+
+    def test_none_open_returns_none(self) -> None:
+        assert _detect_price_gap(None, 100.0) is None
+
+    def test_none_prev_close_returns_none(self) -> None:
+        assert _detect_price_gap(100.0, None) is None
+
+    def test_zero_prev_close_returns_none(self) -> None:
+        assert _detect_price_gap(100.0, 0.0) is None
+
+    def test_both_none_returns_none(self) -> None:
+        assert _detect_price_gap(None, None) is None
+
+    def test_no_gap_same_price_returns_false(self) -> None:
+        assert _detect_price_gap(100.0, 100.0) is False
+
+
+# ---------------------------------------------------------------------------
+# _compute_eligibility with gap / IV-wait params
+# ---------------------------------------------------------------------------
+
+
+def _base_entry_conditions() -> list:
+    return [
+        _evaluate_entry_condition1(True),
+        _evaluate_entry_condition2("CLEAR"),
+        _evaluate_entry_condition3(86),
+    ]
+
+
+class TestComputeEligibilityGapBlock:
+    def test_gap_detected_adds_block_reason(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            gap_detected=True,
+        )
+        assert result.leaps_eligible is False
+        assert result.gap_detected is True
+        assert any("gap" in r.lower() for r in result.block_reasons)
+
+    def test_gap_not_detected_does_not_block(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            gap_detected=False,
+        )
+        assert result.leaps_eligible is True
+        assert result.gap_detected is False
+
+    def test_gap_unknown_adds_warning_not_block(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            gap_detected=None,
+        )
+        # gap unknown → deferred (undetermined), not hard blocked
+        assert result.leaps_eligible is None
+        assert result.eligibility_undetermined is True
+        assert any("gap" in w.lower() for w in result.warning_messages)
+
+
+class TestComputeEligibilityIVCatalystWait:
+    def test_iv_wait_remaining_blocks_leaps(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            iv_catalyst_wait_days_remaining=4,
+        )
+        assert result.leaps_eligible is False
+        assert result.iv_catalyst_wait_days_remaining == 4
+        assert any("catalyst" in r.lower() or "iv" in r.lower() for r in result.block_reasons)
+
+    def test_iv_wait_zero_does_not_block(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            gap_detected=False,
+            iv_catalyst_wait_days_remaining=0,
+        )
+        assert result.leaps_eligible is True
+        assert result.iv_catalyst_wait_days_remaining == 0
+
+    def test_iv_wait_none_does_not_block(self) -> None:
+        result = _compute_eligibility(
+            ticker="NVDA",
+            score=86,
+            tier="TIER_1",
+            flow_confirmed=None,
+            regime_state="CLEAR",
+            gate_f7_active=False,
+            gate_f29_passed=True,
+            gate_f30_permits_leaps=True,
+            gate_f11_blocks=False,
+            gate_f15_blocks=False,
+            iv_current=0.45,
+            iv_percentile=0.30,
+            entry_conditions=_base_entry_conditions(),
+            data_age_minutes=0,
+            gap_detected=False,
+            iv_catalyst_wait_days_remaining=None,
+        )
+        # None means no earnings data — should not block
+        assert result.leaps_eligible is True
+        assert result.iv_catalyst_wait_days_remaining is None

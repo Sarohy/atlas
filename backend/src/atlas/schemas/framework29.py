@@ -1,17 +1,17 @@
-"""Pydantic schemas for Framework 29 — Capitulation / Re-Entry AND Gate.
+"""Pydantic schemas for Framework 29 - Capitulation / Re-Entry AND Gate.
 
 Framework 29 monitors 5 market signals and fires a GREEN LIGHT deploy alert
 when 3 of 5 are confirmed.  It is portfolio-level (no per-ticker state).
 
-Signals:
-  1. VIX 5-day SMA declining for 2 consecutive sessions
-  2. Put/call ratio below 1.2 for 3 consecutive sessions
-  3. S&P 500 closes above 200-DMA for 2 consecutive sessions
-  4. Net institutional ETF flow turning positive (or manual confirmation)
-  5. Brent crude below its declining 7-day SMA
+Signals (per CLAUDE.md spec, updated 2026-04-29):
+  1. VIX touches prior regime-high then declines for ≥3 consecutive sessions
+  2. Brent crude closes below $95 for the 2nd consecutive session
+  3. Put/call ratio spikes above 1.3 then reverses downward
+  4. % S&P 500 stocks above 50-DMA falls below 30% then recovers (I:S5O)
+  5. Operator geopolitical flag set to RESOLVED
 
 Gate rule: 3 of 5 confirmed = GREEN LIGHT
-UNAVAILABLE / MANUAL_REQUIRED signals do NOT count toward the 3 required.
+UNAVAILABLE signals do NOT count toward the 3 required.
 """
 
 from __future__ import annotations

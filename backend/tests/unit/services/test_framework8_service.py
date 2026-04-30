@@ -201,34 +201,36 @@ class TestResolveF5Cap:
 
 
 # ---------------------------------------------------------------------------
-# _build_insider_analysis — hardcoded tickers
+# _build_insider_analysis — three-filter pipeline
 # ---------------------------------------------------------------------------
 
 
 class TestBuildInsiderAnalysis:
-    """Hardcoded active-flag tickers bypass the API entirely."""
+    """Discretionary-sale detection over pre-fetched Form 4 filings."""
 
-    # Hardcoded tickers: NBIS, CRDO, FN, COHR, CF
-    @pytest.mark.parametrize("ticker", ["NBIS", "CRDO", "FN", "COHR", "CF"])
-    def test_hardcoded_tickers_have_flag_active(self, ticker: str) -> None:
-        result = _build_insider_analysis(ticker, filings=[])
-        assert result.flag_active is True
-
-    def test_hardcoded_ticker_case_insensitive(self) -> None:
-        result = _build_insider_analysis("nbis", filings=[])
-        assert result.flag_active is True
-
-    def test_unknown_ticker_with_no_filings_has_flag_inactive(self) -> None:
+    def test_no_filings_has_flag_inactive(self) -> None:
         result = _build_insider_analysis("AAPL", filings=[])
         assert result.flag_active is False
 
-    def test_cohr_is_sponsor_exception_preserves_flag(self) -> None:
-        """COHR is hardcoded — sponsor exception does not matter here."""
-        result = _build_insider_analysis("COHR", filings=[])
-        assert result.flag_active is True
+    def test_no_filings_case_insensitive(self) -> None:
+        result = _build_insider_analysis("aapl", filings=[])
+        assert result.flag_active is False
+        assert result.ticker == "AAPL"
+
+    def test_sponsor_sale_no_flag(self) -> None:
+        """Sponsor sales are ignored — flag stays off."""
+        filing = {
+            "transactionCode": "S",
+            "reportingOwnerName": "Bain Capital Investors LLC",
+            "transactionAmounts": {"transactionTotalValue": 5_000_000.0},
+            "filingTitle": "Director",
+            "footnotes": "",
+        }
+        result = _build_insider_analysis("COHR", filings=[filing])
+        assert result.flag_active is False
 
     def test_unknown_ticker_sponsor_sale_no_flag(self) -> None:
-        """Sponsor sales are ignored — flag stays off for non-hardcoded ticker."""
+        """Sponsor sales are ignored — flag stays off for any ticker."""
         filing = {
             "transactionCode": "S",
             "reportingOwnerName": "Bain Capital Investors LLC",

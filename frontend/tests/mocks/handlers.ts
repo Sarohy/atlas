@@ -744,4 +744,46 @@ export const handlers = [
       beta_source_flag: betaSource === 'DEFAULT',
     });
   }),
+
+  // ── LEAPS ────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/leaps/eligibility/:ticker`, ({ params }) => {
+    const ticker = String(params['ticker'] ?? 'MU').toUpperCase();
+    return HttpResponse.json({
+      ticker,
+      leaps_eligible: true,
+      eligibility_undetermined: false,
+      score: 88,
+      tier: 'TIER_1',
+      flow_confirmed: null,
+      regime_state: 'CLEAR',
+      regime_clears_leaps: true,
+      gate_f7_active: false,
+      gate_f29_passed: true,
+      gate_f30_permits_leaps: true,
+      iv_current: 0.45,
+      iv_percentile: 0.55,
+      iv_blocked: false,
+      iv_alert: 'NONE',
+      entry_conditions: [
+        {
+          condition_name: 'F33 Condition A — Calm Accumulation',
+          status: 'CONFIRMED',
+          met: true,
+          detail: 'Calm Accumulation: drawdown=22.0% (≥20%) and VIX=16.5 in [15.0, 18.0]',
+        },
+        {
+          condition_name: 'F33 Condition B — Washout',
+          status: 'NOT_MET',
+          met: false,
+          detail: 'Not met: sector drawdown 10.0% < 25.0%',
+        },
+      ],
+      conditions_met: 1,
+      conditions_required: 1,
+      block_reasons: [],
+      warning_messages: [],
+      data_age_minutes: 2,
+      cache_hit: false,
+    });
+  }),
 ];

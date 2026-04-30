@@ -6,6 +6,8 @@ import type {
   EntryConditionStatus,
   IVAlert,
   LeapsEligibility,
+  LeapsExpiryGuidance,
+  SizeGuidance,
 } from '@/lib/schemas/leaps';
 
 // ---------------------------------------------------------------------------
@@ -97,9 +99,12 @@ type LeapsCardProps = {
  *   3. Gate checks row (F7 / F29 / F30)
  *   4. Three entry condition cards
  *   5. IV panel
- *   6. Block reasons (if any)
- *   7. Warning messages (if any)
- *   8. Data age footer
+ *   6. Gap & IV catalyst wait row
+ *   7. Expiry & strike guidance
+ *   8. Size guidance
+ *   9. Block reasons (if any)
+ *  10. Warning messages (if any)
+ *  11. Data age footer
  */
 export function LeapsCard({ ticker }: LeapsCardProps) {
   const hasTicker = ticker.trim().length > 0;
@@ -268,7 +273,50 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
         </div>
       </div>
 
-      {/* ── Section 6: Block reasons ── */}
+      {/* ── Section 6: Gap & IV catalyst wait row ── */}
+      <div className="atlas-leaps-extras-row" data-testid="leaps-extras">
+        <div className="atlas-leaps-extra-cell">
+          <span className="atlas-leaps-extra-label">Gap Day</span>
+          <span
+            className={cn(
+              'atlas-leaps-extra-value',
+              data.gap_detected === true
+                ? 'is-leaps-gap-detected'
+                : data.gap_detected === false
+                  ? 'is-leaps-gap-clear'
+                  : '',
+            )}
+          >
+            {data.gap_detected === null ? '\u2014' : data.gap_detected ? 'GAP DETECTED' : 'NO GAP'}
+          </span>
+        </div>
+        <div className="atlas-leaps-extra-cell">
+          <span className="atlas-leaps-extra-label">IV Wait</span>
+          <span
+            className={cn(
+              'atlas-leaps-extra-value',
+              data.iv_catalyst_wait_days_remaining !== null &&
+                data.iv_catalyst_wait_days_remaining > 0
+                ? 'is-leaps-iv-wait-active'
+                : '',
+            )}
+          >
+            {data.iv_catalyst_wait_days_remaining === null
+              ? '\u2014'
+              : data.iv_catalyst_wait_days_remaining === 0
+                ? 'CLEAR'
+                : `${data.iv_catalyst_wait_days_remaining}d remaining`}
+          </span>
+        </div>
+      </div>
+
+      {/* ── Section 7: Expiry & strike guidance ── */}
+      <ExpiryGuidancePanel guidance={data.expiry_guidance} />
+
+      {/* ── Section 8: Size guidance ── */}
+      <SizeGuidancePanel guidance={data.size_guidance} />
+
+      {/* ── Section 9: Block reasons ── */}
       {data.block_reasons.length > 0 && (
         <ul className="atlas-leaps-block-reasons" data-testid="leaps-block-reasons">
           {data.block_reasons.map((reason, idx) => (
@@ -279,7 +327,7 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
         </ul>
       )}
 
-      {/* ── Section 7: Warning messages ── */}
+      {/* ── Section 10: Warning messages ── */}
       {data.warning_messages.length > 0 && (
         <ul className="atlas-leaps-warnings" data-testid="leaps-warnings">
           {data.warning_messages.map((msg, idx) => (
@@ -290,7 +338,7 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
         </ul>
       )}
 
-      {/* ── Section 8: Data age footer ── */}
+      {/* ── Section 11: Data age footer ── */}
       <p className="atlas-leaps-footer" data-testid="leaps-footer">
         {data.cache_hit ? 'cached' : 'live'} · {data.data_age_minutes.toFixed(0)} min ago
       </p>
@@ -299,9 +347,6 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
 }
 
 // ---------------------------------------------------------------------------
-// Gate cell helper
-// ---------------------------------------------------------------------------
-
 function GateCell({
   label,
   passed,
@@ -315,12 +360,62 @@ function GateCell({
       : passed
         ? 'is-leaps-gate-passed'
         : 'is-leaps-gate-failed';
-  const val = passed === null ? '—' : passed ? 'PASS' : 'FAIL';
+  const val = passed === null ? '\u2014' : passed ? 'PASS' : 'FAIL';
 
   return (
     <div className={cn('atlas-leaps-gate-cell', cls)}>
       <span className="atlas-leaps-gate-label">{label}</span>
       <span className="atlas-leaps-gate-value">{val}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expiry guidance panel
+// ---------------------------------------------------------------------------
+
+function ExpiryGuidancePanel({
+  guidance,
+}: {
+  guidance: LeapsExpiryGuidance;
+}) {
+  return (
+    <div className="atlas-leaps-expiry-panel" data-testid="leaps-expiry-guidance">
+      <span className="atlas-leaps-expiry-label">Preferred expiry</span>
+      <span className="atlas-leaps-expiry-value">
+        {guidance.preferred_expiries.join(' / ')}
+      </span>
+      <span className="atlas-leaps-expiry-otm">
+        OTM {guidance.otm_pct_low.toFixed(0)}–{guidance.otm_pct_high.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Size guidance panel
+// ---------------------------------------------------------------------------
+
+function SizeGuidancePanel({ guidance }: { guidance: SizeGuidance }) {
+  const label = guidance.carveout_active ? 'Carveout sizing' : 'Standard sizing';
+  const baselineRange =
+    guidance.carveout_active
+      ? `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`
+      : `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`;
+  return (
+    <div
+      className={cn(
+        'atlas-leaps-size-panel',
+        guidance.carveout_active ? 'is-leaps-size-carveout' : '',
+        guidance.data_missing ? 'is-leaps-size-missing' : '',
+      )}
+      data-testid="leaps-size-guidance"
+    >
+      <span className="atlas-leaps-size-label">{label}</span>
+      <span className="atlas-leaps-size-baseline">{baselineRange}</span>
+      <span className="atlas-leaps-size-max">
+        max {guidance.standard_max_pct.toFixed(1)}% NAV
+      </span>
     </div>
   );
 }

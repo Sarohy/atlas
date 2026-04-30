@@ -7,14 +7,27 @@ Pure functions under test:
   _map_action        — final_score → (action, action_tone) via classify_tier
   _compute_raw_total — (f1,f2,f3,f4,f5) → weighted sum (max 100)
   _compute_final_score — raw_total → clamped int [0,100]
+
+Integration contracts:
+  TestFetchF4UsesFramework9 — _fetch_f4 must delegate to evaluate_framework9
+                              (not raw OptionsFlowService) so that pre-earnings
+                              modifiers are applied before F1 consumes the score.
 """
 
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
 from atlas.core.scoring import classify_tier
+from atlas.schemas.framework9 import (
+    DataSourceStatus,
+    FlowDirection,
+    Framework9Result,
+    SignalTier,
+)
 from atlas.services.framework_score_service import (
+    FrameworkScoreService,
     _compute_final_score,
     _compute_raw_total,
     _map_action,
@@ -246,3 +259,111 @@ class TestComputeFinalScore:
     def test_rounding(self) -> None:
         # 82.6 → rounds to 83
         assert _compute_final_score(82.6) == 83
+
+
+# ---------------------------------------------------------------------------
+# _fetch_f4 must delegate to evaluate_framework9
+# ---------------------------------------------------------------------------
+
+
+def _make_f9_result(ticker: str = "TEST", f4_score: float = 41.0) -> Framework9Result:
+    """Return a minimal Framework9Result for mocking purposes."""
+    return Framework9Result(
+        ticker=ticker,
+        f4_score=f4_score,
+        f4_grade="NEUTRAL",
+        f4_contribution=round(f4_score * 0.15, 2),
+        signal_tier=SignalTier.TIER_4_WEAK,
+        flow_direction=FlowDirection.NEUTRAL,
+        put_call_modifier=0,
+        dark_pool_modifier=0,
+        pre_earnings_modifier=-13,
+        index_modifier=0,
+        signal_valid=False,
+        minimum_threshold_met=False,
+        uw_status=DataSourceStatus.ONLINE,
+        polygon_status=DataSourceStatus.ONLINE,
+        av_status=DataSourceStatus.ONLINE,
+        data_gap_severity="NONE",
+        warning_level="AMBER",
+    )
+
+
+class TestFetchF4UsesFramework9:
+    """_fetch_f4 must delegate to evaluate_framework9, not raw OptionsFlowService.
+
+    Framework 9 applies the pre-earnings modifier (e.g. −25%) on top of the
+    raw F4 base score.  Framework 1 must consume the *adjusted* score so the
+    final conviction score reflects the timing-risk adjustment.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fetch_f4_returns_framework9_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_fetch_f4 must return Framework9Result (pre-earnings modifier baked in)."""
+        import atlas.services.framework_score_service as fss_module
+
+        expected = _make_f9_result(ticker="TEST", f4_score=41.0)
+
+        async def _mock_evaluate_framework9(
+            ticker: str,
+            uw_api_key: str,
+            polygon_api_key: str,
+            av_api_key: str,
+            **kwargs: object,
+        ) -> Framework9Result:
+            return expected
+
+        monkeypatch.setattr(fss_module, "evaluate_framework9", _mock_evaluate_framework9)
+
+        svc = FrameworkScoreService(
+            polygon_api_key="poly",
+            alphavantage_api_key="av",
+            transcript_api_key="fmp",
+            benzinga_api_key="benz",
+            unusual_whales_api_key="uw",
+            sec_api_key="sec",
+        )
+        result = await svc._fetch_f4("TEST")
+
+        assert isinstance(result, Framework9Result)
+        assert result.f4_score == 41.0
+        assert result.pre_earnings_modifier == -13
+
+    @pytest.mark.asyncio
+    async def test_fetch_f4_passes_api_keys_to_framework9(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_fetch_f4 must forward uw, polygon, and av keys to evaluate_framework9."""
+        import atlas.services.framework_score_service as fss_module
+
+        captured: dict[str, str] = {}
+
+        async def _capturing_f9(
+            ticker: str,
+            uw_api_key: str,
+            polygon_api_key: str,
+            av_api_key: str,
+            **kwargs: object,
+        ) -> Framework9Result:
+            captured["ticker"] = ticker
+            captured["uw"] = uw_api_key
+            captured["polygon"] = polygon_api_key
+            captured["av"] = av_api_key
+            return _make_f9_result(ticker=ticker)
+
+        monkeypatch.setattr(fss_module, "evaluate_framework9", _capturing_f9)
+
+        svc = FrameworkScoreService(
+            polygon_api_key="POLY_KEY",
+            alphavantage_api_key="AV_KEY",
+            transcript_api_key="FMP_KEY",
+            benzinga_api_key="BENZ_KEY",
+            unusual_whales_api_key="UW_KEY",
+            sec_api_key="SEC_KEY",
+        )
+        await svc._fetch_f4("AAPL")
+
+        assert captured["ticker"] == "AAPL"
+        assert captured["uw"] == "UW_KEY"
+        assert captured["polygon"] == "POLY_KEY"
+        assert captured["av"] == "AV_KEY"

@@ -35,6 +35,7 @@ import httpx
 from atlas.schemas.framework9 import (
     DataGapDetail,
     DataSourceStatus,
+    ExceptionalConvictionDetail,
     FlowDirection,
     Framework9Result,
     SignalTier,
@@ -52,13 +53,16 @@ _CACHE_TTL_SECONDS: Final[int] = 900  # 15 minutes
 # Stale threshold: data older than this is flagged as STALE.
 _STALE_THRESHOLD_MINUTES: Final[float] = 240.0
 
-# Signal tier score defaults.
-_SCORE_TIER1_BULLISH: Final[float] = 92.0
-_SCORE_TIER1_BEARISH: Final[float] = 30.0
-_SCORE_TIER2_BASE: Final[float] = 82.0
-_SCORE_TIER3_BASE: Final[float] = 70.0
-_SCORE_TIER4_BASE: Final[float] = 57.0
-_SCORE_TIER5_BASELINE: Final[float] = 55.0
+# Signal tier score defaults (spec-defined midpoints).
+_SCORE_TIER1_BULLISH: Final[float] = 92.0  # $10M+ whale block confirmed (spec: 88-92)
+_SCORE_TIER1_BEARISH: Final[float] = 60.0  # genuine bearish put flow (spec: 55-65)
+_SCORE_TIER2_BASE: Final[float] = 82.0  # dark pool $500K+ single session (spec: 80-85)
+_SCORE_TIER3_BASE: Final[float] = 80.0  # 150%+ above normal call volume (spec: 78-82)
+_SCORE_TIER4_BASE: Final[float] = 74.0  # moderate unusual call activity (spec: 72-76)
+_SCORE_TIER5_BASELINE: Final[float] = 66.0  # normal baseline activity (spec: 65-68)
+
+# Degraded fallback when all data is unavailable (distinct from baseline).
+_SCORE_DEGRADED_BASELINE: Final[float] = 55.0
 
 # Low liquidity ADV threshold.
 _LOW_LIQUIDITY_ADV: Final[float] = 100_000.0
@@ -66,12 +70,26 @@ _LOW_LIQUIDITY_CAP: Final[float] = 70.0
 
 # Minimum print thresholds for signal validation.
 _MIN_PRINTS_COUNT: Final[int] = 10
-_MIN_ADV_FRACTION: Final[float] = 0.02   # 2% of ADV
+_MIN_ADV_FRACTION: Final[float] = 0.02  # 2% of ADV
 _MIN_SESSION_USD: Final[float] = 500_000.0
 
 # Whale / institutional thresholds.
 _WHALE_THRESHOLD_USD: Final[float] = 10_000_000.0
 _INST_DARK_POOL_USD: Final[float] = 500_000.0
+
+# Pre-earnings timing modifier (spec §5).
+_PRE_EARNINGS_REDUCTION_PCT: Final[float] = 0.25  # 25% score reduction
+_PRE_EARNINGS_WINDOW_DAYS: Final[int] = 7  # applies when 0-7 calendar days to earnings
+
+# Exceptional Conviction override (spec §6) — requires 3-of-5 criteria.
+_EXCEPTIONAL_CONVICTION_THRESHOLD: Final[int] = 3
+# Criterion 1: "multiple" dark pool blocks > $1M in last 5 trading days.
+_EXCEPTIONAL_CONVICTION_DARK_POOL_BLOCK_USD: Final[float] = 1_000_000.0
+_EXCEPTIONAL_CONVICTION_DARK_POOL_MIN_BLOCKS: Final[int] = 2  # "multiple" = >=2
+# Criterion 5: bullish call/put ratio threshold indicating skew.
+_EXCEPTIONAL_CONVICTION_CP_RATIO_MIN: Final[float] = 2.0
+# Reward when EC is active: +10% premium on base score.
+_EXCEPTIONAL_CONVICTION_PREMIUM_PCT: Final[float] = 0.10
 
 # Score grades.
 _GRADE_STRONG_BUY_MIN: Final[int] = 80
@@ -157,6 +175,45 @@ def _resolve_spread_position(
     return (price - bid) / spread, flags
 
 
+def evaluate_exceptional_conviction(
+    *,
+    dark_pool_blocks_gt_1m_count: int,
+    transcript_conviction_language: bool | None,
+    guidance_raised_above_high: bool | None,
+    transcript_cross_references_ge5: bool | None,
+    bullish_skew_despite_elevated_iv: bool,
+) -> ExceptionalConvictionDetail:
+    """Evaluate the five Exceptional Conviction criteria and return a detail record.
+
+    Pure function — no I/O, no side effects.
+
+    Criterion 1 (auto):  Dark pool multiple blocks >$1M in last 5 trading days.
+    Criterion 2 (manual): Transcript conviction language.
+    Criterion 3 (manual): Guidance raised; analysts modeling above high end.
+    Criterion 4 (manual): >=5 transcript cross-references in universe.
+    Criterion 5 (auto):  Bullish call skew despite elevated IV.
+
+    None inputs for criteria 2-4 are treated as False (not evaluated).
+    """
+    crit_1 = dark_pool_blocks_gt_1m_count >= _EXCEPTIONAL_CONVICTION_DARK_POOL_MIN_BLOCKS
+    crit_2 = bool(transcript_conviction_language)
+    crit_3 = bool(guidance_raised_above_high)
+    crit_4 = bool(transcript_cross_references_ge5)
+    crit_5 = bullish_skew_despite_elevated_iv
+
+    count = sum([crit_1, crit_2, crit_3, crit_4, crit_5])
+
+    return ExceptionalConvictionDetail(
+        dark_pool_multiple_blocks_gt_1m=crit_1,
+        transcript_conviction_language=transcript_conviction_language,
+        guidance_raised_above_high=guidance_raised_above_high,
+        transcript_cross_references_ge5=transcript_cross_references_ge5,
+        bullish_skew_despite_elevated_iv=crit_5,
+        count=count,
+        active=count >= _EXCEPTIONAL_CONVICTION_THRESHOLD,
+    )
+
+
 def build_data_gap_details(
     uw_status: DataSourceStatus,
     polygon_status: DataSourceStatus,
@@ -209,10 +266,7 @@ def build_data_gap_details(
                 field="dark_pool",
                 source="Polygon.io",
                 reason="API unavailable",
-                impact=(
-                    "Dark pool formula cannot run. "
-                    "Tier 2 blocked. Modifier = 0."
-                ),
+                impact=("Dark pool formula cannot run. Tier 2 blocked. Modifier = 0."),
                 default_used="dark_pool_modifier = 0",
             )
         )
@@ -249,10 +303,7 @@ def build_data_gap_details(
             severity = "PARTIAL"
 
     # ── Critical: both volume sources offline ──────────────────────────────
-    if (
-        av_status == DataSourceStatus.OFFLINE
-        and polygon_status == DataSourceStatus.OFFLINE
-    ):
+    if av_status == DataSourceStatus.OFFLINE and polygon_status == DataSourceStatus.OFFLINE:
         gaps.append(
             DataGapDetail(
                 field="options_volume",
@@ -277,14 +328,10 @@ def build_data_gap_details(
     elif severity == "MAJOR":
         f1_badge = "F4 MAJOR DATA GAP"
         f1_message = (
-            "Options flow severely limited. "
-            "Key sources offline. "
-            "F4 score may be understated."
+            "Options flow severely limited. Key sources offline. F4 score may be understated."
         )
         f1_tooltip = " | ".join(
-            f"{g.source} offline: {g.impact}"
-            for g in gaps
-            if "unavailable" in g.reason.lower()
+            f"{g.source} offline: {g.impact}" for g in gaps if "unavailable" in g.reason.lower()
         )
 
     elif severity == "CRITICAL":
@@ -295,8 +342,7 @@ def build_data_gap_details(
             "Verify manually before acting."
         )
         f1_tooltip = (
-            "Unusual Whales, Polygon, and Alpha Vantage "
-            "all offline. Cannot score options flow."
+            "Unusual Whales, Polygon, and Alpha Vantage all offline. Cannot score options flow."
         )
 
     return gaps, severity, f1_badge, f1_message, f1_tooltip
@@ -428,18 +474,14 @@ async def fetch_polygon_dark_pool(
             "num_prints": len(trades),
             "total_usd": total_usd,
             "avg_spread_position": (
-                sum(spread_positions) / len(spread_positions)
-                if spread_positions
-                else None
+                sum(spread_positions) / len(spread_positions) if spread_positions else None
             ),
             "missing_fields": list(set(missing_fields)),
         }
 
         _cache_set(cache_key, result)
 
-        status = (
-            DataSourceStatus.PARTIAL if missing_fields else DataSourceStatus.ONLINE
-        )
+        status = DataSourceStatus.PARTIAL if missing_fields else DataSourceStatus.ONLINE
         return result, status
 
     except Exception as exc:
@@ -529,9 +571,7 @@ async def fetch_options_volume(
             calls_vol = sum(
                 int(o.get("volume", 0) or 0) for o in options if o.get("type") == "call"
             )
-            puts_vol = sum(
-                int(o.get("volume", 0) or 0) for o in options if o.get("type") == "put"
-            )
+            puts_vol = sum(int(o.get("volume", 0) or 0) for o in options if o.get("type") == "put")
             pc = puts_vol / calls_vol if calls_vol > 0 else None
 
             result = {
@@ -579,9 +619,7 @@ async def get_30_day_adv(
             data = response.json()
             # Polygon snapshot returns day.volume for today and prevDay.volume.
             # We approximate ADV using the 30d period volume from the ticker details.
-            day_vol: float | None = (
-                data.get("ticker", {}).get("day", {}).get("volume")
-            )
+            day_vol: float | None = data.get("ticker", {}).get("day", {}).get("volume")
             return float(day_vol) if day_vol else None
     except Exception as exc:
         logger.debug("ADV fetch failed", extra={"ticker": ticker, "error": repr(exc)})
@@ -600,25 +638,30 @@ async def evaluate_framework9(
     av_api_key: str,
     *,
     client: httpx.AsyncClient | None = None,
+    # Optional manual Exceptional Conviction inputs (criteria 2-4).
+    # None = not evaluated this session; False = evaluated and not met.
+    transcript_conviction_language: bool | None = None,
+    guidance_raised_above_high: bool | None = None,
+    transcript_cross_references_ge5: bool | None = None,
 ) -> Framework9Result:
     """Run the Framework 9 evaluation pipeline for *ticker*.
 
     Source-of-truth contract: F9 reuses the F4 score produced by
     ``OptionsFlowService.compute_options_flow`` (the same data already
-    rendered in the F4 panel).  F9's only job is to layer F9-specific
-    timing modifiers (pre-earnings reduction from F7) on top of the F4
-    score.  It does NOT re-fetch options data from Unusual Whales or
-    Polygon — those endpoints have moved/become entitled-only and
-    fetching them here previously caused a spurious "F4 MAJOR DATA GAP"
-    badge while the F4 panel itself was healthy.
+    rendered in the F4 panel).  F9's job is to layer F9-specific timing
+    modifiers on top of the F4 score.  It does NOT re-fetch options data
+    from Unusual Whales or Polygon — those endpoints have moved/become
+    entitled-only and fetching them here previously caused a spurious
+    "F4 MAJOR DATA GAP" badge while the F4 panel itself was healthy.
 
     Modifier policy:
-      • put_call and dark_pool modifiers are NOT applied here. F4 already
-        weights call/put ratio (20%) and dark-pool premium (15%) inside
-        its own composite, so re-applying them would double-count.
-      • pre_earnings reduction (-30%) is applied when F7's earnings gate
-        is active (F4 has no earnings awareness on its own).
-      • index_modifier remains 0 (no signal source).
+      - put_call and dark_pool modifiers are NOT applied here.  F4 already
+        weights call/put ratio (20%) and dark-pool premium (15%) inside its
+        own composite, so re-applying them would double-count.
+      - Pre-earnings: 25% reduction when 0-7 calendar days to earnings.
+        Exceptional Conviction (3-of-5 criteria) replaces the reduction
+        with a +10% premium.
+      - index_modifier remains 0 (no signal source).
     """
     from atlas.services.options_flow_service import OptionsFlowService
 
@@ -677,22 +720,22 @@ async def evaluate_framework9(
                     source="OptionsFlowService (Unusual Whales)",
                     reason="F4 service call failed",
                     impact="F4 score unavailable; F9 cannot evaluate flow.",
-                    default_used="f4_score = 55 neutral baseline",
+                    default_used=f"f4_score = {_SCORE_DEGRADED_BASELINE} degraded baseline",
                 )
             )
-            severity = "MAJOR"
-            f1_badge = "F4 SERVICE UNAVAILABLE"
+            severity = "CRITICAL"
+            f1_badge = "F4 DATA UNAVAILABLE"
             f1_msg = (
                 "Options flow service unavailable. F4 score defaulting to "
-                "neutral 55. Verify manually before acting."
+                f"degraded baseline {_SCORE_DEGRADED_BASELINE}. Verify manually before acting."
             )
             f1_tip = "OptionsFlowService.compute_options_flow() raised an exception."
 
             return Framework9Result(
                 ticker=ticker,
-                f4_score=_SCORE_TIER5_BASELINE,
-                f4_grade=_grade_from_score(_SCORE_TIER5_BASELINE),
-                f4_contribution=round(_SCORE_TIER5_BASELINE * 0.15, 2),
+                f4_score=_SCORE_DEGRADED_BASELINE,
+                f4_grade=_grade_from_score(_SCORE_DEGRADED_BASELINE),
+                f4_contribution=round(_SCORE_DEGRADED_BASELINE * 0.15, 2),
                 signal_tier=SignalTier.TIER_5_NONE,
                 flow_direction=FlowDirection.NEUTRAL,
                 largest_print_usd=None,
@@ -709,6 +752,8 @@ async def evaluate_framework9(
                 covered_call_exception=False,
                 covered_call_unverifiable=False,
                 pre_earnings_reduction=False,
+                days_to_earnings=None,
+                exceptional_conviction=None,
                 conflicting_signals=False,
                 low_liquidity=False,
                 potential_index_flow=False,
@@ -724,7 +769,7 @@ async def evaluate_framework9(
                 warning_level="RED",
                 warning_messages=[
                     "Options flow service offline — F4 score unavailable. "
-                    "F9 returning neutral baseline 55."
+                    f"F9 returning degraded baseline {_SCORE_DEGRADED_BASELINE}."
                 ],
                 breakdown={},
             )
@@ -750,9 +795,7 @@ async def evaluate_framework9(
         # Map F4's signal hierarchy (GOLD/BLUE/GREEN/YELLOW/GREY/WHITE) onto
         # F9's tier enum so downstream UI keeps working unchanged.
         f4_tier_str = (
-            f4.signal_tier.value
-            if hasattr(f4.signal_tier, "value")
-            else str(f4.signal_tier)
+            f4.signal_tier.value if hasattr(f4.signal_tier, "value") else str(f4.signal_tier)
         )
         f4_to_f9_tier: dict[str, SignalTier] = {
             "GOLD": SignalTier.TIER_1_WHALE,
@@ -764,45 +807,147 @@ async def evaluate_framework9(
         }
         tier: SignalTier = f4_to_f9_tier.get(f4_tier_str, SignalTier.TIER_5_NONE)
 
-        # Step 3 — F7 earnings gate check (timing only — F4 has no earnings awareness).
+        # Derive data quality from F4's response completeness.
+        # Each missing indicator adds a gap and raises severity.
+        whale_missing = f4.whale_block.largest_premium is None
+        dp_missing = f4.dark_pool.total_dark_pool_premium is None
+        cp_missing = f4.call_put_ratio.ratio is None
+
+        if whale_missing:
+            gaps.append(
+                DataGapDetail(
+                    field="largest_print_usd",
+                    source="Unusual Whales",
+                    reason="Whale block data unavailable from F4",
+                    impact=(
+                        "Tier 1 whale signal cannot be evaluated; "
+                        "score derived from secondary indicators."
+                    ),
+                    default_used="0",
+                )
+            )
+        if dp_missing:
+            gaps.append(
+                DataGapDetail(
+                    field="dark_pool",
+                    source="Polygon.io",
+                    reason="Dark pool data unavailable from F4",
+                    impact="Dark pool confirmation not available.",
+                    default_used="None",
+                )
+            )
+        if cp_missing:
+            gaps.append(
+                DataGapDetail(
+                    field="put_call_ratio",
+                    source="Polygon.io / Alpha Vantage",
+                    reason="Put/call ratio unavailable",
+                    impact="Call/put ratio direction cannot be assessed.",
+                    default_used="None",
+                )
+            )
+
+        if whale_missing and dp_missing:
+            severity = "MAJOR"
+            f1_badge = "F4 MAJOR DATA GAP"
+            f1_msg = "Whale block and dark pool data both unavailable — F4 score degraded."
+            f1_tip = "Neither Unusual Whales nor Polygon reported data for this ticker."
+        elif whale_missing:
+            # Whale data is the primary F9 signal — missing it alone constitutes a major gap.
+            severity = "MAJOR"
+            f1_badge = "F4 MAJOR DATA GAP"
+            f1_msg = (
+                "Whale block data unavailable — Tier 1 signal blocked. "
+                "Score limited to secondary indicators."
+            )
+            f1_tip = "Unusual Whales data not available from F4 for this ticker."
+        elif gaps:
+            severity = "PARTIAL"
+            f1_badge = "F4 PARTIAL DATA"
+            f1_msg = "Some F4 indicators unavailable — score derived from available data."
+            f1_tip = "; ".join(g.reason for g in gaps)
+
+        # Covered call verification: when BEARISH flow is present but dark pool is
+        # offline, we cannot confirm whether it is genuine bearish or covered call
+        # writing (which should NOT penalise F4).
+        covered_call_unverifiable = uw_direction == "BEARISH" and dp_missing
+        if covered_call_unverifiable:
+            warnings.append(
+                "Bearish flow detected — dark pool data unavailable; "
+                "covered call status cannot be verified."
+            )
+
+        # Step 3 — Earnings proximity check (0-7 calendar days = pre-earnings window).
+        days_to_earnings: int | None = None
         gate_active = False
         try:
             from datetime import date
 
             from atlas.config import get_settings
-            from atlas.services.framework7_service import (
-                calculate_gate_close_date,
-                get_earnings_date,
-            )
+            from atlas.services.framework7_service import get_earnings_date
 
             settings = get_settings()
-            earnings_date_str = await get_earnings_date(
-                ticker, settings.alphavantage_api_key
-            )
+            earnings_date_str = await get_earnings_date(ticker, settings.alphavantage_api_key)
             if earnings_date_str:
                 earnings_date = date.fromisoformat(earnings_date_str)
-                gate_close = calculate_gate_close_date(earnings_date)
-                gate_active = date.today() >= gate_close
+                days_to_earnings = (earnings_date - date.today()).days
+                gate_active = 0 <= days_to_earnings <= _PRE_EARNINGS_WINDOW_DAYS
         except Exception as exc:
-            warnings.append(
-                "Could not verify earnings gate — pre-earnings modifier not applied"
-            )
+            warnings.append("Could not verify earnings date — pre-earnings modifier not applied")
             logger.debug(
-                "Framework 7 gate check failed",
+                "Framework 7 earnings date check failed",
                 extra={"ticker": ticker, "error": repr(exc)},
             )
 
-        # Step 4 — Apply pre-earnings reduction (the only modifier F9 layers on F4).
+        # Step 4 — Exceptional Conviction evaluation (when inside earnings window).
+        ec_detail: ExceptionalConvictionDetail | None = None
         if gate_active:
-            flags["pre_earnings"] = True
-            reduction = int(base_score * 0.30)
-            modifiers["pre_earnings"] = -reduction
-            warnings.append(
-                f"Pre-earnings reduction applied — "
-                f"-{reduction} points (30% of F4 score {base_score:.0f})"
+            # Criterion 1: dark pool multiple blocks > $1M in last 5 trading days.
+            # Proxy: largest_dp > $1M AND dp_count >= 2 (F4 aggregates same-session).
+            dp_blocks_gt_1m = (
+                dp_count
+                if (
+                    largest_dp is not None
+                    and largest_dp > _EXCEPTIONAL_CONVICTION_DARK_POOL_BLOCK_USD
+                    and dp_count >= _EXCEPTIONAL_CONVICTION_DARK_POOL_MIN_BLOCKS
+                )
+                else 0
+            )
+            # Criterion 5: bullish call skew (cp_ratio > 2.0) and BULLISH direction.
+            bullish_skew = (
+                cp_ratio is not None
+                and cp_ratio > _EXCEPTIONAL_CONVICTION_CP_RATIO_MIN
+                and uw_direction == "BULLISH"
+            )
+            ec_detail = evaluate_exceptional_conviction(
+                dark_pool_blocks_gt_1m_count=dp_blocks_gt_1m,
+                transcript_conviction_language=transcript_conviction_language,
+                guidance_raised_above_high=guidance_raised_above_high,
+                transcript_cross_references_ge5=transcript_cross_references_ge5,
+                bullish_skew_despite_elevated_iv=bullish_skew,
             )
 
-        # Step 5 — Final F4 score.
+        # Step 5 — Apply pre-earnings modifier.
+        if gate_active:
+            flags["pre_earnings"] = True
+            if ec_detail is not None and ec_detail.active:
+                # Exceptional Conviction active — +10% premium instead of reduction.
+                premium = int(base_score * _EXCEPTIONAL_CONVICTION_PREMIUM_PCT)
+                modifiers["pre_earnings"] = premium
+                warnings.append(
+                    f"Exceptional Conviction active (3-of-5) — "
+                    f"+{premium} points premium (instead of pre-earnings reduction)"
+                )
+            else:
+                # Normal: 25% reduction for 0-7 days to earnings.
+                reduction = int(base_score * _PRE_EARNINGS_REDUCTION_PCT)
+                modifiers["pre_earnings"] = -reduction
+                warnings.append(
+                    f"Pre-earnings reduction applied — "
+                    f"-{reduction} points (25% of F4 score {base_score:.0f})"
+                )
+
+        # Step 6 — Final F4 score.
         f4_score = max(0.0, min(100.0, base_score + modifiers["pre_earnings"]))
 
         # Step 6 — Threshold/validity flags carried over from F4's data.
@@ -811,8 +956,13 @@ async def evaluate_framework9(
         threshold_b = False  # volume-vs-ADV not computed when reusing F4
         threshold_c = largest_premium >= _MIN_SESSION_USD
 
-        # Step 7 — Warning level (no MAJOR/CRITICAL when F4 is healthy).
-        warning_level = "AMBER" if flags["pre_earnings"] else "NONE"
+        # Warning level: RED for major gaps, AMBER for partial or pre-earnings, else NONE.
+        if severity in ("MAJOR", "CRITICAL"):
+            warning_level = "RED"
+        elif severity == "PARTIAL" or flags["pre_earnings"] or covered_call_unverifiable:
+            warning_level = "AMBER"
+        else:
+            warning_level = "NONE"
 
         # Resolve flow direction enum safely.
         try:
@@ -828,8 +978,8 @@ async def evaluate_framework9(
             signal_tier=tier,
             flow_direction=flow_dir,
             largest_print_usd=largest_dp,
-            dark_pool_spread_position=None,  # not exposed by F4
-            dark_pool_direction=None,
+            dark_pool_spread_position=None,  # not exposed by F4 (no bid/ask from UW API)
+            dark_pool_direction=f4.dark_pool.direction,
             put_call_ratio=(round(cp_ratio, 2) if cp_ratio is not None else None),
             put_call_modifier=0,
             dark_pool_modifier=0,
@@ -839,8 +989,10 @@ async def evaluate_framework9(
             signal_valid=threshold_met,
             minimum_threshold_met=threshold_met,
             covered_call_exception=False,
-            covered_call_unverifiable=False,
+            covered_call_unverifiable=covered_call_unverifiable,
             pre_earnings_reduction=flags["pre_earnings"],
+            days_to_earnings=days_to_earnings,
+            exceptional_conviction=ec_detail,
             conflicting_signals=False,
             low_liquidity=False,
             potential_index_flow=False,
@@ -864,6 +1016,7 @@ async def evaluate_framework9(
                 "dark_pool_largest_usd": largest_dp,
                 "dark_pool_count": dp_count,
                 "put_call_ratio": cp_ratio,
+                "days_to_earnings": days_to_earnings,
                 "modifiers": modifiers,
                 "flags": flags,
                 "thresholds": {

@@ -51,6 +51,8 @@ from atlas.schemas.leaps import (
     IVAlert,
     LeapsBucketStatus,
     LeapsEligibility,
+    SizeGuidanceSchema,
+    _default_expiry_guidance,
 )
 from atlas.schemas.leaps import (
     LeapsPosition as LeapsPositionSchema,
@@ -88,8 +90,8 @@ _IV_BLOCK_THRESHOLD: Final[float] = 0.90
 # Dark pool flow required for Tier 2 LEAPS eligibility.
 _TIER_2_DARK_POOL_FLOW_USD: Final[float] = 500_000.0
 
-# LEAPS bucket cap as % of NAV.
-_LEAPS_BUCKET_CAP_PCT: Final[float] = 5.0  # 5% max of NAV
+# LEAPS bucket cap as % of NAV (Bucket 2 hard cap per F33 spec).
+_LEAPS_BUCKET_CAP_PCT: Final[float] = 4.0  # 4% max of NAV
 
 # Unusual Whales IV endpoint.
 _UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
@@ -98,6 +100,17 @@ _UW_IV_URL: Final[str] = f"{_UW_BASE_URL}/api/stock/{{ticker}}/iv-rank"
 # Regime states that clear LEAPS eligibility.
 _LEAPS_ALLOWED_REGIMES: Final[frozenset[str]] = frozenset(
     {"CLEAR", "SOFT_CAUTION", "NORMAL", "NONE"}
+)
+
+# Days to wait after a major catalyst (earnings) for IV to compress.
+_IV_CATALYST_WAIT_DAYS: Final[int] = 7
+
+# Minimum price gap (open vs. prev close as %) to trigger the gap-entry block.
+_GAP_THRESHOLD_PCT: Final[float] = 2.0  # 2% gap constitutes a "gap day"
+
+# Polygon snapshot URL for gap detection (open / prev-close fetch).
+_POLYGON_TICKER_SNAPSHOT_URL: Final[str] = (
+    "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}"
 )
 
 # ---------------------------------------------------------------------------
@@ -346,6 +359,69 @@ def _compute_iv_alert(
     return IVAlert.NONE
 
 
+def _compute_iv_catalyst_wait(
+    earnings_date: date | None,
+    today: date | None = None,
+) -> int | None:
+    """Return days remaining in the 7-day post-catalyst IV compression wait.
+
+    Spec: "Wait 5-7 days after a major catalyst for IV compression."
+
+    Parameters
+    ----------
+    earnings_date:
+        Most recent earnings date (past or present).  None when unavailable.
+    today:
+        Reference date — injectable for testing.  Defaults to ``date.today()``.
+
+    Returns
+    -------
+    int | None
+        None  — no earnings date available; no wait tracked.
+        0     — wait window over (> 7 days since catalyst) or catalyst in future.
+        1-7   — days remaining in the wait window.
+    """
+    if earnings_date is None:
+        return None
+    _today = today or date.today()
+    days_since = (_today - earnings_date).days
+    if 0 <= days_since <= _IV_CATALYST_WAIT_DAYS:
+        return _IV_CATALYST_WAIT_DAYS - days_since
+    return 0
+
+
+def _detect_price_gap(
+    open_price: float | None,
+    prev_close: float | None,
+    *,
+    threshold_pct: float = _GAP_THRESHOLD_PCT,
+) -> bool | None:
+    """Return True when today's open gaps from the previous close by ≥ threshold_pct.
+
+    Spec: "Never buy LEAPS into a gap."
+
+    Parameters
+    ----------
+    open_price:
+        Today's official open price.
+    prev_close:
+        Previous session's closing price.
+    threshold_pct:
+        Minimum absolute % deviation that constitutes a gap (default 2%).
+
+    Returns
+    -------
+    bool | None
+        True  — gap detected (open differs from prev_close by ≥ threshold).
+        False — no gap.
+        None  — data unavailable.
+    """
+    if open_price is None or prev_close is None or prev_close == 0.0:
+        return None
+    gap_pct = abs(open_price - prev_close) / prev_close * 100.0
+    return gap_pct >= threshold_pct
+
+
 def _compute_eligibility(
     *,
     ticker: str,
@@ -362,6 +438,9 @@ def _compute_eligibility(
     iv_percentile: float | None,
     entry_conditions: list[EntryCondition],
     data_age_minutes: int,
+    gap_detected: bool | None = None,
+    iv_catalyst_wait_days_remaining: int | None = None,
+    size_guidance_f33: object | None = None,
 ) -> LeapsEligibility:
     """Compute LEAPS eligibility from all pre-fetched inputs. Pure function.
 
@@ -455,6 +534,23 @@ def _compute_eligibility(
             has_unknown = True
             warning_messages.append("F9 dark pool flow data unavailable for Tier 2 check.")
 
+    # --- Gap-day block (spec: "Never buy LEAPS into a gap") ---
+    if gap_detected is True:
+        block_reasons.append(
+            f"Price gap detected (≥{_GAP_THRESHOLD_PCT:.0f}% open vs. prev close) — "
+            "do not enter LEAPS on a gap day."
+        )
+    elif gap_detected is None:
+        has_unknown = True
+        warning_messages.append("Gap data unavailable — price check deferred.")
+
+    # --- Post-catalyst IV compression wait ---
+    if iv_catalyst_wait_days_remaining is not None and iv_catalyst_wait_days_remaining > 0:
+        block_reasons.append(
+            f"Post-catalyst IV wait: {iv_catalyst_wait_days_remaining} day(s) remaining "
+            f"(spec: wait {_IV_CATALYST_WAIT_DAYS} days after earnings for IV compression)."
+        )
+
     # --- Determine overall eligibility ---
     conditions_met = sum(1 for c in entry_conditions if c.met is True)
     conditions_required = 2  # At least 2 of 3 entry conditions should be met
@@ -469,6 +565,26 @@ def _compute_eligibility(
         # All required checks passed and no unknowns.
         leaps_eligible = True
         eligibility_undetermined = False
+
+    # Build size guidance schema from F33 dataclass (or use default).
+    from atlas.services.framework33_service import SizeGuidance
+
+    if size_guidance_f33 is not None and isinstance(size_guidance_f33, SizeGuidance):
+        size_guidance = SizeGuidanceSchema(
+            standard_max_pct=size_guidance_f33.standard_max_pct,
+            baseline_pct=size_guidance_f33.baseline_pct,
+            baseline_max_pct=size_guidance_f33.baseline_max_pct,
+            carveout_active=size_guidance_f33.carveout_active,
+            data_missing=size_guidance_f33.data_missing,
+        )
+    else:
+        size_guidance = SizeGuidanceSchema(
+            standard_max_pct=1.0,
+            baseline_pct=0.3,
+            baseline_max_pct=0.75,
+            carveout_active=False,
+            data_missing=False,
+        )
 
     return LeapsEligibility(
         ticker=ticker,
@@ -486,11 +602,15 @@ def _compute_eligibility(
         iv_percentile=iv_percentile,
         iv_blocked=iv_blocked,
         iv_alert=iv_alert,
+        iv_catalyst_wait_days_remaining=iv_catalyst_wait_days_remaining,
+        gap_detected=gap_detected,
         entry_conditions=entry_conditions,
         conditions_met=conditions_met,
         conditions_required=conditions_required,
         block_reasons=block_reasons,
         warning_messages=warning_messages,
+        expiry_guidance=_default_expiry_guidance(),
+        size_guidance=size_guidance,
         data_age_minutes=data_age_minutes,
         cache_hit=False,
     )
@@ -544,6 +664,71 @@ async def _fetch_iv_from_uw(
         return None, None
 
 
+async def _fetch_open_and_prev_close(
+    ticker: str,
+    api_key: str,
+    client: httpx.AsyncClient,
+) -> tuple[float | None, float | None]:
+    """Fetch today's open price and previous session close from Polygon snapshot.
+
+    Used to detect gap-day entries (spec: "Never buy LEAPS into a gap").
+
+    Returns
+    -------
+    (open_price, prev_close) — both None when unavailable.
+    """
+    if not api_key:
+        return None, None
+    try:
+        response = await client.get(
+            _POLYGON_TICKER_SNAPSHOT_URL.format(ticker=ticker.upper()),
+            params={"apiKey": api_key},
+            timeout=8.0,
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "Polygon snapshot non-200 for gap check",
+                extra={"ticker": ticker, "status": response.status_code},
+            )
+            return None, None
+        data = response.json()
+        snapshot = data.get("ticker", {})
+        day = snapshot.get("day", {})
+        prev_day = snapshot.get("prevDay", {})
+        open_price = day.get("o")
+        prev_close = prev_day.get("c")
+        return (
+            float(open_price) if open_price else None,
+            float(prev_close) if prev_close else None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Polygon gap-check fetch failed", extra={"ticker": ticker, "error": repr(exc)}
+        )
+        return None, None
+
+
+# ---------------------------------------------------------------------------
+# Size guidance helper
+# ---------------------------------------------------------------------------
+
+
+def _get_f33_size_guidance(gate_f30_permits_leaps: bool | None) -> object:
+    """Derive F33 SizeGuidance from F30 gate state.
+
+    gate_f30_permits_leaps=True  → F30 permits LEAPS; no carveout
+    gate_f30_permits_leaps=False → HARD_HALT; carveout applied defensively
+    gate_f30_permits_leaps=None  → unknown; conservative carveout
+    """
+    from atlas.services.framework33_service import compute_per_name_size_pct
+
+    if gate_f30_permits_leaps is True:
+        return compute_per_name_size_pct(f30_drawdown_gate_active=False)
+    if gate_f30_permits_leaps is False:
+        return compute_per_name_size_pct(f30_drawdown_gate_active=True)
+    return compute_per_name_size_pct(f30_drawdown_gate_active=None)
+
+
 # ---------------------------------------------------------------------------
 # Main evaluation function
 # ---------------------------------------------------------------------------
@@ -571,6 +756,43 @@ async def check_leaps_eligibility(
     Returns a LeapsEligibility with tristate leaps_eligible.
     """
     normalised = ticker.strip().upper()
+
+    # ------------------------------------------------------------------
+    # F33 excluded-ticker check (OTC / foreign / thin US options chains)
+    # ------------------------------------------------------------------
+    from atlas.services.framework33_service import is_excluded_ticker
+
+    if is_excluded_ticker(normalised):
+        return LeapsEligibility(
+            ticker=normalised,
+            leaps_eligible=False,
+            eligibility_undetermined=False,
+            score=None,
+            tier=None,
+            flow_confirmed=None,
+            regime_state=None,
+            regime_clears_leaps=None,
+            gate_f7_active=None,
+            gate_f29_passed=None,
+            gate_f30_permits_leaps=None,
+            iv_current=None,
+            iv_percentile=None,
+            iv_blocked=None,
+            iv_alert=IVAlert.NONE,
+            iv_catalyst_wait_days_remaining=None,
+            gap_detected=None,
+            entry_conditions=[],
+            conditions_met=0,
+            conditions_required=1,
+            block_reasons=[
+                f"{normalised} is excluded from LEAPS "
+                "(OTC / foreign / thin US options chain — see F33)."
+            ],
+            warning_messages=[],
+            expiry_guidance=_default_expiry_guidance(),
+            data_age_minutes=0,
+            cache_hit=False,
+        )
 
     # ------------------------------------------------------------------
     # Score-keyed cache validation (Section 4.4 — Precedence of Truth).
@@ -660,6 +882,7 @@ async def check_leaps_eligibility(
         )
         f9_task = evaluate_framework9(normalised, uw_api_key, polygon_api_key, alphavantage_api_key)
         iv_task = _fetch_iv_from_uw(normalised, uw_api_key, client)
+        gap_task = _fetch_open_and_prev_close(normalised, polygon_api_key, client)
 
         async def _resolved_f29() -> object:
             return f29_cached
@@ -679,11 +902,11 @@ async def check_leaps_eligibility(
         )
 
         results = await asyncio.gather(
-            f7_task, f9_task, iv_task, f29_task, f30_task,
+            f7_task, f9_task, iv_task, gap_task, f29_task, f30_task,
             return_exceptions=True,
         )
 
-    f7_result, f9_result, iv_result, f29_result_raw, f30_result_raw = results
+    f7_result, f9_result, iv_result, gap_result_raw, f29_result_raw, f30_result_raw = results
 
     # Conviction score — already resolved (and validated) by
     # ``_resolve_current_score`` before the cache check above. This is the
@@ -696,6 +919,18 @@ async def check_leaps_eligibility(
     gate_f7_active: bool | None = None
     if not isinstance(f7_result, BaseException):
         gate_f7_active = f7_result.gate_active  # type: ignore[attr-defined]
+
+    # --- Post-catalyst IV wait (spec: wait 7 days after earnings for IV compression) ---
+    iv_catalyst_wait_days_remaining: int | None = None
+    if not isinstance(f7_result, BaseException):
+        earnings_dt = getattr(f7_result, "earnings_date", None)
+        iv_catalyst_wait_days_remaining = _compute_iv_catalyst_wait(earnings_dt)
+
+    # --- Gap-day detection from Polygon price snapshot ---
+    gap_detected: bool | None = None
+    if not isinstance(gap_result_raw, BaseException):
+        open_price, prev_close = gap_result_raw
+        gap_detected = _detect_price_gap(open_price, prev_close)
 
     # --- Dark pool flow from F9 (Tier 2 confirmation only) ---
     # F9 is used exclusively for the $500K dark pool flow check.
@@ -740,11 +975,64 @@ async def check_leaps_eligibility(
     else:
         regime_state = None
 
-    # Build entry conditions.
+    # Build entry conditions using F33 (Condition A + Condition B).
+    from atlas.services.framework33_service import (
+        evaluate_condition_a,
+        evaluate_condition_b,
+    )
+
+    # F33 inputs — all come from upstream data already fetched above.
+    # drawdown_from_high_pct: not yet fetched in this service; pass None
+    # (will show INCOMPLETE).  Callers that have drawdown data can extend
+    # this path.  VIX current is sourced from the F29 signals.
+    f29_vix_current: float | None = None
+    f29_drawdown: float | None = None
+    if not isinstance(f29_result_raw, BaseException) and f29_result_raw is not None:
+        for _sig in getattr(f29_result_raw, "signals", []):
+            if getattr(_sig, "signal_number", None) == 1:
+                f29_vix_current = getattr(_sig, "value", None)
+                break
+
+    cond_a = evaluate_condition_a(
+        drawdown_from_high_pct=f29_drawdown,
+        vix_current=f29_vix_current,
+    )
+    cond_b = evaluate_condition_b(
+        sector_drawdown_pct=None,
+        capitulation_volume_confirmed=(
+            f29_vix_signal if f29_vix_signal is not None else None
+        ),
+        vix_elevated=(
+            True if (f29_vix_current is not None and f29_vix_current > 20.0) else
+            (False if f29_vix_current is not None else None)
+        ),
+        vix_declining_from_peak=f29_vix_signal,
+    )
+
+    def _entry_condition_from_f33(
+        label: str, confirmed: bool | None, detail: str
+    ) -> EntryCondition:
+        if confirmed is True:
+            status = EntryConditionStatus.CONFIRMED
+        elif confirmed is False:
+            status = EntryConditionStatus.NOT_MET
+        else:
+            status = EntryConditionStatus.INCOMPLETE
+        return EntryCondition(
+            condition_name=label, status=status, met=confirmed, detail=detail
+        )
+
     entry_conditions = [
-        _evaluate_entry_condition1(f29_vix_signal),
-        _evaluate_entry_condition2(regime_state),
-        _evaluate_entry_condition3(score),
+        _entry_condition_from_f33(
+            "F33 Condition A — Calm Accumulation",
+            cond_a.confirmed,
+            cond_a.detail,
+        ),
+        _entry_condition_from_f33(
+            "F33 Condition B — Washout",
+            cond_b.confirmed,
+            cond_b.detail,
+        ),
     ]
 
     # Framework 11 — Cash Floor Gate (read-only from F11 cache).
@@ -787,6 +1075,9 @@ async def check_leaps_eligibility(
         iv_percentile=iv_percentile,
         entry_conditions=entry_conditions,
         data_age_minutes=0,
+        gap_detected=gap_detected,
+        iv_catalyst_wait_days_remaining=iv_catalyst_wait_days_remaining,
+        size_guidance_f33=_get_f33_size_guidance(gate_f30_permits_leaps),
     )
 
     _cache_set(normalised, result)

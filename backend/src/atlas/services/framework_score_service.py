@@ -26,16 +26,17 @@ import httpx
 from atlas.core.scoring import classify_tier
 from atlas.schemas.analyst import AnalystResponse
 from atlas.schemas.earnings import EarningsResponse
+from atlas.schemas.framework9 import Framework9Result
 from atlas.schemas.framework_score import (
     FactorBreakdown,
     FrameworkScoreResponse,
 )
 from atlas.schemas.fundamental import FundamentalResponse
 from atlas.schemas.momentum import MomentumResponse
-from atlas.schemas.options_flow import OptionsFlowResponse
 from atlas.services.analyst_service import AnalystService
 from atlas.services.earnings_service import EarningsService
 from atlas.services.framework8_service import Framework8Service
+from atlas.services.framework9_service import evaluate_framework9
 from atlas.services.fundamental_service import FundamentalService
 from atlas.services.momentum_service import MomentumService
 
@@ -226,8 +227,7 @@ class FrameworkScoreService:
             f5_cap_applied = f8_cap
             f5_cap_source = f8_data.get("cap_reason", "Framework 8 insider flag active")
             flags.append(
-                f"F5 capped at {f8_cap} by Framework 8 insider flag. "
-                f"Raw F5 was {f5_raw_score}."
+                f"F5 capped at {f8_cap} by Framework 8 insider flag. Raw F5 was {f5_raw_score}."
             )
 
         # --- F5 block detection ---
@@ -239,9 +239,7 @@ class FrameworkScoreService:
         # --- Assemble factor breakdowns ---
         # available=False when either score extraction failed OR the underlying
         # data source reported data_available=False (the latter drives degraded=True).
-        f2_data_ok = not (
-            isinstance(f2_result, EarningsResponse) and not f2_result.data_available
-        )
+        f2_data_ok = not (isinstance(f2_result, EarningsResponse) and not f2_result.data_available)
         f5_data_ok = not (
             isinstance(f5_result, FundamentalResponse) and not f5_result.data_available
         )
@@ -381,12 +379,20 @@ class FrameworkScoreService:
         )
         return await service.compute_analyst(ticker, overview_task=overview_task)
 
-    async def _fetch_f4(self, ticker: str) -> OptionsFlowResponse:
-        """Fetch F4 Options Flow score via OptionsFlowService (Unusual Whales)."""
-        from atlas.services.options_flow_service import OptionsFlowService
+    async def _fetch_f4(self, ticker: str) -> Framework9Result:
+        """Fetch F4 Options Flow score via Framework 9.
 
-        service = OptionsFlowService(api_key=self._unusual_whales_key)
-        return await service.compute_options_flow(ticker)
+        Framework 9 wraps OptionsFlowService and applies pre-earnings timing
+        modifiers (-25% reduction or +10% Exceptional Conviction premium).
+        Framework 1 must consume the *adjusted* score so timing risk is
+        reflected in the final conviction score.
+        """
+        return await evaluate_framework9(
+            ticker,
+            uw_api_key=self._unusual_whales_key,
+            polygon_api_key=self._polygon_key,
+            av_api_key=self._alphavantage_key,
+        )
 
     async def _fetch_f5(
         self,

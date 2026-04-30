@@ -1,9 +1,11 @@
-"""API routes for Framework 29 — Capitulation / Re-Entry AND Gate.
+"""API routes for Framework 29 - Capitulation / Re-Entry AND Gate.
 
 GET  /api/v1/framework29/signals          → Framework29Result (full evaluation)
 GET  /api/v1/framework29/signals/status   → Framework29GateStatus (lightweight)
-POST /api/v1/framework29/signals/confirm  → set Signal 4 manual confirmation
 POST /api/v1/framework29/refresh          → clear cache + re-evaluate
+
+Signals 1-4 are evaluated automatically from live market data (Polygon, Unusual Whales).
+Signal 5 (geo flag) is controlled via the regime modifier endpoint (Framework 2).
 """
 
 from __future__ import annotations
@@ -14,13 +16,11 @@ from atlas.config import get_settings
 from atlas.schemas.framework29 import (
     Framework29GateStatus,
     Framework29Result,
-    ManualConfirmRequest,
 )
 from atlas.services.framework29_service import (
     _cache_invalidate,
     evaluate_framework29,
     get_gate_status,
-    set_manual_confirmation,
 )
 
 router = APIRouter(prefix="/framework29", tags=["framework29"])
@@ -35,7 +35,7 @@ async def get_framework29_signals() -> Framework29Result:
             status_code=503,
             detail=(
                 "Framework 29 unavailable: POLYGON_API_KEY is not configured. "
-                "VIX, SPY, and Brent data require a Polygon.io key."
+                "VIX, Brent, and breadth index data require a Polygon.io key."
             ),
         )
     return await evaluate_framework29(
@@ -71,33 +71,6 @@ async def get_framework29_gate_status() -> Framework29GateStatus:
     )
 
 
-@router.post("/signals/confirm")
-async def confirm_framework29_signal(body: ManualConfirmRequest) -> dict[str, object]:
-    """Set a manual confirmation for Signal 4 (institutional ETF flow).
-
-    Only Signal 4 supports manual confirmation in V1.  Confirmation resets
-    daily (keyed by today's date).  Providing confirmed=True with a reason
-    allows a human to override unavailable API data.
-    """
-    if body.signal != 4:
-        raise HTTPException(
-            status_code=422,
-            detail="Manual confirmation is only supported for Signal 4 (ETF flow) in V1.",
-        )
-    set_manual_confirmation(
-        signal=body.signal,
-        confirmed=body.confirmed,
-        reason=body.reason,
-    )
-    return {
-        "ok": True,
-        "signal": body.signal,
-        "confirmed": body.confirmed,
-        "message": (
-            "Manual confirmation set. Cache invalidated — next /signals call "
-            "will re-evaluate with the updated confirmation."
-        ),
-    }
 
 
 @router.post("/refresh", response_model=Framework29Result)

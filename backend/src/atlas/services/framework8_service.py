@@ -2,13 +2,11 @@
 
 Decision flow
 -------------
-1. Hardcoded active-flag tickers (NBIS, CRDO, FN, COHR, CF) — client-confirmed
-   through human review.  Flag is raised directly without hitting any API.
+1. Fetch SEC EDGAR submissions + Form 4 XML for the ticker (free public API,
+   no API key required — only a User-Agent header).  Only transaction code
+   "S" (sale) filings are processed.
 
-2. All other tickers: fetch SEC EDGAR RSS feed for recent Form 4 filings.
-   Only transaction code "S" (sale) filings are processed.
-
-3. Three sequential filters for each sale:
+2. Three sequential filters for each sale:
    a. Financial-sponsor check — if the filer name matches a known PE / sponsor
       firm (e.g. Bain Capital) the sale is not counted as discretionary (the
       "COHR / Bain Capital exception").  No F5 cap is applied.
@@ -16,12 +14,12 @@ Decision flow
       the sale to be ignored entirely.
    c. If neither exception applies → discretionary sale confirmed; flag raised.
 
-4. Filer title is classified into InsiderTier (TIER1 / TIER2 / TIER3).
+3. Filer title is classified into InsiderTier (TIER1 / TIER2 / TIER3).
 
-5. Hard-pass check: >= 5 sales with zero purchases -> ticker removed from
+4. Hard-pass check: >= 5 sales with zero purchases -> ticker removed from
    investable universe (CF Industries pattern).
 
-6. F5 cap resolution:
+5. F5 cap resolution:
    * Large sale (>= $1 M) OR Tier 1 filer -> cap F5 at 68
    * Standard discretionary sale -> cap F5 at 72
 
@@ -29,7 +27,7 @@ Pure helpers (_is_financial_sponsor, _has_10b51_language, _classify_filer_tier,
 _is_hard_pass, _resolve_f5_cap, _build_insider_analysis) contain zero I/O so
 they can be unit-tested synchronously.
 
-The async method (compute) owns all network I/O via the SEC EDGAR RSS feed.
+The async method (compute) owns all network I/O via the SEC EDGAR feed.
 """
 
 from __future__ import annotations
@@ -50,9 +48,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# Tickers whose insider flag has been confirmed through human review.
-_HARDCODED_ACTIVE: frozenset[str] = frozenset({"NBIS", "CRDO", "FN", "COHR", "CF"})
 
 # Known PE / financial-sponsor name fragments (lower-case, substring match).
 _SPONSOR_KEYWORDS: frozenset[str] = frozenset(
@@ -235,26 +230,14 @@ def _build_insider_analysis(
 ) -> InsiderAnalysisResponse:
     """Build an InsiderAnalysisResponse from pre-fetched filing dicts.
 
-    Hardcoded tickers return the stored flag immediately.
-    For all others the three-filter pipeline runs over *filings*.
+    Runs the three-filter pipeline (sponsor check, 10b5-1 check, discretionary
+    classification) over *filings*.
 
     Pure function — no I/O (filings already fetched by the caller).
     """
     upper = ticker.strip().upper()
 
-    # ── 1. Hardcoded active-flag tickers ──────────────────────────────────
-    if upper in _HARDCODED_ACTIVE:
-        return InsiderAnalysisResponse(
-            ticker=upper,
-            flag_active=True,
-            hard_pass=False,
-            filer_tier=None,
-            largest_sale_usd=None,
-            f5_cap=_F5_CAP_STANDARD,
-            source="hardcoded",
-        )
-
-    # ── 2. Parse filings with three-filter pipeline ───────────────────────
+    # ── Parse filings with three-filter pipeline ─────────────────────────
     sale_count = 0
     purchase_count = 0
     flag_active = False
@@ -412,10 +395,6 @@ class Framework8Service:
         Safe defaults (flag_active=False) are returned on network errors.
         """
         upper = ticker.strip().upper()
-
-        # Hardcoded tickers never need the cache — they are always the same.
-        if upper in _HARDCODED_ACTIVE:
-            return _build_insider_analysis(upper, filings=[])
 
         # Cache hit.
         if upper in _cache:

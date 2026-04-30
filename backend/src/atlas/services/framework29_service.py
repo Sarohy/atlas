@@ -2,21 +2,22 @@
 
 Five market signals are evaluated; 3 of 5 confirmed fires the GREEN LIGHT.
 
-Signal list:
-  1. VIX 5-day SMA declining for ≥2 consecutive sessions
-  2. Put/call ratio < 1.2 for the last 3 consecutive sessions
-  3. SPY closing above its 200-day SMA for ≥2 consecutive sessions
-  4. Net institutional ETF flow turning positive (manual if API unavailable)
-  5. Brent crude below its declining 7-day SMA
+Signal list (per CLAUDE.md spec, updated 2026-04-29):
+  1. VIX touches prior regime-high then declines for ≥3 consecutive sessions
+  2. Brent crude closes below $95 for the 2nd consecutive session
+  3. Put/call ratio spikes above 1.3 then reverses downward
+  4. Breadth: % S&P 500 stocks above 50-DMA falls below 30% then recovers
+  5. Operator geopolitical flag set to RESOLVED
 
 Data sources:
-  • Polygon.io — Signals 1, 3, 5 (VIX aggs via I:VIX, SPY aggs, Brent via BZ)
-  • Unusual Whales — Signals 2, 4 (put/call ratio, ETF flow)
+  • Yahoo Finance — Signal 1 (VIX daily closes via ^VIX chart API)
+  • Yahoo Finance — Signal 2 (Brent daily closes via BZ=F chart API)
+  • Unusual Whales /api/market/total-options-volume — Signal 3 (put_volume/call_volume)
+  • Polygon.io I:S5O — Signal 4 (breadth index; requires paid plan — stays UNAVAILABLE on Starter)
+  • In-memory geo flag (regime_modifier_service) — Signal 5
 
 Caching:
   Results are cached in an in-memory dict for 15 minutes (900 s).
-  Signal 4 manual confirmations are stored in a module-level dict keyed by
-  date string (YYYY-MM-DD) and reset automatically on the next calendar day.
 
 Pure helpers (prefixed with underscore) are I/O-free and unit-testable.
 """
@@ -26,8 +27,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Final
+from datetime import UTC, date, datetime, timedelta
+from typing import Final
 
 import httpx
 
@@ -53,24 +54,36 @@ _CACHE_KEY: Final[str] = "f29_result"
 # Number of confirmed signals required to pass the AND gate.
 _GATE_THRESHOLD: Final[int] = 3
 
-# Signal thresholds.
-_VIX_SMA_WINDOW: Final[int] = 5          # 5-day SMA for VIX
-_VIX_LOOKBACK_DAYS: Final[int] = 12      # trading days to fetch
-_PCR_THRESHOLD: Final[float] = 1.2       # put/call ratio must be below this
-_PCR_SESSIONS_REQUIRED: Final[int] = 3   # consecutive sessions below threshold
-_SPY_DMA_WINDOW: Final[int] = 200        # 200-day SMA for SPY
-_SPY_LOOKBACK_DAYS: Final[int] = 215     # trading days to fetch
-_SPY_SESSIONS_REQUIRED: Final[int] = 2   # consecutive closes above DMA
-_BRENT_SMA_WINDOW: Final[int] = 7        # 7-day SMA for Brent
-_BRENT_LOOKBACK_DAYS: Final[int] = 12    # trading days to fetch
+# Signal 1 — VIX regime-high and consecutive decline.
+_VIX_LOOKBACK_DAYS: Final[int] = 30       # calendar days for Yahoo Finance range param
+_VIX_REGIME_WINDOW: Final[int] = 20       # look back this many sessions to find regime-high
+_VIX_DECLINE_SESSIONS: Final[int] = 3     # must decline for 3 consecutive sessions after peak touch
 
-# Polygon tickers.
-_POLYGON_VIX_TICKER: Final[str] = "I:VIX"
-_POLYGON_SPY_TICKER: Final[str] = "SPY"
-_POLYGON_BRENT_TICKER: Final[str] = "BZ"
+# Signal 2 — Brent hard threshold.
+_BRENT_HARD_THRESHOLD: Final[float] = 95.0  # USD per barrel
+_BRENT_CONSECUTIVE_SESSIONS: Final[int] = 2 # must be below threshold for 2 consecutive sessions
 
-# Polygon aggs base URL.
-_POLYGON_AGGS_URL: Final[str] = "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+# Signal 3 — Put/call panic-then-reversal (computed from UW total-options-volume).
+_PCR_PANIC_THRESHOLD: Final[float] = 1.3   # spike above this qualifies as panic
+_PCR_LOOKBACK_SESSIONS: Final[int] = 10    # sessions to scan for spike + reversal
+
+# Signal 4 — Breadth washout-and-recovery via Polygon I:S5O.
+# NOTE: I:S5O requires a Polygon paid plan. Signal stays UNAVAILABLE on Starter plan.
+_BREADTH_WASHOUT_THRESHOLD: Final[float] = 30.0   # % stocks above 50-DMA that marks washout
+_BREADTH_LOOKBACK_DAYS: Final[int] = 20            # sessions to scan for dip + recovery
+
+# Yahoo Finance chart API URLs.
+_YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"
+_YAHOO_BRENT_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/BZ%3DF"
+_YAHOO_HEADERS: Final[dict[str, str]] = {"User-Agent": "Mozilla/5.0"}
+
+# Polygon breadth ticker (requires plan upgrade — kept for future use).
+_POLYGON_BREADTH_TICKER: Final[str] = "I:S5O"  # S&P 500 % above 50-DMA index
+
+# Polygon aggs base URL (breadth only).
+_POLYGON_AGGS_URL: Final[str] = (
+    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+)
 
 # Unusual Whales API base URL.
 _UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
@@ -81,9 +94,6 @@ _UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
 
 # In-memory result cache: key -> (result, unix_timestamp)
 _cache: dict[str, tuple[Framework29Result, float]] = {}
-
-# Manual signal confirmations: date_str -> {signal: int, confirmed: bool, reason: str}
-_manual_confirmations: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -112,195 +122,174 @@ def _cache_invalidate() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Manual confirmation helpers
+# Pure signal helpers — no I/O
 # ---------------------------------------------------------------------------
 
 
-def set_manual_confirmation(signal: int, confirmed: bool, reason: str) -> None:
-    """Store a manual confirmation for Signal 4 (institutional ETF flow).
+def _find_regime_high(closes: list[float], window: int) -> float | None:
+    """Return the maximum close over the last *window* sessions.
 
-    Keyed by today's date so it auto-expires at midnight.
-    Only Signal 4 supports manual confirmation in V1.
+    Returns None when fewer than *window* values are available.
     """
-    today = date.today().isoformat()
-    _manual_confirmations[today] = {
-        "signal": signal,
-        "confirmed": confirmed,
-        "reason": reason,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-    }
-    _cache_invalidate()
+    if len(closes) < window:
+        return None
+    return max(closes[-window:])
 
 
-def _get_today_manual_confirmation() -> dict[str, Any] | None:
-    """Return today's manual confirmation dict if set, otherwise None."""
-    today = date.today().isoformat()
-    return _manual_confirmations.get(today)
+def _check_signal1_vix(
+    closes: list[float],
+) -> tuple[SignalStatus, dict[str, object]]:
+    """Signal 1: VIX touches prior regime-high then declines >= 3 consecutive sessions.
 
+    Algorithm:
+      1. Find regime-high = max VIX in the last _VIX_REGIME_WINDOW sessions.
+      2. Confirm the peak occurred at least _VIX_DECLINE_SESSIONS sessions ago
+         (i.e., there is room for the 3-session decline to follow the spike).
+      3. Confirm the last _VIX_DECLINE_SESSIONS closes are each lower than the one before.
 
-# ---------------------------------------------------------------------------
-# Pure calculation helpers
-# ---------------------------------------------------------------------------
-
-
-def _compute_sma(closes: list[float], window: int) -> list[float]:
-    """Compute a simple moving average over closes. Returns a list of SMA values.
-
-    The result has the same length as closes; the first (window-1) values are NaN
-    (represented as 0.0 here, but callers must check index >= window-1 before use).
+    Pure function -- no I/O.
     """
-    sma: list[float] = []
-    for i, _ in enumerate(closes):
-        if i < window - 1:
-            sma.append(0.0)
-        else:
-            sma.append(sum(closes[i - window + 1 : i + 1]) / window)
-    return sma
-
-
-def _is_sma_declining(sma_values: list[float], window: int, sessions: int = 2) -> bool:
-    """Return True if the SMA has declined for the last 'sessions' periods.
-
-    Requires at least (window + sessions) values so the SMA is valid.
-    """
-    if len(sma_values) < window + sessions:
-        return False
-    valid = sma_values[window - 1 :]  # first valid SMA values
-    if len(valid) < sessions + 1:
-        return False
-    # Check each consecutive pair in the last (sessions + 1) entries.
-    tail = valid[-(sessions + 1) :]
-    for i in range(sessions):
-        if tail[i + 1] >= tail[i]:
-            return False
-    return True
-
-
-def _check_signal1_vix(closes: list[float]) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 1: VIX 5-day SMA declining for ≥2 sessions. Pure function."""
-    if len(closes) < _VIX_SMA_WINDOW + 2:
+    if len(closes) < _VIX_REGIME_WINDOW:
         return SignalStatus.UNAVAILABLE, {"reason": "Insufficient VIX history"}
 
-    sma = _compute_sma(closes, _VIX_SMA_WINDOW)
-    declining = _is_sma_declining(sma, _VIX_SMA_WINDOW, sessions=2)
-    latest_close = closes[-1]
-    latest_sma = sma[-1]
-    prev_sma = sma[-2]
+    regime_window = closes[-_VIX_REGIME_WINDOW:]
+    regime_high = max(regime_window)
 
-    status = SignalStatus.CONFIRMED if declining else SignalStatus.NOT_MET
-    return status, {
-        "vix_latest_close": round(latest_close, 2),
-        "vix_5d_sma": round(latest_sma, 3),
-        "vix_5d_sma_prev": round(prev_sma, 3),
-        "declining": declining,
-    }
+    # Index of the most recent peak in the regime window.
+    # reversed() so that we find the MOST RECENT peak when values repeat.
+    peak_offset = next(
+        i for i, v in enumerate(reversed(regime_window)) if v == regime_high
+    )
+    # peak_offset is 0 if the peak is the most recent session.
+    sessions_since_peak = peak_offset
 
+    # Need at least _VIX_DECLINE_SESSIONS sessions of room after the peak.
+    touched_high = sessions_since_peak >= _VIX_DECLINE_SESSIONS
 
-def _check_signal2_pcr(pcr_sessions: list[float]) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 2: Put/call ratio < 1.2 for last 3 sessions. Pure function."""
-    if len(pcr_sessions) < _PCR_SESSIONS_REQUIRED:
-        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient put/call data"}
+    # Check 3 consecutive declining sessions at the end of the series.
+    tail = closes[-(_VIX_DECLINE_SESSIONS + 1):]
+    declining = (
+        len(tail) == _VIX_DECLINE_SESSIONS + 1
+        and all(tail[i + 1] < tail[i] for i in range(_VIX_DECLINE_SESSIONS))
+    )
 
-    tail = pcr_sessions[-_PCR_SESSIONS_REQUIRED:]
-    all_below = all(r < _PCR_THRESHOLD for r in tail)
-    status = SignalStatus.CONFIRMED if all_below else SignalStatus.NOT_MET
-    return status, {
-        "sessions_checked": _PCR_SESSIONS_REQUIRED,
-        "threshold": _PCR_THRESHOLD,
-        "values": [round(r, 3) for r in tail],
-        "all_below_threshold": all_below,
-    }
-
-
-def _check_signal3_spy_dma(closes: list[float]) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 3: SPY close above 200-DMA for ≥2 consecutive sessions. Pure function."""
-    if len(closes) < _SPY_DMA_WINDOW + 2:
-        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient SPY history (need 202+ days)"}
-
-    sma = _compute_sma(closes, _SPY_DMA_WINDOW)
-    valid_sma = sma[_SPY_DMA_WINDOW - 1 :]
-    valid_closes = closes[_SPY_DMA_WINDOW - 1 :]
-
-    if len(valid_sma) < _SPY_SESSIONS_REQUIRED:
-        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient SPY data after SMA warmup"}
-
-    tail_sma = valid_sma[-_SPY_SESSIONS_REQUIRED:]
-    tail_closes = valid_closes[-_SPY_SESSIONS_REQUIRED:]
-    above = [c > s for c, s in zip(tail_closes, tail_sma)]
-    confirmed = all(above)
-
+    confirmed = touched_high and declining
     status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
+
     return status, {
-        "spy_latest_close": round(closes[-1], 2),
-        "spy_200d_sma": round(sma[-1], 3),
-        "consecutive_sessions_above": sum(1 for a in reversed(above) if a),
-        "sessions_required": _SPY_SESSIONS_REQUIRED,
+        "vix_latest_close": round(closes[-1], 2),
+        "vix_regime_high": round(regime_high, 2),
+        "vix_touched_regime_high": touched_high,
+        "sessions_since_peak": sessions_since_peak,
+        "vix_declining_sessions": _VIX_DECLINE_SESSIONS,
+        "vix_currently_declining": declining,
         "confirmed": confirmed,
     }
 
 
-def _check_signal4_etf_flow(
-    net_flow_usd: float | None,
-    manual: dict[str, Any] | None,
+def _check_signal2_brent(
+    closes: list[float],
 ) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 4: Institutional ETF flow net positive, or manual confirmation.
+    """Signal 2: Brent crude closes below $95 for 2nd consecutive session.
 
-    If API data is available and net_flow_usd > 0 → CONFIRMED.
-    If net_flow_usd ≤ 0 → NOT_MET (with manual override possible).
-    If API unavailable → check manual confirmation, else MANUAL_REQUIRED.
+    Pure function — no I/O.
     """
-    if net_flow_usd is not None:
-        if manual and manual.get("confirmed") and net_flow_usd <= 0:
-            # Manual override of negative flow.
-            return SignalStatus.CONFIRMED, {
-                "net_flow_usd": round(net_flow_usd, 0),
-                "manual_override": True,
-                "manual_reason": manual.get("reason"),
-            }
-        positive = net_flow_usd > 0
-        status = SignalStatus.CONFIRMED if positive else SignalStatus.NOT_MET
-        return status, {
-            "net_flow_usd": round(net_flow_usd, 0),
-            "positive": positive,
-            "manual_override": False,
-        }
+    if len(closes) < _BRENT_CONSECUTIVE_SESSIONS:
+        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient Brent history"}
 
-    # API unavailable — use manual confirmation if today's is set.
-    if manual is not None:
-        confirmed = bool(manual.get("confirmed", False))
-        status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
-        return status, {
-            "net_flow_usd": None,
-            "api_unavailable": True,
-            "manual_confirmed": confirmed,
-            "manual_reason": manual.get("reason"),
-        }
+    tail = closes[-_BRENT_CONSECUTIVE_SESSIONS:]
+    all_below = all(c < _BRENT_HARD_THRESHOLD for c in tail)
+    status = SignalStatus.CONFIRMED if all_below else SignalStatus.NOT_MET
 
-    return SignalStatus.MANUAL_REQUIRED, {
-        "net_flow_usd": None,
-        "api_unavailable": True,
-        "manual_required": True,
+    return status, {
+        "brent_latest_close": round(closes[-1], 2),
+        "threshold": _BRENT_HARD_THRESHOLD,
+        "consecutive_sessions_required": _BRENT_CONSECUTIVE_SESSIONS,
+        "consecutive_closes_below": [round(c, 2) for c in tail],
+        "confirmed": all_below,
     }
 
 
-def _check_signal5_brent(closes: list[float]) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 5: Brent crude below its declining 7-day SMA. Pure function."""
-    if len(closes) < _BRENT_SMA_WINDOW + 2:
-        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient Brent history"}
+def _check_signal3_pcr(
+    pcr_sessions: list[float],
+) -> tuple[SignalStatus, dict[str, object]]:
+    """Signal 3: Put/call ratio spikes above 1.3 then reverses downward.
 
-    sma = _compute_sma(closes, _BRENT_SMA_WINDOW)
-    latest_close = closes[-1]
-    latest_sma = sma[-1]
-    declining = _is_sma_declining(sma, _BRENT_SMA_WINDOW, sessions=2)
-    below = latest_close < latest_sma
-    confirmed = below and declining
+    Algorithm:
+      1. Scan last _PCR_LOOKBACK_SESSIONS for a value >= _PCR_PANIC_THRESHOLD.
+      2. Confirm the most recent session is LOWER than the session before it
+         (i.e., reversal from the spike).
 
+    Pure function — no I/O.
+    """
+    if len(pcr_sessions) < 3:
+        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient put/call data"}
+
+    window = pcr_sessions[-_PCR_LOOKBACK_SESSIONS:]
+    spiked = any(r >= _PCR_PANIC_THRESHOLD for r in window)
+    reversing = pcr_sessions[-1] < pcr_sessions[-2]  # latest < previous
+
+    confirmed = spiked and reversing
     status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
+
     return status, {
-        "brent_latest_close": round(latest_close, 2),
-        "brent_7d_sma": round(latest_sma, 3),
-        "price_below_sma": below,
-        "sma_declining": declining,
+        "pcr_latest": round(pcr_sessions[-1], 3),
+        "pcr_previous": round(pcr_sessions[-2], 3),
+        "panic_threshold": _PCR_PANIC_THRESHOLD,
+        "spike_detected_in_window": spiked,
+        "currently_reversing": reversing,
+        "confirmed": confirmed,
+    }
+
+
+def _check_signal4_breadth(
+    breadth_values: list[float],
+) -> tuple[SignalStatus, dict[str, object]]:
+    """Signal 4: % S&P 500 stocks above 50-DMA dips below 30% then recovers.
+
+    Algorithm:
+      1. Scan last _BREADTH_LOOKBACK_DAYS for a value <= _BREADTH_WASHOUT_THRESHOLD.
+      2. Confirm the most recent session is ABOVE the washout threshold (recovery).
+
+    Data source: Polygon index I:S5O (S&P 500 % above 50-DMA).
+    Pure function — no I/O.
+    """
+    if len(breadth_values) < 3:
+        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient breadth history (I:S5O)"}
+
+    window = breadth_values[-_BREADTH_LOOKBACK_DAYS:]
+    washout_occurred = any(v <= _BREADTH_WASHOUT_THRESHOLD for v in window)
+    recovered = breadth_values[-1] > _BREADTH_WASHOUT_THRESHOLD
+
+    confirmed = washout_occurred and recovered
+    status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
+
+    return status, {
+        "breadth_latest_pct": round(breadth_values[-1], 2),
+        "washout_threshold_pct": _BREADTH_WASHOUT_THRESHOLD,
+        "washout_occurred_in_window": washout_occurred,
+        "currently_recovered": recovered,
+        "data_source": "Polygon I:S5O",
+        "confirmed": confirmed,
+    }
+
+
+def _check_signal5_geo_flag(
+    geo_flag: str,
+) -> tuple[SignalStatus, dict[str, object]]:
+    """Signal 5: Operator geopolitical flag set in Framework 2 (any non-NONE value).
+
+    Reads the in-memory geo flag written by the regime modifier endpoint
+    (Framework 2). Confirms whenever Framework 2 has recorded any active
+    geopolitical state i.e. geo_flag is not "NONE". Pure function -- no I/O.
+    """
+    normalized = geo_flag.strip().upper()
+    confirmed = normalized != "NONE" and normalized != ""
+    status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
+
+    return status, {
+        "geo_flag_current": geo_flag,
+        "geo_flag_source": "Framework 2 (regime modifier)",
         "confirmed": confirmed,
     }
 
@@ -314,17 +303,15 @@ def _determine_gate_status(
 
     Returns (gate_passed, gate_status, gate_message).
     """
-    skipped = unavailable  # UNAVAILABLE / MANUAL_REQUIRED signals are not counted
-    effective_total = total - skipped
+    remaining = _GATE_THRESHOLD - confirmed
+    skipped = unavailable
 
     if confirmed >= _GATE_THRESHOLD:
         return True, "GREEN_LIGHT", (
             f"AND gate open — {confirmed}/{total} signals confirmed "
-            f"({skipped} unavailable, {effective_total} evaluated). "
-            "Capitulation conditions met."
+            f"({skipped} unavailable). Capitulation conditions met. Deploy cash."
         )
 
-    remaining = _GATE_THRESHOLD - confirmed
     return False, "BLOCKED", (
         f"AND gate blocked — {confirmed}/{total} confirmed, need {_GATE_THRESHOLD}. "
         f"{remaining} more signal(s) required. ({skipped} unavailable.)"
@@ -342,9 +329,102 @@ def _data_gap_severity(unavailable: int) -> str:
     return "HIGH"
 
 
-# ---------------------------------------------------------------------------
-# Async data fetchers
-# ---------------------------------------------------------------------------
+def _unavailable(reason: str) -> tuple[SignalStatus, dict[str, object]]:
+    """Return a typed (UNAVAILABLE, detail) pair for use in the evaluation pipeline."""
+    return SignalStatus.UNAVAILABLE, {"reason": reason}
+
+
+
+async def _fetch_yahoo_daily_closes(
+    url: str,
+    range_str: str,
+    client: httpx.AsyncClient,
+) -> list[float] | None:
+    """Fetch daily close prices from Yahoo Finance chart API.
+
+    Args:
+        url: Pre-encoded Yahoo Finance chart URL for the symbol.
+        range_str: Yahoo range parameter e.g. ``"1mo"``, ``"3mo"``.
+
+    Returns ascending chronological list of close floats, or None on error.
+    Null entries (holidays/halts) are filtered out.
+    """
+    try:
+        response = await client.get(
+            url,
+            params={"interval": "1d", "range": range_str},
+            headers=_YAHOO_HEADERS,
+            timeout=10.0,
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "Yahoo Finance non-200",
+                extra={"url": url, "status": response.status_code},
+            )
+            return None
+
+        data = response.json()
+        result_list = (data.get("chart") or {}).get("result")
+        if not result_list:
+            return None
+
+        quotes = result_list[0].get("indicators", {}).get("quote", [{}])
+        closes_raw = quotes[0].get("close", []) if quotes else []
+        closes = [float(c) for c in closes_raw if c is not None]
+        return closes if closes else None
+
+    except Exception as exc:
+        logger.warning(
+            "Yahoo Finance fetch failed",
+            extra={"url": url, "error": repr(exc)},
+        )
+        return None
+
+
+async def _fetch_uw_pcr_from_options_volume(
+    api_key: str,
+    client: httpx.AsyncClient,
+) -> list[float] | None:
+    """Compute put/call ratio history from UW /api/market/total-options-volume.
+
+    Each day's PCR = put_volume / call_volume.
+    Returns ascending chronological list of PCR floats, or None on error.
+    """
+    try:
+        response = await client.get(
+            f"{_UW_BASE_URL}/api/market/total-options-volume",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": _PCR_LOOKBACK_SESSIONS + 2},
+            timeout=10.0,
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "UW total-options-volume non-200",
+                extra={"status": response.status_code},
+            )
+            return None
+
+        data = response.json()
+        entries = data.get("data", []) if isinstance(data, dict) else data
+        if not entries:
+            return None
+
+        ratios: list[float] = []
+        # Entries come back most-recent-first; reverse for ascending order.
+        for entry in reversed(entries):
+            call_vol = float(entry.get("call_volume", 0) or 0)
+            put_vol = float(entry.get("put_volume", 0) or 0)
+            if call_vol > 0:
+                ratios.append(round(put_vol / call_vol, 4))
+
+        return ratios if ratios else None
+
+    except Exception as exc:
+        logger.warning(
+            "UW total-options-volume fetch failed",
+            extra={"error": repr(exc)},
+        )
+        return None
 
 
 async def _fetch_polygon_closes(
@@ -355,7 +435,8 @@ async def _fetch_polygon_closes(
 ) -> list[float] | None:
     """Fetch daily close prices from Polygon aggs endpoint.
 
-    Returns a list of close prices (ascending chronological order) or None on error.
+    Used for Signal 4 breadth index (I:S5O). Requires a Polygon paid plan.
+    Returns ascending chronological list of close floats, or None on error.
     """
     to_date = date.today()
     from_date = to_date - timedelta(days=lookback_days * 2)  # buffer for weekends/holidays
@@ -369,7 +450,7 @@ async def _fetch_polygon_closes(
     try:
         response = await client.get(
             url,
-            params={"apiKey": api_key, "sort": "asc", "limit": lookback_days + 20},
+            params={"apiKey": api_key, "sort": "asc", "limit": lookback_days + 30},
             timeout=10.0,
         )
 
@@ -396,88 +477,6 @@ async def _fetch_polygon_closes(
         return None
 
 
-async def _fetch_uw_put_call_ratio(
-    api_key: str,
-    client: httpx.AsyncClient,
-) -> list[float] | None:
-    """Fetch the last N sessions of put/call ratio from Unusual Whales.
-
-    Returns a list of ratio values (ascending chronological) or None on error.
-    """
-    try:
-        response = await client.get(
-            f"{_UW_BASE_URL}/api/market/put-call-ratio",
-            headers={"Authorization": f"Bearer {api_key}"},
-            params={"limit": _PCR_SESSIONS_REQUIRED + 2},
-            timeout=10.0,
-        )
-
-        if response.status_code != 200:
-            logger.warning(
-                "UW put/call ratio non-200",
-                extra={"status": response.status_code},
-            )
-            return None
-
-        data = response.json()
-        # UW returns { "data": [{"date": "...", "ratio": 1.05}, ...] }
-        entries = data.get("data", []) if isinstance(data, dict) else data
-        if not entries:
-            return None
-
-        ratios = [float(e["ratio"]) for e in entries if "ratio" in e]
-        return ratios if ratios else None
-
-    except Exception as exc:
-        logger.warning(
-            "UW put/call ratio fetch failed",
-            extra={"error": repr(exc)},
-        )
-        return None
-
-
-async def _fetch_uw_etf_flow(
-    api_key: str,
-    client: httpx.AsyncClient,
-) -> float | None:
-    """Fetch net institutional ETF flow from Unusual Whales.
-
-    Returns net flow in USD (positive = bullish, negative = bearish) or None.
-    We aggregate net_flow for QQQ, SMH, SOXX, XLK as a proxy for tech institutions.
-    """
-    # Monitored ETFs for institutional tech flow.
-    _ETF_TICKERS: Final[list[str]] = ["QQQ", "SMH", "SOXX", "XLK"]
-
-    try:
-        response = await client.get(
-            f"{_UW_BASE_URL}/api/etf/flow",
-            headers={"Authorization": f"Bearer {api_key}"},
-            params={"tickers": ",".join(_ETF_TICKERS)},
-            timeout=10.0,
-        )
-
-        if response.status_code != 200:
-            logger.warning(
-                "UW ETF flow non-200",
-                extra={"status": response.status_code},
-            )
-            return None
-
-        data = response.json()
-        entries = data.get("data", []) if isinstance(data, dict) else data
-        if not entries:
-            return None
-
-        # Sum net flow across monitored ETFs.
-        net_flow = sum(float(e.get("net_flow", 0)) for e in entries if "net_flow" in e)
-        return net_flow
-
-    except Exception as exc:
-        logger.warning(
-            "UW ETF flow fetch failed",
-            extra={"error": repr(exc)},
-        )
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -504,14 +503,15 @@ async def evaluate_framework29(
     _client: httpx.AsyncClient = client if client is not None else httpx.AsyncClient()
 
     try:
-        # Parallel fetch all external data.
-        vix_closes_raw, pcr_raw, spy_closes_raw, etf_flow_raw, brent_closes_raw = (
+        # Parallel fetch: VIX (Yahoo), Brent (Yahoo), PCR (UW options vol), breadth (Polygon).
+        vix_closes_raw, brent_closes_raw, pcr_raw, breadth_raw = (
             await asyncio.gather(
-                _fetch_polygon_closes(_POLYGON_VIX_TICKER, _VIX_LOOKBACK_DAYS, polygon_api_key, _client),
-                _fetch_uw_put_call_ratio(uw_api_key, _client),
-                _fetch_polygon_closes(_POLYGON_SPY_TICKER, _SPY_LOOKBACK_DAYS, polygon_api_key, _client),
-                _fetch_uw_etf_flow(uw_api_key, _client),
-                _fetch_polygon_closes(_POLYGON_BRENT_TICKER, _BRENT_LOOKBACK_DAYS, polygon_api_key, _client),
+                _fetch_yahoo_daily_closes(_YAHOO_VIX_URL, "3mo", _client),
+                _fetch_yahoo_daily_closes(_YAHOO_BRENT_URL, "1mo", _client),
+                _fetch_uw_pcr_from_options_volume(uw_api_key, _client),
+                _fetch_polygon_closes(
+                    _POLYGON_BREADTH_TICKER, _BREADTH_LOOKBACK_DAYS, polygon_api_key, _client
+                ),
                 return_exceptions=True,
             )
         )
@@ -524,42 +524,80 @@ async def evaluate_framework29(
         return None if isinstance(v, BaseException) else v
 
     vix_closes: list[float] | None = _unwrap(vix_closes_raw)  # type: ignore[assignment]
-    pcr_sessions: list[float] | None = _unwrap(pcr_raw)  # type: ignore[assignment]
-    spy_closes: list[float] | None = _unwrap(spy_closes_raw)  # type: ignore[assignment]
-    etf_flow: float | None = _unwrap(etf_flow_raw)  # type: ignore[assignment]
     brent_closes: list[float] | None = _unwrap(brent_closes_raw)  # type: ignore[assignment]
+    pcr_sessions: list[float] | None = _unwrap(pcr_raw)  # type: ignore[assignment]
+    breadth_values: list[float] | None = _unwrap(breadth_raw)  # type: ignore[assignment]
 
-    manual = _get_today_manual_confirmation()
+    # Signal 5: read the in-memory geo flag (no network I/O).
+    from atlas.services.regime_modifier_service import get_geo_flag_current
+    geo_flag = get_geo_flag_current()
 
     # Evaluate each signal.
     s1_status, s1_vals = (
         _check_signal1_vix(vix_closes)
         if vix_closes
-        else (SignalStatus.UNAVAILABLE, {"reason": "VIX data unavailable"})
+        else _unavailable("VIX data unavailable")
     )
     s2_status, s2_vals = (
-        _check_signal2_pcr(pcr_sessions)
-        if pcr_sessions
-        else (SignalStatus.UNAVAILABLE, {"reason": "Put/call data unavailable"})
+        _check_signal2_brent(brent_closes)
+        if brent_closes
+        else _unavailable("Brent data unavailable")
     )
     s3_status, s3_vals = (
-        _check_signal3_spy_dma(spy_closes)
-        if spy_closes
-        else (SignalStatus.UNAVAILABLE, {"reason": "SPY data unavailable"})
+        _check_signal3_pcr(pcr_sessions)
+        if pcr_sessions
+        else _unavailable("Put/call data unavailable")
     )
-    s4_status, s4_vals = _check_signal4_etf_flow(etf_flow, manual)
-    s5_status, s5_vals = (
-        _check_signal5_brent(brent_closes)
-        if brent_closes
-        else (SignalStatus.UNAVAILABLE, {"reason": "Brent data unavailable"})
+    s4_status, s4_vals = (
+        _check_signal4_breadth(breadth_values)
+        if breadth_values
+        else _unavailable("Breadth data unavailable (I:S5O)")
     )
+    s5_status, s5_vals = _check_signal5_geo_flag(geo_flag)
 
-    signals_data = [
-        (s1_status, "VIX 5-day SMA Declining", s1_vals, {"sessions_declining": 2, "sma_window": _VIX_SMA_WINDOW}),
-        (s2_status, "Put/Call Ratio < 1.2 (3 sessions)", s2_vals, {"threshold": _PCR_THRESHOLD, "sessions": _PCR_SESSIONS_REQUIRED}),
-        (s3_status, "SPY Above 200-DMA (2 sessions)", s3_vals, {"sma_window": _SPY_DMA_WINDOW, "sessions": _SPY_SESSIONS_REQUIRED}),
-        (s4_status, "Institutional ETF Flow Net Positive", s4_vals, {"manual_eligible": True}),
-        (s5_status, "Brent Below Declining 7-Day SMA", s5_vals, {"sma_window": _BRENT_SMA_WINDOW}),
+    signals_data: list[tuple[SignalStatus, str, dict[str, object], dict[str, object]]] = [
+        (
+            s1_status,
+            "VIX touches regime-high then declines 3 sessions",
+            s1_vals,
+            {
+                "regime_window": _VIX_REGIME_WINDOW,
+                "decline_sessions_required": _VIX_DECLINE_SESSIONS,
+            },
+        ),
+        (
+            s2_status,
+            "Brent below $95 for 2 consecutive sessions",
+            s2_vals,
+            {
+                "threshold_usd": _BRENT_HARD_THRESHOLD,
+                "consecutive_sessions": _BRENT_CONSECUTIVE_SESSIONS,
+            },
+        ),
+        (
+            s3_status,
+            "Put/call ratio spikes above 1.3 then reverses",
+            s3_vals,
+            {
+                "panic_threshold": _PCR_PANIC_THRESHOLD,
+                "lookback_sessions": _PCR_LOOKBACK_SESSIONS,
+            },
+        ),
+        (
+            s4_status,
+            "S&P 500 breadth dips below 30% above 50-DMA then recovers",
+            s4_vals,
+            {
+                "washout_threshold_pct": _BREADTH_WASHOUT_THRESHOLD,
+                "lookback_days": _BREADTH_LOOKBACK_DAYS,
+            },
+        ),
+        (
+            s5_status,
+            "Framework 2 geopolitical flag set (any non-NONE value)",
+            s5_vals,
+            {"confirmed_when": "geo_flag != NONE", "source": "Framework 2"},
+        ),
     ]
 
     unavailable_statuses = {SignalStatus.UNAVAILABLE, SignalStatus.MANUAL_REQUIRED}
@@ -575,11 +613,6 @@ async def evaluate_framework29(
         warning_messages.append(
             f"{signals_unavailable} signal(s) could not be evaluated due to missing data."
         )
-    if s4_status == SignalStatus.MANUAL_REQUIRED:
-        warning_messages.append(
-            "Signal 4 (ETF flow) requires manual confirmation — "
-            "POST /framework29/signals/confirm to set."
-        )
 
     signals_out = [
         Framework29Signal(
@@ -588,14 +621,16 @@ async def evaluate_framework29(
             status=s,
             confirmed=(s == SignalStatus.CONFIRMED),
             data_missing=(s in unavailable_statuses),
-            missing_reason=vals.get("reason") if s in unavailable_statuses else None,
+            missing_reason=(
+                str(vals["reason"]) if s in unavailable_statuses and "reason" in vals else None
+            ),
             current_values={k: v for k, v in vals.items() if k != "reason"},
             threshold=threshold,
         )
         for i, (s, name, vals, threshold) in enumerate(signals_data)
     ]
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     result = Framework29Result(
         signals_confirmed=signals_confirmed,
         signals_unavailable=signals_unavailable,
@@ -629,3 +664,5 @@ def get_gate_status() -> Framework29GateStatus | None:
         gate_status=cached.gate_status,
         data_gap_severity=cached.data_gap_severity,
     )
+
+

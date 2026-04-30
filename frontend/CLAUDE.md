@@ -297,12 +297,12 @@ Full defensive posture. Only MU, TSM, GLD, NEM, CEG, ATI as core. Everything els
 Framework #29 — Capitulation / Re-Entry Signal
 Purpose: Define precisely when the selloff is exhausted and it is time to deploy cash aggressively — replacing judgment-call approach with a structured 5-signal gate.
 5 signals monitored:
-VIX 5-day average declining (not just a single-day drop)
-Put/call ratio normalized below 1.2 for 3 consecutive sessions
-S&P 500 closes above 200-DMA for 2 consecutive sessions
-Net institutional flow turning positive (tracked via ETF flow data)
-Oil (Brent) holding below a declining 7-day moving average
-Gate: 3 of 5 signals confirmed = Green Light. System generates 'Deploy Cash' alert with specific names and sizes.
+Signal 1 — VIX touches the prior regime-high then declines for 3 consecutive sessions (not just any SMA decline — requires prior peak reference)
+Signal 2 — Brent crude closes below $95 for the second consecutive session (hard price threshold, not SMA-relative)
+Signal 3 — Put/call ratio reaches >1.3 (panic spike) then reverses downward (fear-peak-then-reversal pattern, not sustained calm)
+Signal 4 — Breadth indicator: percentage of S&P 500 stocks above their 50-DMA falls below 30% then recovers (washout-and-recovery, not trend confirmation). Data source: Polygon index I:S5O (S&P 500 stocks above 50-DMA).
+Signal 5 — Framework 2 geopolitical flag set to any active state (not NONE). Confirms whenever the operator has entered any geopolitical condition in Framework 2 (RESOLVED, DE_ESCALATING, ACTIVE_RISK, or ESCALATING). Whatever Framework 2 shows will be present here.
+Gate: 3 of 5 confirmed simultaneously = Green Light. System generates 'Deploy Cash' alert with specific names and sizes.
 
 Framework #30 — Max Drawdown Gate
 Purpose: Protect accumulated gains by halting aggressive positioning when the portfolio draws down significantly from its peak.

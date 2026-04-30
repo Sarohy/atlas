@@ -1,89 +1,33 @@
 'use client';
 
-import { useState } from 'react';
-
 import { useRegimeModifier } from '@/lib/hooks/use-regime-modifier';
+import type { GeopoliticalState } from '@/lib/schemas/regime-modifier';
 import { cn } from '@/lib/utils';
-import type { RegimeRule } from '@/lib/utils/regime-rules';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** CSS tone class for each rule. */
-const RULE_TONE: Record<RegimeRule, string> = {
-  1: 'is-red',
-  2: 'is-orange',
-  3: 'is-green',
+const REGIME_TONE: Record<string, string> = {
+  CLEAR: 'is-green',
+  CAUTION: 'is-orange',
+  'SOFT CAUTION': 'is-yellow',
+  'CRISIS HALT': 'is-red',
+  NORMAL: 'is-cyan',
 };
-
-/** Human-readable label for each regime rule. */
-const RULE_LABEL: Record<RegimeRule, string> = {
-  1: 'RULE 1 — CRISIS',
-  2: 'RULE 2 — CAUTION',
-  3: 'RULE 3 — CLEAR',
-};
-
-/** Score delta label per rule. */
-const RULE_DELTA_LABEL: Record<RegimeRule, string> = {
-  1: '−10 pts',
-  2: '−5 pts',
-  3: '+5 pts',
-};
-
-/** CSS tone class derived from adjusted score (mirrors action-tone logic). */
-function scoreToTone(score: number): string {
-  if (score >= 90) return 'is-green';
-  if (score >= 80) return 'is-cyan';
-  if (score >= 70) return 'is-yellow';
-  if (score >= 60) return 'is-orange';
-  return 'is-red';
-}
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
 
 type RegimeModifierPanelProps = {
-  /** Active ticker symbol driven by the shared selector above the panels. */
   ticker: string;
-  /**
-   * When provided the component acts as a controlled input — the parent owns
-   * the war-zone state and the panel's toggle calls ``onToggleWar`` instead
-   * of managing its own internal state.
-   */
-  activeWar?: boolean;
-  onToggleWar?: () => void;
+  geopoliticalState: GeopoliticalState;
+  onGeopoliticalStateChange: (state: GeopoliticalState) => void;
 };
 
-// ---------------------------------------------------------------------------
-// Public component
-// ---------------------------------------------------------------------------
-
-/** Regime Modifier panel driven by the backend regime-modifier response. */
 export function RegimeModifierPanel({
   ticker,
-  activeWar: activeWarProp,
-  onToggleWar,
+  geopoliticalState,
+  onGeopoliticalStateChange,
 }: RegimeModifierPanelProps) {
-  const [internalWar, setInternalWar] = useState(false);
-
-  // Support both controlled (activeWar/onToggleWar from parent) and
-  // uncontrolled (internal state) usage so existing usages without props
-  // continue to work.
-  const isControlled = activeWarProp !== undefined && onToggleWar !== undefined;
-  const activeWar = isControlled ? activeWarProp : internalWar;
-  const handleToggleWar = isControlled ? onToggleWar : () => setInternalWar((v) => !v);
-
   const activeTicker = ticker.trim().length > 0;
-
-  const {
-    data: regime,
-    isLoading,
-    isError,
-    error,
-  } = useRegimeModifier(ticker, activeWar);
-  const hasData = activeTicker && regime !== undefined;
+  const { data: regime, isLoading, isError, error } = useRegimeModifier(
+    ticker,
+    geopoliticalState,
+  );
   const errorMsg = error instanceof Error ? error.message : 'Failed to load regime data.';
 
   return (
@@ -93,46 +37,81 @@ export function RegimeModifierPanel({
     >
       <header className="atlas-frameworks-panel-header atlas-fws-panel-header">
         <h2 className="atlas-frameworks-panel-title">Framework 2</h2>
-
-        <button
-          aria-label={activeWar ? 'Deactivate war zone flag' : 'Activate war zone flag'}
-          aria-pressed={activeWar}
-          className={cn('atlas-regime-war-btn', activeWar && 'is-active')}
-          data-testid="regime-war-toggle"
-          type="button"
-          onClick={handleToggleWar}
-        >
-          <span className="atlas-regime-war-icon" aria-hidden="true">
-            ⚑
-          </span>
-          {activeWar ? 'WAR ACTIVE' : 'WAR ZONE'}
-        </button>
-
-        <span className="atlas-fws-subtitle">Brent · VIX · War → Score</span>
+        <span className="atlas-fws-subtitle">Brent · VIX · Geopolitical Gate → Regime</span>
       </header>
 
       <div className="atlas-fws-panel-body">
+        <GeopoliticalToggle
+          value={geopoliticalState}
+          onChange={onGeopoliticalStateChange}
+        />
         {isLoading && <LoadingState />}
         {isError && <ErrorState message={errorMsg} />}
-        {!isLoading && !isError && hasData && (
+        {!isLoading && !isError && regime && (
           <RegimeContent
             brentPrice={regime.brent_price}
+            brentStreak={regime.brent_consecutive_below_95_count}
+            determinationText={regime.determination_text}
+            effectiveRegime={regime.effective_regime}
+            geopoliticalState={regime.geopolitical_state}
+            rule={regime.rule}
             vixValue={regime.vix_value}
-            activeWar={activeWar}
-            adjustedScore={regime.adjusted_score}
-            ruleTriggered={regime.rule_triggered}
-            ruleName={regime.rule}
+            brentCondition={regime.brent_condition ?? ''}
+            vixCondition={regime.vix_condition ?? ''}
+            triggerLogic={regime.trigger_logic ?? ''}
+            modifierReason={regime.modifier_reason ?? ''}
+            modifier={regime.modifier}
+            specialCaseActive={regime.special_case_active ?? false}
+            cashFloorPct={regime.cash_floor_pct ?? 0.2}
           />
         )}
-        {!isLoading && !isError && !hasData && activeTicker && <EmptyState ticker={ticker} />}
+        {!isLoading && !isError && !regime && activeTicker && <EmptyState ticker={ticker} />}
       </div>
     </section>
   );
 }
 
-// ---------------------------------------------------------------------------
-// State components
-// ---------------------------------------------------------------------------
+const GEOPOLITICAL_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: GeopoliticalState;
+}> = [
+  { label: 'None', value: 'NONE' },
+  { label: 'Resolved', value: 'RESOLVED' },
+  { label: 'De-escalating', value: 'DE_ESCALATING' },
+  { label: 'Active risk', value: 'ACTIVE_RISK' },
+  { label: 'Escalating', value: 'ESCALATING' },
+];
+
+function GeopoliticalToggle({
+  value,
+  onChange,
+}: {
+  value: GeopoliticalState;
+  onChange: (state: GeopoliticalState) => void;
+}) {
+  return (
+    <div
+      aria-label="Geopolitical state"
+      className="atlas-regime-geopolitical-toggle"
+      role="group"
+    >
+      {GEOPOLITICAL_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          aria-pressed={value === option.value}
+          className={cn(
+            'atlas-regime-geopolitical-option',
+            value === option.value && 'is-active',
+          )}
+          type="button"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function LoadingState() {
   return (
@@ -158,84 +137,105 @@ function EmptyState({ ticker }: { ticker: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main content
-// ---------------------------------------------------------------------------
-
 type RegimeContentProps = {
   brentPrice: number | null;
+  brentStreak: number;
+  determinationText: string;
+  effectiveRegime: string;
+  geopoliticalState: GeopoliticalState;
+  rule: string;
   vixValue: number | null;
-  activeWar: boolean;
-  adjustedScore: number;
-  ruleTriggered: RegimeRule | null;
-  ruleName: string;
+  brentCondition: string;
+  vixCondition: string;
+  triggerLogic: string;
+  modifierReason: string;
+  modifier: number;
+  specialCaseActive: boolean;
+  cashFloorPct: number;
 };
 
 function RegimeContent({
   brentPrice,
+  brentStreak,
+  determinationText,
+  effectiveRegime,
+  geopoliticalState,
+  rule,
   vixValue,
-  activeWar,
-  adjustedScore,
-  ruleTriggered,
-  ruleName,
+  brentCondition,
+  vixCondition,
+  triggerLogic,
+  modifierReason,
+  modifier,
+  specialCaseActive,
+  cashFloorPct,
 }: RegimeContentProps) {
-  const adjTone = scoreToTone(adjustedScore);
-  const ruleTone = ruleTriggered !== null ? RULE_TONE[ruleTriggered] : '';
+  const automaticTone = REGIME_TONE[rule] ?? 'is-cyan';
+
+  const geoTone =
+    geopoliticalState === 'ESCALATING'
+      ? 'is-red'
+      : geopoliticalState === 'ACTIVE_RISK'
+        ? 'is-orange'
+        : geopoliticalState === 'DE_ESCALATING'
+          ? 'is-yellow'
+          : geopoliticalState === 'RESOLVED'
+            ? 'is-green'
+            : 'is-cyan';
+
+  const modifierSign = modifier >= 0 ? `+${modifier}` : `${modifier}`;
 
   return (
     <div className="atlas-regime-content" data-testid="regime-content">
       <div className="atlas-regime-market-row">
-        <div className="atlas-regime-stat">
-          <span className="atlas-regime-stat-label">BRENT</span>
-          <span className="atlas-regime-stat-value" data-testid="regime-brent">
-            {brentPrice !== null ? `$${brentPrice.toFixed(2)}` : '-'}
-          </span>
-        </div>
+        <RegimeStat label="BRENT" testId="regime-brent" value={brentPrice !== null ? `$${brentPrice.toFixed(2)}` : '-'} />
         <div className="atlas-regime-stat-divider" />
-        <div className="atlas-regime-stat">
-          <span className="atlas-regime-stat-label">VIX</span>
-          <span className="atlas-regime-stat-value" data-testid="regime-vix">
-            {vixValue !== null ? vixValue.toFixed(2) : '-'}
-          </span>
+        <RegimeStat label="VIX" testId="regime-vix" value={vixValue !== null ? vixValue.toFixed(2) : '-'} />
+        <div className="atlas-regime-stat-divider" />
+        <RegimeStat label="BRENT < $95 STREAK" testId="regime-brent-streak" value={String(brentStreak)} />
+      </div>
+
+      {specialCaseActive && (
+        <div className="atlas-regime-special-case-badge" data-testid="regime-geo-penalty-badge">
+          GEO PENALTY ACTIVE
         </div>
-        {activeWar && (
-          <>
-            <div className="atlas-regime-stat-divider" />
-            <div className="atlas-regime-stat">
-              <span
-                className={cn('atlas-frameworks-pill is-red atlas-regime-war-pill')}
-                data-testid="regime-war-badge"
-              >
-                WAR ACTIVE
-              </span>
-            </div>
-          </>
-        )}
-      </div>
+      )}
 
-      <div className="atlas-regime-rule-row" data-testid="regime-rule-row">
-        {ruleTriggered !== null ? (
-          <>
-            <span className={cn('atlas-regime-rule-badge', ruleTone)} data-testid="regime-rule-badge">
-              {RULE_LABEL[ruleTriggered]}
-            </span>
-          </>
-        ) : (
-          <span className="atlas-regime-rule-badge is-muted" data-testid="regime-rule-badge">
-            NORMAL MARKET
-          </span>
-        )}
+      <div className="atlas-regime-determination" data-testid="regime-determination">
+        {determinationText}
       </div>
-
-      <div className="atlas-regime-score-hero">
-        <div className="atlas-regime-score-block">
-          <span className="atlas-regime-score-label">RULE</span>
-          <span className={cn('atlas-regime-score-num', adjTone)} data-testid="regime-rule-value">
-            {ruleName}
-          </span>
-        </div>
-      </div>
-
     </div>
   );
+}
+
+function RegimeStat({
+  label,
+  testId,
+  tone,
+  value,
+}: {
+  label: string;
+  testId: string;
+  tone?: string;
+  value: string;
+}) {
+  return (
+    <div className="atlas-regime-stat">
+      <span className="atlas-regime-stat-label">{label}</span>
+      <span className={cn('atlas-regime-stat-value', tone)} data-testid={testId}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function formatGeopoliticalState(state: GeopoliticalState): string {
+  const labels: Record<GeopoliticalState, string> = {
+    NONE: 'NONE',
+    RESOLVED: 'RESOLVED',
+    DE_ESCALATING: 'DE-ESCALATING',
+    ACTIVE_RISK: 'ACTIVE RISK',
+    ESCALATING: 'ESCALATING',
+  };
+  return labels[state];
 }

@@ -1,17 +1,17 @@
 """Pydantic schemas for the Regime Modifier endpoint."""
 
 from pydantic import BaseModel, Field
+from typing import Literal
+
+
+GeopoliticalState = Literal["NONE", "RESOLVED", "DE_ESCALATING", "ACTIVE_RISK", "ESCALATING"]
 
 
 class RegimeModifierResponse(BaseModel):
-    """Response from the regime modifier endpoint.
-
-    Combines the base Framework Score with a market-regime adjustment driven
-    by Brent crude price, VIX level, and an active-war flag.
-    """
+    """Response from the regime modifier endpoint."""
 
     ticker: str
-    active_war: bool
+    geopolitical_state: GeopoliticalState
 
     # ── Market conditions (None when Polygon.io data unavailable) ─────────
     brent_price: float | None = Field(
@@ -19,6 +19,9 @@ class RegimeModifierResponse(BaseModel):
     )
     vix_value: float | None = Field(
         description="CBOE VIX index level (most recent daily close).",
+    )
+    brent_consecutive_below_95_count: int = Field(
+        description="Number of consecutive Brent closes below $95 using the most recent closes.",
     )
 
     # ── Framework score ───────────────────────────────────────────────────
@@ -37,6 +40,9 @@ class RegimeModifierResponse(BaseModel):
     rule: str = Field(
         description="Human-readable name of the triggered rule: "
         "CRISIS | CAUTION | CLEAR | NORMAL.",
+    )
+    effective_regime: str = Field(
+        description="Displayed regime after applying the geopolitical gate.",
     )
     modifier: int = Field(
         description="Score delta applied by the triggered rule: "
@@ -65,4 +71,37 @@ class RegimeModifierResponse(BaseModel):
     # ── Human-readable guidance ───────────────────────────────────────────
     output_text: str = Field(
         description="Regime cash-management instruction (multi-line for crisis rules).",
+    )
+    determination_text: str = Field(
+        description="Human-readable summary of the Brent/VIX calculation and modifier.",
+    )
+
+    # ── Enriched condition display (Section 14 spec v2.1) ─────────────────
+    brent_condition: str = Field(
+        description="Brent price with zone label, e.g. '$97.50 — $95-110 (CAUTION trigger)'.",
+        default="",
+    )
+    vix_condition: str = Field(
+        description="VIX level with zone label, e.g. '17.48 — Below 22 (SOFT CAUTION zone)'.",
+        default="",
+    )
+    geo_condition: str = Field(
+        description="Active geopolitical flag value, e.g. 'ACTIVE_RISK'.",
+        default="",
+    )
+    trigger_logic: str = Field(
+        description="Whether this regime uses OR or AND logic: 'OR — either Brent or VIX triggers'.",
+        default="",
+    )
+    modifier_reason: str = Field(
+        description="Explanation of the modifier applied, e.g. 'CAUTION + Escalating geo → −7'.",
+        default="",
+    )
+    special_case_active: bool = Field(
+        description="True only when regime=CAUTION and geo=ESCALATING (−7 modifier).",
+        default=False,
+    )
+    cash_floor_pct: float = Field(
+        description="Minimum portfolio cash floor fraction per Section 14.1 (0.08 = 8%).",
+        default=0.20,
     )

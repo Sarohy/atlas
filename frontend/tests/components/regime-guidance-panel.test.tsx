@@ -30,14 +30,16 @@ describe('RegimeGuidancePanel', () => {
     expect(screen.queryByTestId('regime-guidance-vix')).not.toBeInTheDocument();
   });
 
-  it('renders the backend action, conviction score, and instruction', async () => {
+  it('renders the backend action and display message', async () => {
     renderPanel();
     await waitFor(() => screen.getByTestId('regime-guidance-content'));
 
-    expect(screen.getByTestId('regime-guidance-action-value')).toHaveTextContent('HOLD');
-    expect(screen.getByTestId('regime-guidance-score')).toHaveTextContent('79');
+    // Mock returns tier=TIER_2, action='GTC ADDS PERMITTED'
+    expect(screen.getByTestId('regime-guidance-action-value')).toHaveTextContent(
+      'GTC ADDS PERMITTED',
+    );
     expect(screen.getByTestId('regime-guidance-output-text')).toHaveTextContent(
-      'Hold position',
+      'GTC adds permitted',
     );
   });
 
@@ -46,5 +48,19 @@ describe('RegimeGuidancePanel', () => {
     await waitFor(() => screen.getByTestId('regime-guidance-content'));
 
     expect(screen.queryByTestId('regime-guidance-war-toggle')).not.toBeInTheDocument();
+  });
+
+  it('does not render the grey zone box for TIER_2', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('regime-guidance-content'));
+
+    expect(screen.queryByTestId('regime-guidance-grey-zone-box')).not.toBeInTheDocument();
+  });
+
+  it('does not render exit rules note for TIER_2', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByTestId('regime-guidance-content'));
+
+    expect(screen.queryByTestId('regime-guidance-exit-rules-note')).not.toBeInTheDocument();
   });
 });

@@ -61,6 +61,9 @@ _MAX_CONCURRENCY = 20
 # 30 pairs ≈ 6 weeks of daily data; below this the estimate is unreliable.
 _MIN_RETURN_PAIRS = 30
 
+# Polygon can emit 0 for snapshot closes before a usable session price exists.
+_MIN_VALID_PRICE = Decimal("0")
+
 
 class MarketDataService:
     """Fetches real-time quotes and computes 1-year rolling beta via Polygon."""
@@ -334,6 +337,12 @@ class MarketDataService:
             except InvalidOperation:
                 return None
 
+        def to_price(value: object) -> Decimal | None:
+            price = to_dec(value)
+            if price is None or price <= _MIN_VALID_PRICE:
+                return None
+            return price
+
         current_price: Decimal | None = None
         previous_close: Decimal | None = None
         day_change: Decimal | None = None
@@ -343,8 +352,8 @@ class MarketDataService:
             day = snapshot.get("day") or {}
             prev_day = snapshot.get("prevDay") or {}
 
-            current_price = to_dec(day.get("c"))
-            previous_close = to_dec(prev_day.get("c"))
+            current_price = to_price(day.get("c"))
+            previous_close = to_price(prev_day.get("c"))
 
             # Polygon snapshot provides the computed day change directly.
             day_change = to_dec(snapshot.get("todaysChange"))
@@ -352,16 +361,19 @@ class MarketDataService:
 
             # If the current session has no close yet, fall back to last agg bar.
             if current_price is None and agg_bars:
-                current_price = to_dec(agg_bars[-1].get("c"))
+                current_price = to_price(agg_bars[-1].get("c"))
+
+            if current_price is None:
+                current_price = previous_close
 
         elif agg_bars:
             # Snapshot unavailable — derive from the last two daily agg bars.
             latest = agg_bars[-1]
-            current_price = to_dec(latest.get("c"))
+            current_price = to_price(latest.get("c"))
             previous_close = (
-                to_dec(agg_bars[-2].get("c"))
+                to_price(agg_bars[-2].get("c"))
                 if len(agg_bars) >= 2
-                else to_dec(latest.get("o"))
+                else to_price(latest.get("o"))
             )
 
         # Re-derive day change locally when Polygon did not include it.

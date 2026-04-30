@@ -282,6 +282,16 @@ class TestApplyMarketData:
         assert ticker.current_price == Decimal("131.0")
         assert ticker.previous_close == Decimal("130.0")
 
+    def test_snapshot_zero_day_close_falls_back_to_previous_close(self) -> None:
+        """Polygon can return day.c=0 before a usable close; never value holdings at zero."""
+        ticker = _make_ticker(shares=Decimal("10"))
+        snap = _make_snapshot(day_close=0.0, prev_close=136.5)
+
+        MarketDataService._apply_market_data(ticker, snap, [], None, self._NOW)
+
+        assert ticker.current_price == Decimal("136.5")
+        assert ticker.position_value == Decimal("136.5") * Decimal("10")
+
 
 # ---------------------------------------------------------------------------
 # _fetch_snapshot_batch / _fetch_snapshot_chunk

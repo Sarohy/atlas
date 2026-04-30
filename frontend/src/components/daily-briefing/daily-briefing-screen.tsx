@@ -8,6 +8,8 @@ import type {
   DailyBriefingScreenData,
 } from '@/types/daily-briefing';
 
+import { GeopoliticalGateCard } from './geopolitical-gate-card';
+
 type DailyBriefingScreenProps = {
   data: DailyBriefingScreenData;
 };
@@ -45,6 +47,8 @@ export function DailyBriefingScreen({ data }: DailyBriefingScreenProps) {
             <h2 className="atlas-briefing-question">{data.q2Title}</h2>
             <div className="atlas-briefing-callout">{data.q2Callout}</div>
           </section>
+
+          <GeopoliticalGateCard />
 
           <section className="atlas-briefing-block">
             <h2 className="atlas-briefing-question">Q5 — What changes this today?</h2>

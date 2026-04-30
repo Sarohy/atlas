@@ -454,6 +454,15 @@
   padding: 0.7rem 0.9rem 0.8rem;
 }
 
+.atlas-portfolio-actions-placeholder {
+  border-top: 1px solid var(--atlas-portfolio-divider);
+  margin: 0;
+  padding: 0.95rem 0.9rem 1rem;
+  color: var(--atlas-portfolio-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
 .atlas-portfolio-action-dot {
   width: 7px;
   height: 7px;

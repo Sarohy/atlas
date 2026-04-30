@@ -1,105 +1,180 @@
-# ATLAS — Setup Prompts & Agents
+# ATLAS — Active Investing Decision-Support Tool
 
-This bundle contains everything you need to bootstrap the ATLAS project with Claude Code, with strict TDD and clean architecture from day one.
+ATLAS helps a single investor evaluate conviction scores, apply regime modifiers, and maintain an auditable decision trace. It never executes trades autonomously. Safety and auditability are first-class constraints.
 
-## What's in this bundle
+## What's been built
+
+### Frameworks implemented
+
+| Framework | Name | Status |
+|-----------|------|--------|
+| F1 | Momentum Score | ✅ Live |
+| F2 | Earnings Gate | ✅ Live |
+| F3 | Analyst Consensus | ✅ Live |
+| F4 | Options Flow | ✅ Live |
+| F5 | Fundamental Quality | ✅ Live |
+| F6 | Framework Score (conviction 0–100) | ✅ Live |
+| F7 | Earnings Gate (earnings proximity guard) | ✅ Live |
+| F8 | Position Sizing | ✅ Live |
+| F9 | Options Flow Engine (UW + Polygon + dark pool) | ✅ Live |
+| F10 | LEAPS Strategy (entry eligibility) | ✅ Live |
+| F11 | Cash Floor Enforcer | ✅ Live |
+| F12 | Catalyst No-Fly Zone | ✅ Live |
+| F13 | Tranche Sizing | ✅ Live |
+| F14 | Conviction Action | ✅ Live |
+| F29 | Regime Modifier (VIX / Brent / escalation) | ✅ Live |
+| F30 | Portfolio Health | ✅ Live |
+
+### Architecture
 
 ```
-.
-├── README.md                          ← you are here
-├── BACKEND_SETUP.md                   ← prompt to scaffold the FastAPI backend
-├── FRONTEND_SETUP.md                  ← prompt to scaffold the Next.js frontend
-└── .claude/
-    └── agents/
-        ├── tdd-enforcer.md            ← blocks impl code without failing tests
-        ├── code-reviewer.md           ← runs the quality gate before commits
-        └── architecture-guardian.md   ← enforces layering & dependency rules
+atlas/
+├── backend/          FastAPI + PostgreSQL (Python 3.12+, uv)
+├── frontend/         Next.js 16 App Router (Node 22+, pnpm)
+├── .claude/agents/   Sub-agent definitions (architecture, TDD, review)
+├── AGENTS.md         Authoritative AI agent coding instructions
+├── BACKEND_SETUP.md
+└── FRONTEND_SETUP.md
 ```
 
-## How to use it
+**Backend layers** (strict top-down, never reverse):
+```
+api/       routes only — no business logic
+services/  business logic — calls db and external clients
+models/    SQLAlchemy ORM models — pure
+schemas/   Pydantic request/response — pure
+db/        session, base, migrations
+core/      cross-cutting (logging, security, settings)
+```
 
-### 1. Create the project root
+**Frontend layers**:
+```
+app/           Server Components by default; 'use client' only when needed
+components/    imports from lib/ only — no raw fetch calls
+lib/api/       all fetch calls
+lib/hooks/     TanStack Query hooks — only layer calling lib/api/
+lib/schemas/   pure Zod — no external imports
+lib/stores/    Zustand stores
+```
+
+### Key safety rules
+
+- **Decision Trace is append-only.** Every block, override, and deferral is permanently logged. No `UPDATE` or `DELETE` ever.
+- **Regime modifier is a pure function.** No side effects, no I/O, no randomness.
+- **Conviction scores are read-only intraday.** No recomputation outside the post-close batch job.
+- **Framework 12 no-fly zone uses conservative defaults.** When any data source is unavailable, all sell-side actions (covered calls, partial sells, trims) are treated as BLOCKED.
+
+### Database tables
+
+| Table | Purpose |
+|-------|---------|
+| `tickers` | Held portfolio positions |
+| `watchlist` | Watchlist tickers |
+| `leaps_eligibility` | LEAPS strategy tracking |
+| `nav_history` | NAV history for cash floor |
+| `clusters` | Sector/cluster groupings |
+| `gtc_orders` | GTC order tracking (F11) |
+| `signal_queue` | Queued buy signals (F11) |
+| `catalyst_events` | Non-earnings catalyst events (F12) |
+| `framework12_overrides` | Per-action human overrides (F12) |
+| `decision_trace` | Append-only audit log (F12) |
+| `atlas_config` | Runtime config key-value store |
+
+### Config (never hardcoded in app code)
+
+| Key | Value | Purpose |
+|-----|-------|---------|
+| `f12_catalyst_window_days` | 7 | F12 no-fly zone window in calendar days |
+| `f12_exit_deferral_trading_days` | 10 | Trading days after catalyst before exit rule resumes |
+
+## Running locally
+
+### Backend
 
 ```bash
-mkdir atlas && cd atlas
+# PostgreSQL must be running first
+cd backend
+cp .env.example .env          # fill in DATABASE_URL and API keys
+uv run uvicorn atlas.main:create_app --factory --reload --port 8000
 ```
 
-### 2. Copy the agents into place
-
-The `.claude/agents/` directory must live at the **project root** (next to `backend/` and `frontend/`), not inside either subproject. Claude Code automatically picks up agents from there.
-
-```bash
-mkdir -p .claude/agents
-cp /path/to/this/bundle/.claude/agents/*.md .claude/agents/
+Required env:
+```
+DATABASE_URL=postgresql+asyncpg://localhost/atlas_dev
+ENVIRONMENT=development
+ALPHAVANTAGE_API_KEY=...
+POLYGON_API_KEY=...
 ```
 
-### 3. Run the backend setup prompt
+Run migrations after first start:
+```bash
+cd backend && uv run alembic upgrade head
+```
 
-Open Claude Code in the `atlas/` directory and paste the **entire contents of `BACKEND_SETUP.md`** as your first message. Claude will work through the steps, using the `tdd-enforcer` and `code-reviewer` agents at the appropriate moments.
-
-When it finishes, you'll have a working `backend/` directory with:
-- A passing `GET /api/v1/health` endpoint
-- ≥90% test coverage
-- All quality gates green
-- Pre-commit hooks installed
-
-### 4. Run the frontend setup prompt
-
-Once the backend is running, paste the **entire contents of `FRONTEND_SETUP.md`** as your next message in the same Claude Code session (or a new one — agents work either way).
-
-When it finishes, you'll have a working `frontend/` directory with:
-- A home page rendering "ATLAS" + live backend health status
-- Unit, component, and e2e tests all passing
-- Same quality gates and TDD discipline as the backend
-
-### 5. Verify end-to-end
+### Frontend
 
 ```bash
-# Terminal 1 — make sure local Postgres is running, then:
-cd backend && uv run uvicorn atlas.main:create_app --factory --reload
+cd frontend
+cp .env.example .env.local    # set NEXT_PUBLIC_API_URL
+pnpm dev                      # http://localhost:3000
+```
 
-# Terminal 2
-cd frontend && pnpm dev
+Required env:
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-# Terminal 3
+### Tests
+
+```bash
+# Backend
+cd backend && uv run pytest --cov=src --cov-fail-under=90
+
+# Frontend unit + component
+cd frontend && pnpm test
+
+# Frontend e2e (requires backend on :8000)
 cd frontend && pnpm test:e2e
 ```
 
-Visit `http://localhost:3000` and confirm "ATLAS" + "Backend: ok" appears.
+## Quality gate (must pass before every commit)
 
-## How the agents work together
+### Backend
+```bash
+cd backend
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+uv run pytest --cov=src --cov-fail-under=90
+```
 
-Once the agents are in `.claude/agents/`, Claude Code will invoke them automatically based on their `description` fields. You can also invoke them manually by name:
+### Frontend
+```bash
+cd frontend
+pnpm typecheck        # tsc --noEmit
+pnpm lint
+pnpm format:check
+pnpm test:coverage    # ≥90% coverage
+```
 
-- **`tdd-enforcer`** runs at the start of any feature work. It checks that a failing test exists before any implementation gets written. If you try to write code first, it blocks you with `❌ TDD VIOLATION`.
+## Tech stack
 
-- **`code-reviewer`** runs after implementation is complete, before committing. It runs the full quality gate (lint, types, tests, coverage) and reads the diff for ATLAS-specific rules like Decision Trace immutability and regime modifier purity.
+**Backend:** Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2 async · PostgreSQL · Alembic · pytest · uv · ruff · mypy · structlog
 
-- **`architecture-guardian`** runs when new files, directories, or dependencies are introduced. It enforces the layering rules (`api/` → `services/` → `db/`, never the other way) and the approved dependency list.
+**Frontend:** Next.js 16 · TypeScript 5 strict · Tailwind CSS 4 · shadcn/ui · TanStack Query v5 · Zustand · Zod v4 · React Hook Form · Vitest · MSW · Playwright · pnpm
 
-The typical loop for any new feature looks like:
+## Sub-agents (`.claude/agents/`)
 
-1. You ask Claude to add a feature.
-2. `tdd-enforcer` makes sure a failing test is written first.
-3. `architecture-guardian` confirms the new files go in the right place.
-4. Claude writes the minimum implementation.
-5. `code-reviewer` runs the quality gate and either approves or sends it back.
-6. Commit.
+| Agent | When to invoke |
+|-------|---------------|
+| `architecture-guardian` | Before adding any new module, file, directory, or dependency |
+| `tdd-enforcer` | At the start of every feature, bug fix, or refactor touching business logic |
+| `code-reviewer` | After any implementation work, before committing |
 
-## Project context (the short version)
+## Commit convention
 
-ATLAS is a decision-support tool for active investing. It computes a daily 0–100 conviction score for each holding using five weighted factors plus a regime modifier (Crisis Halt / Caution / Clear) driven by VIX, Brent crude, and an escalation probability gauge. The UI has three main screens — Daily Briefing, Portfolio, Frameworks — and safety-critical confirmation modals for any trade action. Every confirmed action writes to an append-only Decision Trace log.
-
-The Hello World scaffold doesn't build any of that yet. It builds the foundation those features will sit on, with the discipline they require.
-
-## Tech stack reference
-
-**Backend:** Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · PostgreSQL 16 · Alembic · pytest · uv · ruff · mypy
-
-**Frontend:** Next.js 15 · React 19 · TypeScript (strict) · TailwindCSS · shadcn/ui · TanStack Query · Zod · React Hook Form · Vitest · React Testing Library · MSW · Playwright · pnpm
-
-## Notes
-
-- The agents assume a monorepo layout with `backend/` and `frontend/` as siblings under `atlas/`. If you split them into separate repos, copy `.claude/agents/` into each repo root.
-- The 90% coverage threshold is enforced by the test runners themselves, not just the reviewer agent. You can't accidentally drop below it.
-- The TDD enforcer is strict by design. If it feels annoying, that's the point — it's catching the exact mistake that turns disciplined codebases into messes six months in.
+```
+<type>(<scope>): <short description>
+```
+Types: `feat` · `fix` · `refactor` · `test` · `chore` · `docs` · `perf` · `ci`  
+Scopes: `backend` · `frontend` · `infra` · `deps` · `agents`

@@ -15,8 +15,6 @@ import type {
 // Named constants
 // ---------------------------------------------------------------------------
 
-const SCORE_BAR_SEGMENTS = 10;
-
 const GRADE_TONE: Record<string, string> = {
   STRONG: 'is-green',
   GOOD: 'is-cyan',
@@ -63,6 +61,13 @@ const INST_TONE: Record<string, string> = {
 type F5FundamentalPanelProps = {
   /** Active ticker symbol chosen by the shared selector in FrameworksPanelsSection. */
   ticker: string;
+  /**
+   * Framework 8 insider flag status. When true, the F5 score is capped at
+   * `f8Cap` so the detail card matches Framework 1's summary table.
+   */
+  f8FlagActive?: boolean;
+  /** Framework 8 cap value (68 or 72). Only meaningful when `f8FlagActive` is true. */
+  f8Cap?: number | null;
 };
 
 /**
@@ -78,7 +83,7 @@ type F5FundamentalPanelProps = {
  * Caps: C-suite sell >$1M → 72 | CEO/CFO >$10M → 65 | Altman grey zone → 75.
  * Hard block: Altman Z < 1.8 → new capital blocked.
  */
-export function F5FundamentalPanel({ ticker }: F5FundamentalPanelProps) {
+export function F5FundamentalPanel({ ticker, f8FlagActive, f8Cap }: F5FundamentalPanelProps) {
   const { data, isFetching, isError, error } = useFundamental(ticker);
 
   return (
@@ -97,7 +102,9 @@ export function F5FundamentalPanel({ ticker }: F5FundamentalPanelProps) {
         {!isFetching && !isError && data && data.data_available === false && (
           <DegradedBanner reason="Alpha Vantage rate limit reached — balance sheet, income statement, cash flow, and overview data unavailable. Fundamental score is a neutral fallback (not computed from real data). Try again in ~1 minute." />
         )}
-        {!isFetching && !isError && data && <FundamentalContent data={data} />}
+        {!isFetching && !isError && data && (
+          <FundamentalContent data={data} f8FlagActive={f8FlagActive} f8Cap={f8Cap} />
+        )}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
@@ -145,7 +152,19 @@ function DegradedBanner({ reason }: { reason: string }) {
 // Main content
 // ---------------------------------------------------------------------------
 
-function FundamentalContent({ data }: { data: FundamentalResponse }) {
+function FundamentalContent({
+  data,
+  f8FlagActive,
+  f8Cap,
+}: {
+  data: FundamentalResponse;
+  f8FlagActive?: boolean;
+  f8Cap?: number | null;
+}) {
+  // Apply the Framework 8 insider cap when active so this detail card
+  // shows the same value as the Framework 1 summary table row.
+  const f8CapActive = f8FlagActive === true && typeof f8Cap === 'number';
+  const displayScore = f8CapActive ? Math.min(data.f5_score, f8Cap as number) : data.f5_score;
   const gradeTone = GRADE_TONE[data.f5_grade] ?? 'is-yellow';
 
   return (
@@ -154,7 +173,7 @@ function FundamentalContent({ data }: { data: FundamentalResponse }) {
       <div className="atlas-f5-score-hero">
         <div className="atlas-f5-score-ring">
           <span className={cn('atlas-f5-score-number', gradeTone)} data-testid="f5-score">
-            {data.f5_score}
+            {displayScore}
           </span>
           <span className="atlas-f5-score-denom">/100</span>
         </div>
@@ -166,14 +185,19 @@ function FundamentalContent({ data }: { data: FundamentalResponse }) {
             {data.f5_grade}
           </span>
           <span className="atlas-f5-label-sub">Fundamental Quality</span>
+          {f8CapActive && (
+            <span
+              className="atlas-frameworks-pill atlas-f5-flag-pill is-orange"
+              data-testid="f5-f8-cap-pill"
+            >
+              CAPPED AT {f8Cap} BY F8
+            </span>
+          )}
         </div>
       </div>
 
       {/* Flags row */}
       <FlagsRow data={data} />
-
-      {/* Score bar */}
-      <ScoreBar score={data.f5_score} gradeTone={gradeTone} />
 
       {/* Five weighted indicator cards */}
       <div className="atlas-f5-indicators">
@@ -218,30 +242,6 @@ function FlagsRow({ data }: { data: FundamentalResponse }) {
               : ` (grey zone)`}
         </span>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Score bar
-// ---------------------------------------------------------------------------
-
-function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
-  const filled = Math.round((score / 100) * SCORE_BAR_SEGMENTS);
-  return (
-    <div
-      className="atlas-f5-score-bar"
-      role="progressbar"
-      aria-valuenow={score}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      {Array.from({ length: SCORE_BAR_SEGMENTS }, (_, i) => (
-        <span
-          key={i}
-          className={cn('atlas-f5-score-bar-seg', i < filled ? gradeTone : 'is-empty')}
-        />
-      ))}
     </div>
   );
 }

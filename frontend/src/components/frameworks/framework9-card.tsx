@@ -266,7 +266,7 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
                 }
               />
               <StatCard
-                label="Put / Call Ratio"
+                label="Call / Put Ratio"
                 value={formatRatio(data.put_call_ratio)}
               />
             </div>

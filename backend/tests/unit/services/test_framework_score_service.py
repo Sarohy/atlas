@@ -188,7 +188,7 @@ class TestComputeRawTotal:
     """Verifies that factor weights are applied correctly.
 
     Weights per Factor_Mapping_Guide:
-      F1 x 0.15  F2 x 0.25  F3 x 0.15  F4 x 0.15  F5 x 0.30  -> max = 100
+      F1 x 0.20  F2 x 0.25  F3 x 0.15  F4 x 0.15  F5 x 0.25  -> max = 100
     """
 
     def test_all_perfect_scores_give_100(self) -> None:
@@ -198,8 +198,8 @@ class TestComputeRawTotal:
         assert _compute_raw_total(0, 0, 0, 0, 0) == pytest.approx(0.0)
 
     def test_only_f1_contributes(self) -> None:
-        # 100 x 0.15 = 15.0
-        assert _compute_raw_total(100, 0, 0, 0, 0) == pytest.approx(15.0)
+        # 100 x 0.20 = 20.0
+        assert _compute_raw_total(100, 0, 0, 0, 0) == pytest.approx(20.0)
 
     def test_only_f2_contributes(self) -> None:
         # 100 x 0.25 = 25.0
@@ -214,22 +214,22 @@ class TestComputeRawTotal:
         assert _compute_raw_total(0, 0, 0, 100, 0) == pytest.approx(15.0)
 
     def test_only_f5_contributes(self) -> None:
-        # 100 x 0.30 = 30.0
-        assert _compute_raw_total(0, 0, 0, 0, 100) == pytest.approx(30.0)
+        # 100 x 0.25 = 25.0
+        assert _compute_raw_total(0, 0, 0, 0, 100) == pytest.approx(25.0)
 
     def test_lite_worked_example(self) -> None:
         """LITE example from Factor_Mapping_Guide (before regime modifier).
 
         F1=86, F2=94, F3=100, F4=82, F5=78 (using guide sample scores)
-          86 x 0.15 = 12.90
+          86 x 0.20 = 17.20
           94 x 0.25 = 23.50
          100 x 0.15 = 15.00
           82 x 0.15 = 12.30
-          78 x 0.30 = 23.40
-          Total     = 87.10
+          78 x 0.25 = 19.50
+          Total     = 87.50
         """
         result = _compute_raw_total(86, 94, 100, 82, 78)
-        assert result == pytest.approx(87.10, abs=0.01)
+        assert result == pytest.approx(87.50, abs=0.01)
 
 
 # ---------------------------------------------------------------------------

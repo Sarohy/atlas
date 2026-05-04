@@ -1,7 +1,7 @@
 """Framework Score service — aggregates F1-F5 into a single conviction score.
 
 Formula (Factor_Mapping_Guide §Final Score):
-  Raw Total   = (F1 x 0.15) + (F2 x 0.25) + (F3 x 0.15) + (F4 x 0.15) + (F5 x 0.30)
+  Raw Total   = (F1 x 0.20) + (F2 x 0.25) + (F3 x 0.15) + (F4 x 0.15) + (F5 x 0.25)
   Final Score = round(Raw Total), clamped [0, 100]
 
   Maximum raw total = 100 (all factors at 100, weights sum to 1.00).
@@ -52,11 +52,11 @@ _F8_STALE_THRESHOLD_MINUTES: Final[int] = 30
 
 # Each factor is scored 0-100; multiplied by its weight to contribute to the
 # raw total.  Weights sum to 1.00 (maximum raw total = 100).
-_W_F1: Final[float] = 0.15  # Momentum
+_W_F1: Final[float] = 0.20  # Momentum
 _W_F2: Final[float] = 0.25  # Earnings Quality
 _W_F3: Final[float] = 0.15  # Analyst Sentiment
 _W_F4: Final[float] = 0.15  # Options Flow
-_W_F5: Final[float] = 0.30  # Fundamental Quality
+_W_F5: Final[float] = 0.25  # Fundamental Quality
 
 # Neutral fallback score when a factor service is unavailable.
 _NEUTRAL_SCORE: Final[int] = 50

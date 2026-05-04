@@ -3,7 +3,7 @@
 TDD — covers deterministic pure functions (no I/O).
 
 Pure functions under test:
-  classify_tier      — score → TierResult (ATLAS v7.3.3 Section 13.3 SSOT)
+  classify_tier      — score → TierResult (ATLAS v7.3.5 Section 13.3 SSOT)
   _map_action        — final_score → (action, action_tone) via classify_tier
   _compute_raw_total — (f1,f2,f3,f4,f5) → weighted sum (max 100)
   _compute_final_score — raw_total → clamped int [0,100]
@@ -39,98 +39,97 @@ from atlas.services.framework_score_service import (
 
 
 class TestClassifyTier:
-    """Boundary-exact tests for classify_tier() per v7.3.3 Section 13.3."""
+    """Boundary-exact tests for classify_tier() per v7.3.5 Section 13.3."""
 
-    # ── Tier 1 Core (>= 85) ────────────────────────────────────────────────
+    # ── T1 Elite (>= 85) ────────────────────────────────────────────────
 
     @pytest.mark.parametrize("score", [85, 90, 100])
-    def test_tier1_core(self, score: int) -> None:
+    def test_t1_elite(self, score: int) -> None:
         result = classify_tier(score)
-        assert result["tier"] == "TIER_1_CORE"
+        assert result["tier"] == "T1_ELITE"
         assert result["action"] == "LEAPS ELIGIBLE"
         assert result["leaps_eligible"] is True
         assert result["adds_permitted"] is True
 
-    def test_tier1_lower_boundary(self) -> None:
-        """Score 85 is Tier 1 Core (not Grey Zone)."""
-        assert classify_tier(85)["tier"] == "TIER_1_CORE"
+    def test_t1_elite_lower_boundary(self) -> None:
+        """Score 85 is T1 Elite (not T1)."""
+        assert classify_tier(85)["tier"] == "T1_ELITE"
 
-    def test_grey_zone_upper_boundary(self) -> None:
-        """Score 84 is Grey Zone (not Tier 1 Core)."""
-        assert classify_tier(84)["tier"] == "GREY_ZONE"
+    def test_t1_upper_boundary(self) -> None:
+        """Score 84 is T1 (not T1 Elite)."""
+        assert classify_tier(84)["tier"] == "T1"
 
-    # ── Grey Zone (78-84) ──────────────────────────────────────────────────
+    # ── T1 (80-84) ──────────────────────────────────────────────────────
 
-    @pytest.mark.parametrize("score", [78, 80, 84])
-    def test_grey_zone(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [80, 82, 84])
+    def test_t1(self, score: int) -> None:
         result = classify_tier(score)
-        assert result["tier"] == "GREY_ZONE"
-        assert result["action"] == "3-AI CONSENSUS REQUIRED"
+        assert result["tier"] == "T1"
         assert result["leaps_eligible"] is False
 
-    def test_grey_zone_lower_boundary(self) -> None:
-        """Score 78 is Grey Zone (not Tier 2)."""
-        assert classify_tier(78)["tier"] == "GREY_ZONE"
+    def test_t1_lower_boundary(self) -> None:
+        """Score 80 is T1 (not T2)."""
+        assert classify_tier(80)["tier"] == "T1"
 
-    def test_tier2_upper_boundary(self) -> None:
-        """Score 77 is Tier 2 GTC ADDS (not Grey Zone)."""
-        assert classify_tier(77)["tier"] == "TIER_2"
+    def test_t2_upper_boundary(self) -> None:
+        """Score 79 is T2 (not T1)."""
+        assert classify_tier(79)["tier"] == "T2"
 
-    # ── Tier 2 GTC ADDS (70-77) ───────────────────────────────────────────
+    # ── T2 (70-79) ────────────────────────────────────────────────────
 
-    @pytest.mark.parametrize("score", [70, 73, 77])
-    def test_tier2(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [70, 73, 79])
+    def test_t2(self, score: int) -> None:
         result = classify_tier(score)
-        assert result["tier"] == "TIER_2"
+        assert result["tier"] == "T2"
         assert result["action"] == "GTC ADDS PERMITTED"
 
-    def test_tier2_lower_boundary(self) -> None:
-        """Score 70 is Tier 2 (not Tier 3). This is the boundary fixed in v7.3.3."""
-        assert classify_tier(70)["tier"] == "TIER_2"
+    def test_t2_lower_boundary(self) -> None:
+        """Score 70 is T2 (not T3)."""
+        assert classify_tier(70)["tier"] == "T2"
 
-    def test_tier3_upper_boundary(self) -> None:
-        """Score 69 is Tier 3 SMALL POSITION (not Tier 2). THE BUG FIX."""
-        assert classify_tier(69)["tier"] == "TIER_3"
+    def test_t3_upper_boundary(self) -> None:
+        """Score 69 is T3 (not T2)."""
+        assert classify_tier(69)["tier"] == "T3"
 
-    # ── Tier 3 Small Position (55-69) ─────────────────────────────────────
+    # ── T3 (50-69) ────────────────────────────────────────────────────
 
-    @pytest.mark.parametrize("score", [55, 62, 69])
-    def test_tier3(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [50, 62, 69])
+    def test_t3(self, score: int) -> None:
         result = classify_tier(score)
-        assert result["tier"] == "TIER_3"
+        assert result["tier"] == "T3"
         assert result["action"] == "SMALL POSITION ONLY"
         assert result["leaps_eligible"] is False
 
-    def test_tier3_lower_boundary(self) -> None:
-        """Score 55 is Tier 3 (not Watchlist)."""
-        assert classify_tier(55)["tier"] == "TIER_3"
+    def test_t3_lower_boundary(self) -> None:
+        """Score 50 is T3 (not Below Gate)."""
+        assert classify_tier(50)["tier"] == "T3"
 
-    def test_watchlist_upper_boundary(self) -> None:
-        """Score 54 is Watchlist (not Tier 3)."""
-        assert classify_tier(54)["tier"] == "WATCHLIST"
+    def test_below_gate_upper_boundary(self) -> None:
+        """Score 49 is Below Gate (not T3)."""
+        assert classify_tier(49)["tier"] == "BELOW_GATE"
 
-    # ── Watchlist (< 55) ──────────────────────────────────────────────────
+    # ── Below Gate (< 50) ────────────────────────────────────────────
 
-    @pytest.mark.parametrize("score", [0, 30, 54])
-    def test_watchlist(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [0, 30, 49])
+    def test_below_gate(self, score: int) -> None:
         result = classify_tier(score)
-        assert result["tier"] == "WATCHLIST"
+        assert result["tier"] == "BELOW_GATE"
         assert result["action"] == "NO NEW CAPITAL"
         assert result["adds_permitted"] is False
 
-    # ── Integer conversion (Rule 4) ───────────────────────────────────────
+    # ── Integer conversion (Rule 4) ───────────────────────────────────
 
-    def test_float_69_9_is_tier3(self) -> None:
-        """int(69.9) = 69 → Tier 3, NOT Tier 2."""
-        assert classify_tier(69.9)["tier"] == "TIER_3"
+    def test_float_69_9_is_t3(self) -> None:
+        """int(69.9) = 69 → T3, NOT T2."""
+        assert classify_tier(69.9)["tier"] == "T3"
 
-    def test_float_69_0_is_tier3(self) -> None:
-        """int(69.0) = 69 → Tier 3."""
-        assert classify_tier(69.0)["tier"] == "TIER_3"
+    def test_float_69_0_is_t3(self) -> None:
+        """int(69.0) = 69 → T3."""
+        assert classify_tier(69.0)["tier"] == "T3"
 
-    def test_float_70_0_is_tier2(self) -> None:
-        """int(70.0) = 70 → Tier 2."""
-        assert classify_tier(70.0)["tier"] == "TIER_2"
+    def test_float_70_0_is_t2(self) -> None:
+        """int(70.0) = 70 → T2."""
+        assert classify_tier(70.0)["tier"] == "T2"
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +138,7 @@ class TestClassifyTier:
 
 
 class TestMapAction:
-    """_map_action → (action, tone) per v7.3.3 Section 13.3."""
+    """_map_action → (action, tone) per v7.3.5 Section 13.3."""
 
     @pytest.mark.parametrize("score", [85, 90, 100])
     def test_leaps_eligible(self, score: int) -> None:
@@ -147,26 +146,26 @@ class TestMapAction:
         assert action == "LEAPS ELIGIBLE"
         assert tone == "tone-green"
 
-    @pytest.mark.parametrize("score", [78, 80, 84])
-    def test_grey_zone(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [80, 82, 84])
+    def test_t1_core_position(self, score: int) -> None:
         action, tone = _map_action(score)
-        assert action == "3-AI CONSENSUS REQUIRED"
-        assert tone == "tone-purple"
+        assert action == "CORE POSITION"
+        assert tone == "tone-teal"
 
-    @pytest.mark.parametrize("score", [70, 73, 77])
+    @pytest.mark.parametrize("score", [70, 73, 79])
     def test_gtc_adds(self, score: int) -> None:
         action, tone = _map_action(score)
         assert action == "GTC ADDS PERMITTED"
         assert tone == "tone-blue"
 
-    @pytest.mark.parametrize("score", [55, 62, 69])
+    @pytest.mark.parametrize("score", [50, 62, 69])
     def test_small_position(self, score: int) -> None:
         action, tone = _map_action(score)
         assert action == "SMALL POSITION ONLY"
         assert tone == "tone-yellow"
 
-    @pytest.mark.parametrize("score", [0, 30, 54])
-    def test_watchlist(self, score: int) -> None:
+    @pytest.mark.parametrize("score", [0, 30, 49])
+    def test_below_gate(self, score: int) -> None:
         action, tone = _map_action(score)
         assert action == "NO NEW CAPITAL"
         assert tone == "tone-red"

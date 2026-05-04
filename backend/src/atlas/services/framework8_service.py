@@ -1,31 +1,26 @@
-"""Framework 8 — Insider Activity Flag service.
+"""Framework 8 — Insider Buying Detector service.
 
 Decision flow
 -------------
 1. Fetch SEC EDGAR submissions + Form 4 XML for the ticker (free public API,
-   no API key required — only a User-Agent header).  Only transaction code
-   "S" (sale) filings are processed.
+   no API key required — only a User-Agent header).
 
-2. Three sequential filters for each sale:
-   a. Financial-sponsor check — if the filer name matches a known PE / sponsor
-      firm (e.g. Bain Capital) the sale is not counted as discretionary (the
-      "COHR / Bain Capital exception").  No F5 cap is applied.
-   b. Rule 10b5-1 check — footnotes containing pre-planned sale language cause
-      the sale to be ignored entirely.
-   c. If neither exception applies → discretionary sale confirmed; flag raised.
+2. Buying bonus - additive scoring signal (0-5 points):
+   Transaction codes "P" (open-market purchase) and "A" (award/grant) from any
+   insider, including financial sponsors, increase the buying bonus.
 
-3. Filer title is classified into InsiderTier (TIER1 / TIER2 / TIER3).
+3. Clustered C-suite selling note — display-only, zero scoring impact:
+   When 2+ Tier-1 insiders (CEO/CFO/COO/President) sell in a discretionary
+   manner (no Rule 10b5-1 plan, not a financial sponsor) a neutral informational
+   note is attached to the result.  This note carries no penalty; it is shown
+   in the UI for awareness only.
 
-4. Hard-pass check: >= 5 sales with zero purchases -> ticker removed from
-   investable universe (CF Industries pattern).
-
-5. F5 cap resolution:
-   * Large sale (>= $1 M) OR Tier 1 filer -> cap F5 at 68
-   * Standard discretionary sale -> cap F5 at 72
+   Insider selling in all other scenarios — individual sales, Tier-2/3 filers,
+   10b5-1 plan sales, or sponsor sales — produces no note and no score impact.
 
 Pure helpers (_is_financial_sponsor, _has_10b51_language, _classify_filer_tier,
-_is_hard_pass, _resolve_f5_cap, _build_insider_analysis) contain zero I/O so
-they can be unit-tested synchronously.
+_compute_buying_bonus, _detect_clustered_csuite_selling, _build_insider_analysis)
+contain zero I/O so they can be unit-tested synchronously.
 
 The async method (compute) owns all network I/O via the SEC EDGAR feed.
 """
@@ -77,23 +72,20 @@ _PLAN_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
-# Filer title fragments that map to each tier (checked in order; first match wins).
+# Filer title fragments that map to Tier 1 (checked in order; first match wins).
 _TIER1_KEYWORDS: frozenset[str] = frozenset(
     {"chief executive", "ceo", "chief financial", "cfo", "chief operating", "coo", "president"}
 )
-_TIER2_KEYWORDS: frozenset[str] = frozenset(
-    {"chief technology", "cto", "chief product", "cpo", "chief marketing", "cmo"}
-)
 
-# Hard-pass: >= this many sales with 0 purchases -> remove from universe.
-_HARD_PASS_SALE_THRESHOLD: Final[int] = 5
+# Transaction codes that represent insider buying activity.
+_BUY_CODES: frozenset[str] = frozenset({"P", "A"})
 
-# F5 cap values.
-_F5_CAP_LARGE: Final[int] = 68    # large sale (>= $1M) OR Tier 1 filer
-_F5_CAP_STANDARD: Final[int] = 72  # standard discretionary sale
+# Minimum number of distinct Tier-1 discretionary (non-10b5-1, non-sponsor)
+# sellers required to generate a clustered C-suite selling note.
+_CLUSTERED_SELLING_MIN_TIER1: Final[int] = 2
 
-# Sale USD threshold for the large-sale cap.
-_LARGE_SALE_THRESHOLD: Final[float] = 1_000_000.0
+# Maximum additive buying bonus (caps the bonus at this value).
+_MAX_BUYING_BONUS: Final[int] = 5
 
 # In-memory cache TTL (24 hours).
 _CACHE_TTL_SECONDS: Final[int] = 86_400
@@ -132,12 +124,9 @@ class InsiderAnalysisResponse:
     """
 
     ticker: str
-    flag_active: bool
-    hard_pass: bool
-    filer_tier: InsiderTier | None
-    largest_sale_usd: float | None
-    f5_cap: int | None
-    source: str  # "hardcoded" | "sec_edgar" | "default"
+    buying_bonus: int            # additive points from insider buying (0 = no buys)
+    clustered_selling_note: str | None  # display-only; None = no concern
+    source: str  # "sec_edgar" | "default"
 
 
 # ---------------------------------------------------------------------------
@@ -197,31 +186,70 @@ def _classify_filer_tier(title: str) -> InsiderTier:
     return InsiderTier.TIER3
 
 
-def _is_hard_pass(sale_count: int, purchase_count: int) -> bool:
-    """Return True when the insider pattern is disqualifying.
+def _compute_buying_bonus(filings: list[dict[str, Any]]) -> int:
+    """Return an additive buying bonus (0-_MAX_BUYING_BONUS) from *filings*.
 
-    Hard pass = >= _HARD_PASS_SALE_THRESHOLD sales AND zero purchases.
-    Signals a stock to remove from the investable universe entirely.
-
-    Pure function — no I/O.
-    """
-    return sale_count >= _HARD_PASS_SALE_THRESHOLD and purchase_count == 0
-
-
-def _resolve_f5_cap(sale_usd: float, tier: InsiderTier) -> int:
-    """Return the F5 score cap for a confirmed discretionary sale.
-
-    Cap of 68 applies when:
-      - sale value >= $1 M, OR
-      - filer is Tier 1 (CEO / CFO / COO / President)
-
-    Otherwise the standard cap of 72 applies.
+    Each "P" (open-market purchase) or "A" (award/grant) transaction
+    contributes 1 point to the bonus.  The total is capped at
+    _MAX_BUYING_BONUS.  Selling transactions have no effect.
 
     Pure function — no I/O.
     """
-    if sale_usd >= _LARGE_SALE_THRESHOLD or tier == InsiderTier.TIER1:
-        return _F5_CAP_LARGE
-    return _F5_CAP_STANDARD
+    buy_count = sum(
+        1
+        for filing in filings
+        if filing.get("transactionCode", "") in _BUY_CODES
+    )
+    return min(buy_count, _MAX_BUYING_BONUS)
+
+
+def _detect_clustered_csuite_selling(
+    filings: list[dict[str, Any]],
+) -> str | None:
+    """Return a display-only note when clustered Tier-1 discretionary selling is detected.
+
+    Conditions for a note:
+      - At least _CLUSTERED_SELLING_MIN_TIER1 distinct non-sponsor Tier-1 filers
+        have a "S" (sale) transaction, AND
+      - At least one of those sales lacks Rule 10b5-1 plan language.
+
+    A sale covered by a 10b5-1 plan does not suppress the note when another
+    Tier-1 filer is selling without a plan. Only when ALL Tier-1 sellers have
+    10b5-1 coverage is the note suppressed.
+
+    Returns None when the conditions are not met.
+    Pure function - no I/O.
+    """
+    tier1_sellers: set[str] = set()         # all Tier-1 sellers (non-sponsor)
+    discretionary_tier1: set[str] = set()  # Tier-1 sellers without 10b5-1
+
+    for filing in filings:
+        code: str = filing.get("transactionCode", "")
+        if code != "S":
+            continue
+
+        filer_name: str = filing.get("reportingOwnerName", "") or ""
+        title: str = filing.get("filingTitle", "") or ""
+        footnotes: str = filing.get("footnotes", "") or ""
+
+        if _is_financial_sponsor(filer_name):
+            continue
+        if _classify_filer_tier(title) != InsiderTier.TIER1:
+            continue
+
+        tier1_sellers.add(filer_name)
+        if not _has_10b51_language(footnotes):
+            discretionary_tier1.add(filer_name)
+
+    if (
+        len(tier1_sellers) >= _CLUSTERED_SELLING_MIN_TIER1
+        and len(discretionary_tier1) >= 1
+    ):
+        return (
+            "Multiple C-suite insiders are selling without a 10b5-1 plan. "
+            "This is informational only and does not affect the score."
+        )
+    return None
 
 
 def _build_insider_analysis(
@@ -230,74 +258,17 @@ def _build_insider_analysis(
 ) -> InsiderAnalysisResponse:
     """Build an InsiderAnalysisResponse from pre-fetched filing dicts.
 
-    Runs the three-filter pipeline (sponsor check, 10b5-1 check, discretionary
-    classification) over *filings*.
-
+    Computes the buying bonus and checks for clustered C-suite selling.
     Pure function — no I/O (filings already fetched by the caller).
     """
     upper = ticker.strip().upper()
-
-    # ── Parse filings with three-filter pipeline ─────────────────────────
-    sale_count = 0
-    purchase_count = 0
-    flag_active = False
-    best_tier: InsiderTier = InsiderTier.TIER3
-    largest_sale: float = 0.0
-
-    for filing in filings:
-        code: str = filing.get("transactionCode", "")
-        if code != "S":
-            if code in ("P", "A"):
-                purchase_count += 1
-            continue
-
-        sale_count += 1
-
-        filer_name: str = filing.get("reportingOwnerName", "")
-        footnotes: str = filing.get("footnotes", "") or ""
-        amounts: dict[str, Any] = filing.get("transactionAmounts", {}) or {}
-        try:
-            sale_usd = abs(float(amounts.get("transactionTotalValue", 0) or 0))
-        except (TypeError, ValueError):
-            sale_usd = 0.0
-
-        # Filter a: financial-sponsor exception — not discretionary.
-        if _is_financial_sponsor(filer_name):
-            continue
-
-        # Filter b: Rule 10b5-1 pre-planned sale — ignore.
-        if _has_10b51_language(footnotes):
-            continue
-
-        # Filter c: confirmed discretionary sale.
-        flag_active = True
-        title: str = filing.get("filingTitle", "")
-        tier = _classify_filer_tier(title)
-
-        # Track the most senior tier seen.
-        if tier == InsiderTier.TIER1 or (
-            tier == InsiderTier.TIER2 and best_tier == InsiderTier.TIER3
-        ):
-            best_tier = tier
-
-        if sale_usd > largest_sale:
-            largest_sale = sale_usd
-
-    # ── 3. Hard-pass check ────────────────────────────────────────────────
-    hard_pass = _is_hard_pass(sale_count, purchase_count)
-
-    # ── 4. Resolve F5 cap ─────────────────────────────────────────────────
-    f5_cap: int | None = None
-    if flag_active:
-        f5_cap = _resolve_f5_cap(largest_sale, best_tier)
+    buying_bonus = _compute_buying_bonus(filings)
+    clustered_selling_note = _detect_clustered_csuite_selling(filings)
 
     return InsiderAnalysisResponse(
         ticker=upper,
-        flag_active=flag_active,
-        hard_pass=hard_pass,
-        filer_tier=best_tier if flag_active else None,
-        largest_sale_usd=largest_sale if flag_active else None,
-        f5_cap=f5_cap,
+        buying_bonus=buying_bonus,
+        clustered_selling_note=clustered_selling_note,
         source="sec_edgar",
     )
 
@@ -410,10 +381,11 @@ class Framework8Service:
     async def get_insider_flag(self, ticker: str) -> bool:
         """Backward-compatible boolean flag for Framework 7.
 
-        Returns True when Framework 8 has an active insider flag for *ticker*.
+        Returns True when there is a buying bonus or a clustered selling note
+        for *ticker* (i.e. any notable insider activity).
         """
         result = await self.compute(ticker)
-        return result.flag_active
+        return result.buying_bonus > 0 or result.clustered_selling_note is not None
 
     # ------------------------------------------------------------------
     # Private I/O

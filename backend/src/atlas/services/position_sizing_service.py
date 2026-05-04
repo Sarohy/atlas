@@ -1,15 +1,15 @@
-"""Framework 3 — Score Action Map v7.3.4.
+"""Framework 3 — Score Action Map v7.3.5.
 
 Maps a Framework 1 conviction score to a position-sizing action.
 All band logic delegates to ``atlas.core.scoring.classify_tier`` — the single
-source of truth for v7.3.3 tier boundaries.
+source of truth for v7.3.5 tier boundaries.
 
-Score bands (v7.3.3):
-  >= 85       TIER_1_CORE    - Core position, LEAPS eligible
-  78 - 84     GREY_ZONE      - 3-AI consensus required before any add
-  70 - 77     TIER_2         - GTC adds permitted
-  55 - 69     TIER_3         - Small position only
-  < 55        WATCHLIST      - Exit rules active (see Framework 16)
+Score bands (v7.3.5):
+  >= 85       T1_ELITE    - Core position, LEAPS eligible, 5-10% NAV
+  80-84       T1          - Core position, 2-4% NAV
+  70-79       T2          - GTC adds permitted, 0.5-1.5% NAV
+  50-69       T3          - Small speculative position, 0-0.5% NAV
+  < 50        BELOW_GATE  - Exit rules active (see Framework 16)
 """
 
 from __future__ import annotations
@@ -80,16 +80,16 @@ def score_to_action(
     final_score:
         Framework 1 conviction score (0-100).
     concentration_cap_active:
-        When ``True`` and score falls in TIER_1_CORE, adds are blocked by the
+        When ``True`` and score falls in T1_ELITE, adds are blocked by the
         Framework 14 concentration cap.  The tier label is unchanged.
     """
     tier_data = classify_tier(final_score)
     tier = tier_data["tier"]
 
-    if tier == "TIER_1_CORE":
+    if tier == "T1_ELITE":
         if concentration_cap_active:
             return ScoreAction(
-                tier="TIER_1",
+                tier="T1_ELITE",
                 action="CORE — LEAPS ELIGIBLE",
                 grey_zone=False,
                 consensus_required=False,
@@ -101,7 +101,7 @@ def score_to_action(
                 ),
             )
         return ScoreAction(
-            tier="TIER_1",
+            tier="T1_ELITE",
             action="CORE — LEAPS ELIGIBLE",
             grey_zone=False,
             consensus_required=False,
@@ -111,21 +111,21 @@ def score_to_action(
             display_message="Core position — LEAPS eligible.",
         )
 
-    if tier == "GREY_ZONE":
+    if tier == "T1":
         return ScoreAction(
-            tier="TIER_2_GREY",
-            action="GREY ZONE",
-            grey_zone=True,
-            consensus_required=True,
+            tier="T1",
+            action="CORE POSITION",
+            grey_zone=False,
+            consensus_required=False,
             trigger_exit_rules=False,
-            adds_permitted=False,  # overridden by consensus gate in compute_position_sizing
+            adds_permitted=True,
             leaps_eligible=False,
-            display_message="Grey zone — 3-model consensus required before adding.",
+            display_message="Core position — GTC adds permitted.",
         )
 
-    if tier == "TIER_2":
+    if tier == "T2":
         return ScoreAction(
-            tier="TIER_2",
+            tier="T2",
             action="GTC ADDS PERMITTED",
             grey_zone=False,
             consensus_required=False,
@@ -135,28 +135,28 @@ def score_to_action(
             display_message="GTC adds permitted.",
         )
 
-    if tier == "TIER_3":
+    if tier == "T3":
         return ScoreAction(
-            tier="TIER_3",
+            tier="T3",
             action="SMALL POSITION ONLY",
             grey_zone=False,
             consensus_required=False,
             trigger_exit_rules=False,
             adds_permitted=False,
             leaps_eligible=False,
-            display_message="Small position only — monitor for improvement.",
+            display_message="Small speculative position only — monitor for improvement.",
         )
 
-    # WATCHLIST (score < 55)
+    # BELOW_GATE (score < 50)
     return ScoreAction(
-        tier="WATCHLIST",
-        action="WATCHLIST",
+        tier="BELOW_GATE",
+        action="BELOW GATE",
         grey_zone=False,
         consensus_required=False,
         trigger_exit_rules=True,
         adds_permitted=False,
         leaps_eligible=False,
-        display_message="Watchlist — exit rules active. See Framework 16.",
+        display_message="Below gate — exit rules active. See Framework 16.",
     )
 
 
@@ -172,9 +172,6 @@ def compute_position_sizing(
 ) -> PositionSizingResponse:
     """Compute the Framework 3 position-sizing result.
 
-    Applies the consensus gate for TIER_2_GREY positions on top of the pure
-    ``score_to_action`` mapping.
-
     Parameters
     ----------
     ticker:
@@ -182,32 +179,23 @@ def compute_position_sizing(
     conviction_score:
         Framework 1 final score (0-100); clamped to [0, 100].
     concentration_cap_active:
-        Passed from Framework 14; blocks Tier 1 adds when ``True``.
+        Passed from Framework 14; blocks T1 Elite adds when ``True``.
     """
     clamped = max(0, min(100, conviction_score))
     upper_ticker = ticker.upper()
 
     score_action = score_to_action(float(clamped), concentration_cap_active)
 
-    # Apply consensus gate: grey zone adds are permitted only when confirmed.
-    consensus_confirmed = _get_consensus(upper_ticker) if score_action.grey_zone else False
-    adds_permitted = score_action.adds_permitted
-    display_message = score_action.display_message
-
-    if score_action.grey_zone and consensus_confirmed:
-        adds_permitted = True
-        display_message = "Grey zone cleared by consensus — adds permitted."
-
     return PositionSizingResponse(
         ticker=upper_ticker,
         conviction_score=clamped,
         tier=score_action.tier,
         action=score_action.action,
-        grey_zone=score_action.grey_zone,
-        consensus_required=score_action.consensus_required,
+        grey_zone=False,
+        consensus_required=False,
         trigger_exit_rules=score_action.trigger_exit_rules,
-        adds_permitted=adds_permitted,
+        adds_permitted=score_action.adds_permitted,
         leaps_eligible=score_action.leaps_eligible,
-        display_message=display_message,
-        consensus_confirmed=consensus_confirmed,
+        display_message=score_action.display_message,
+        consensus_confirmed=False,
     )

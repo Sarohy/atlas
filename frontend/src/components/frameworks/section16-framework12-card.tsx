@@ -17,6 +17,7 @@ import type {
   Rule3Result,
   Rule4Result,
   Section16Result,
+  TrackType,
 } from '@/lib/schemas/section16';
 import { cn } from '@/lib/utils';
 

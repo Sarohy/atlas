@@ -200,7 +200,7 @@ export function FrameworksPanelsSection() {
 
       <div className="atlas-frameworks-secondary-row">
         <Framework9Card ticker={activeTicker} />
-        <LeapsCard ticker={activeTicker} />
+        <LeapsCard ticker={activeTicker} score={f1DisplayScore ?? undefined} />
         <Framework11Card />
       </div>
 
@@ -271,11 +271,7 @@ export function FrameworksPanelsSection() {
               <F3AnalystPanel ticker={activeTicker} />
               <F4OptionsPanel ticker={activeTicker} />
             </div>
-            <F5FundamentalPanel
-              ticker={activeTicker}
-              f8FlagActive={framework8ForActive?.flag_active}
-              f8Cap={framework8ForActive?.f5_cap}
-            />
+            <F5FundamentalPanel ticker={activeTicker} />
           </div>
         </div>
       </div>

@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// Enums (v7.3.4 Watchlist Tier Structure)
+// Enums (v7.3.5 New Tier Structure)
 // ---------------------------------------------------------------------------
 
 export const tierSchema = z.enum([
-  'TIER_1_CORE',
-  'GREY_ZONE',
-  'TIER_2',
-  'TIER_3',
-  'WATCHLIST',
+  'T1_ELITE',
+  'T1',
+  'T2',
+  'T3',
+  'BELOW_GATE',
 ]);
 
 export const positionSizeStatusSchema = z.enum([
@@ -40,7 +40,7 @@ export const convictionActionResponseSchema = z.object({
   /** Conviction tier key. */
   tier: tierSchema,
 
-  /** Human-readable tier label (e.g. "TIER 1 — CORE"). */
+  /** Human-readable tier label (e.g. "T1 ELITE"). */
   tier_label: z.string(),
 
   /** CSS hex color for this tier (e.g. "#39d353"). */
@@ -49,26 +49,20 @@ export const convictionActionResponseSchema = z.object({
   /** Lower bound of score band for this tier (inclusive). */
   score_band_min: z.number().int(),
 
-  /** Upper bound of score band for this tier (inclusive). Null for TIER_1_CORE (no ceiling). */
+  /** Upper bound of score band for this tier (inclusive). Null for T1_ELITE (no ceiling). */
   score_band_max: z.number().int().nullable(),
 
-  /** Minimum position size as a percentage of NAV (e.g. 3.0 = 3%). */
+  /** Minimum position size as a percentage of NAV (e.g. 5.0 = 5%). */
   size_min_pct: z.number(),
 
-  /** Maximum position size as a percentage of NAV (e.g. 5.0 = 5%). */
+  /** Maximum position size as a percentage of NAV (e.g. 10.0 = 10%). */
   size_max_pct: z.number(),
 
   /** Recommended action text. */
   action: z.string(),
 
-  /** Whether LEAPS options are eligible (TIER_1_CORE only). */
+  /** Whether LEAPS options are eligible (T1_ELITE only). */
   leaps_eligible: z.boolean(),
-
-  /** Whether 3-AI consensus is required before adding (GREY_ZONE only). */
-  consensus_required: z.boolean(),
-
-  /** Current consensus status. */
-  consensus_status: consensusStatusSchema,
 
   /** Current position weight as a percentage of NAV. */
   current_weight_pct: z.number(),
@@ -94,10 +88,10 @@ export const convictionActionResponseSchema = z.object({
   /** Whether Framework 14 concentration cap is currently active. */
   concentration_cap: z.boolean(),
 
-  /** Whether the exit rule has been triggered (2 consecutive closes < 55). */
+  /** Whether the exit rule has been triggered (2 consecutive closes < 50). */
   exit_triggered: z.boolean(),
 
-  /** Number of consecutive Friday closes below 55. */
+  /** Number of consecutive Friday closes below 50. */
   exit_cycle_count: z.number().int(),
 
   /** Cluster name this ticker belongs to. */

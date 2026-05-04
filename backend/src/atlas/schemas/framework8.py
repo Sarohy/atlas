@@ -1,10 +1,8 @@
-"""Pydantic schema for Framework 8 — Insider Activity Flag response."""
+"""Pydantic schema for Framework 8 — Insider Buying Detector response."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-
-from atlas.services.framework8_service import InsiderTier
 
 
 class Framework8Response(BaseModel):
@@ -15,20 +13,12 @@ class Framework8Response(BaseModel):
 
     ticker: str
 
-    # True when discretionary insider selling has been detected.
-    flag_active: bool
+    # Additive score bonus from insider buying (0 when no qualifying buys).
+    buying_bonus: int = Field(default=0, ge=0)
 
-    # True when many sales + zero purchases -> removed from investable universe.
-    hard_pass: bool
+    # Display-only note when multiple Tier-1 insiders sell without a 10b5-1
+    # plan.  Null when no concern detected.  Carries NO scoring impact.
+    clustered_selling_note: str | None = None
 
-    # Insider tier of the filer who triggered the flag. None when flag is off.
-    filer_tier: InsiderTier | None = None
-
-    # Total USD value of the largest discretionary sale detected.
-    largest_sale_usd: float | None = None
-
-    # Cap applied to F5: 68 (large/Tier 1) or 72 (standard). None = no flag.
-    f5_cap: int | None = Field(default=None, ge=68, le=72)
-
-    # "hardcoded" | "sec_edgar" | "default"
+    # "sec_edgar" | "default"
     source: str

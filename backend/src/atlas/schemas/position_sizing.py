@@ -8,12 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class PositionSizingResponse(BaseModel):
     """Response from the Framework 3 position-sizing endpoint.
 
-    Score-to-action map (v7.3.4):
-      >= 85       TIER_1         — Core position, LEAPS eligible
-      78 - 84     TIER_2_GREY    - Grey zone, 3-model consensus required
-      70 - 77     TIER_2         - GTC adds permitted
-      55 - 69     TIER_3         - Small position only
-      < 55        WATCHLIST      — Exit rules active (see Framework 16)
+    Score-to-action map (v7.3.5):
+      >= 85       T1_ELITE    — Core position, LEAPS eligible, 5-10% NAV
+      80-84       T1          — Core position, 2-4% NAV
+      70-79       T2          — GTC adds permitted, 0.5-1.5% NAV
+      50-69       T3          — Small speculative position, 0-0.5% NAV
+      < 50        BELOW_GATE  — Exit rules active (see Framework 16)
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -26,28 +26,28 @@ class PositionSizingResponse(BaseModel):
     )
     tier: str = Field(
         description=(
-            "Position tier: 'TIER_1' | 'TIER_2_GREY' | 'TIER_2' | 'TIER_3' | 'WATCHLIST'."
+            "Position tier: 'T1_ELITE' | 'T1' | 'T2' | 'T3' | 'BELOW_GATE'."
         ),
     )
     action: str = Field(description="Short action label for the position tier.")
     grey_zone: bool = Field(
-        description="True when the score falls in the 78-84 consensus-required band.",
+        description="Retained for backward compatibility — always False.",
     )
     consensus_required: bool = Field(
-        description="True when 3-model consensus is needed before adding.",
+        description="Retained for backward compatibility — always False.",
     )
     trigger_exit_rules: bool = Field(
-        description="True for WATCHLIST tier — see Framework 16 for exit rules.",
+        description="True for BELOW_GATE tier — see Framework 16 for exit rules.",
     )
     adds_permitted: bool = Field(
-        description=("True when new adds are permitted given tier, cap, and consensus state."),
+        description=("True when new adds are permitted given tier and cap state."),
     )
     leaps_eligible: bool = Field(
-        description="True for TIER_1 positions without a concentration cap block.",
+        description="True for T1_ELITE positions without a concentration cap block.",
     )
     display_message: str = Field(
         description="Human-readable guidance sentence for the current position state.",
     )
     consensus_confirmed: bool = Field(
-        description=("True when the 3-model consensus gate has been confirmed for this ticker."),
+        description="Retained for backward compatibility — always False.",
     )

@@ -1,7 +1,16 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FrameworkScorePanel } from '@/components/frameworks/framework-score-panel';
+
+function makeWrapper() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return Wrapper;
+}
 
 vi.mock('@/lib/hooks/use-framework-score', () => ({
   useFrameworkScore: () => ({
@@ -59,6 +68,9 @@ vi.mock('@/lib/hooks/use-framework-score', () => ({
       action: 'HOLD',
       action_tone: 'tone-yellow',
       f5_blocked: false,
+      f5_raw_score: null,
+      f8_buying_bonus: 0,
+      f8_clustered_selling_note: null,
       flags: [],
       degraded: false,
     },
@@ -70,31 +82,39 @@ vi.mock('@/lib/hooks/use-framework-score', () => ({
 
 vi.mock('@/lib/hooks/use-momentum', () => ({
   useMomentum: () => ({
-    data: { f1_score: 93 },
+    data: { ticker: 'AAPL', f1_score: 93 },
   }),
 }));
 
 vi.mock('@/lib/hooks/use-earnings', () => ({
   useEarnings: () => ({
-    data: { f2_score: 70 },
+    data: { ticker: 'AAPL', f2_score: 70 },
   }),
 }));
 
 vi.mock('@/lib/hooks/use-analyst', () => ({
   useAnalyst: () => ({
-    data: { f3_score: 60 },
+    data: { ticker: 'AAPL', f3_score: 60 },
   }),
 }));
 
 vi.mock('@/lib/hooks/use-options-flow', () => ({
   useOptionsFlow: () => ({
-    data: { f4_score: 74 },
+    data: { ticker: 'AAPL', f4_score: 74 },
   }),
 }));
 
 vi.mock('@/lib/hooks/use-fundamental', () => ({
   useFundamental: () => ({
-    data: { f5_score: 77, f5_grade: 'WEAK' },
+    data: { ticker: 'AAPL', f5_score: 77, f5_grade: 'WEAK' },
+  }),
+}));
+
+vi.mock('@/lib/hooks/use-framework8', () => ({
+  useFramework8: () => ({
+    data: { ticker: 'AAPL', buying_bonus: 0, clustered_selling_note: null, source: 'default' },
+    isLoading: false,
+    isError: false,
   }),
 }));
 
@@ -102,6 +122,7 @@ describe('FrameworkScorePanel', () => {
   it('renders factor rows from the same F1-F5 scores shown in the detailed cards', async () => {
     render(
       <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={0} />,
+      { wrapper: makeWrapper() },
     );
 
     await waitFor(() => {
@@ -121,6 +142,7 @@ describe('FrameworkScorePanel', () => {
   it('shows both the pre-regime framework score and the post-regime displayed score', async () => {
     render(
       <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={-5} />,
+      { wrapper: makeWrapper() },
     );
 
     await waitFor(() => {

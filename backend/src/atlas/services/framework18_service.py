@@ -296,12 +296,14 @@ async def _fetch_spy_weekly_closes(weeks_to_fetch: int) -> dict:
     api_key = settings.polygon_api_key
 
     # Calculate date range.
-    # Fetch (weeks_to_fetch + 2) weeks back to ensure enough completed candles
-    # even when the current week is incomplete.
+    # Polygon's DELAYED tier returns sparse weekly aggregates on narrow date
+    # windows — empirically returns only 2–3 candles for a 35-day range.
+    # Use a 180-day lookback so we always retrieve enough completed candles.
+    # We still only consume the most recent `weeks_to_fetch` after filtering;
+    # extra candles are harmless.
     now_et = datetime.now(_ET_TZ)
     today_et = now_et.date()
-    days_back = (weeks_to_fetch + 2) * 7
-    from_date = (today_et - timedelta(days=days_back)).isoformat()
+    from_date = (today_et - timedelta(days=180)).isoformat()
     to_date = today_et.isoformat()
 
     url = _POLYGON_SPY_WEEKLY_URL.format(from_date=from_date, to_date=to_date)
@@ -313,7 +315,8 @@ async def _fetch_spy_weekly_closes(weeks_to_fetch: int) -> dict:
                 params={
                     "adjusted": "true",
                     "sort": "desc",
-                    "limit": weeks_to_fetch + 2,
+                    # Wider limit to match the wider lookback window.
+                    "limit": max(weeks_to_fetch + 2, 30),
                     "apiKey": api_key,
                 },
                 timeout=_POLYGON_TIMEOUT_SECONDS,
@@ -434,9 +437,9 @@ async def _fetch_spy_weekly_closes(weeks_to_fetch: int) -> dict:
                     "stale": True,
                     "polygon_available": False,
                     "reason": (
-                        f"Insufficient completed weekly candles: got {len(completed)}, "
-                        f"need {weeks_to_fetch} — using cached data. "
-                        "Market may not have had enough completed trading weeks."
+                        f"SPY weekly data unavailable — only {len(completed)} of "
+                        f"{weeks_to_fetch} weeks. Treating F18 as UNKNOWN per spec. "
+                        "Using cached data."
                     ),
                 }
             return {
@@ -446,9 +449,8 @@ async def _fetch_spy_weekly_closes(weeks_to_fetch: int) -> dict:
                 "stale": False,
                 "polygon_available": False,
                 "reason": (
-                    f"Insufficient completed weekly candles: "
-                    f"got {len(completed)}, need {weeks_to_fetch}. "
-                    "Market may not have had enough completed trading weeks yet."
+                    f"SPY weekly data unavailable — only {len(completed)} of "
+                    f"{weeks_to_fetch} weeks. Treating F18 as UNKNOWN per spec."
                 ),
             }
 
@@ -584,9 +586,7 @@ async def evaluate_framework18(session: AsyncSession) -> Framework18Result:
     if not spy_available:
         reason = spy_result.get("reason", "unknown error")
         warnings.append(
-            f"SPY weekly data unavailable — {reason}. "
-            "Framework 18 status unknown. "
-            "All consuming frameworks treating F18 as UNKNOWN."
+            f"{reason} All consuming frameworks treating F18 as UNKNOWN."
         )
         result = Framework18Result(
             f18_status=F18Status.UNKNOWN,

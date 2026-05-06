@@ -5,9 +5,14 @@ import { ConvictionActionPanel } from '@/components/frameworks/conviction-action
 import type { ConvictionActionResponse } from '@/lib/schemas/conviction-action';
 
 const useConvictionActionMock = vi.fn();
+const useLeapsMock = vi.fn();
 
 vi.mock('@/lib/hooks/use-conviction-action', () => ({
   useConvictionAction: (...args: unknown[]) => useConvictionActionMock(...args),
+}));
+
+vi.mock('@/lib/hooks/use-leaps', () => ({
+  useLeaps: (...args: unknown[]) => useLeapsMock(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -20,17 +25,15 @@ function baseResponse(
   return {
     ticker: 'AAPL',
     final_score: 88,
-    tier: 'TIER_1_CORE',
-    tier_label: 'TIER 1 — CORE',
+    tier: 'T1_ELITE',
+    tier_label: 'T1 ELITE',
     tier_color: '#39d353',
     score_band_min: 85,
     score_band_max: null,
-    size_min_pct: 3.0,
-    size_max_pct: 5.0,
-    action: 'Hold full — add on dips',
+    size_min_pct: 5.0,
+    size_max_pct: 10.0,
+    action: 'CORE — LEAPS ELIGIBLE',
     leaps_eligible: true,
-    consensus_required: false,
-    consensus_status: 'NOT_REQUIRED',
     current_weight_pct: 4.2,
     position_size_status: 'IN_RANGE',
     room_to_add_pct: 0.8,
@@ -44,7 +47,7 @@ function baseResponse(
     cluster: 'Tech Mega-Cap',
     cluster_weight_pct: 18.5,
     cluster_status: 'OK',
-    rationale: 'Hold full position and add on dips',
+    rationale: 'Core holding — LEAPS eligible, add on dips',
     ...overrides,
   };
 }
@@ -56,6 +59,7 @@ function mockData(overrides: Partial<ConvictionActionResponse> = {}) {
     isError: false,
     error: null,
   });
+  useLeapsMock.mockReturnValue({ data: undefined });
 }
 
 function mockLoading() {
@@ -65,6 +69,7 @@ function mockLoading() {
     isError: false,
     error: null,
   });
+  useLeapsMock.mockReturnValue({ data: undefined });
 }
 
 function mockError(message = 'Network error') {
@@ -74,6 +79,7 @@ function mockError(message = 'Network error') {
     isError: true,
     error: new Error(message),
   });
+  useLeapsMock.mockReturnValue({ data: undefined });
 }
 
 // ---------------------------------------------------------------------------
@@ -98,63 +104,60 @@ describe('ConvictionActionPanel', () => {
   });
 
   describe('tier label', () => {
-    it('renders TIER 1 — CORE label for score ≥ 85', () => {
+    it('renders T1 ELITE label for score ≥ 85', () => {
       mockData();
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.getByTestId('conviction-tier-label')).toHaveTextContent(
-        'TIER 1 — CORE',
+        'T1 ELITE',
       );
     });
 
-    it('renders GREY ZONE label for score 78-84', () => {
+    it('renders T1 label for score 80-84', () => {
       mockData({
-        tier: 'GREY_ZONE',
-        tier_label: 'GREY ZONE',
-        tier_color: '#a371f7',
-        score_band_min: 78,
+        tier: 'T1',
+        tier_label: 'T1',
+        tier_color: '#2dd4bf',
+        score_band_min: 80,
         score_band_max: 84,
         final_score: 82,
       });
       render(<ConvictionActionPanel ticker="MSFT" adjustedScore={82} />);
-      expect(screen.getByTestId('conviction-tier-label')).toHaveTextContent('GREY ZONE');
+      expect(screen.getByTestId('conviction-tier-label')).toHaveTextContent('T1');
     });
 
-    it('renders WATCHLIST label for score < 55', () => {
+    it('renders BELOW GATE label for score < 50', () => {
       mockData({
-        tier: 'WATCHLIST',
-        tier_label: 'WATCHLIST',
+        tier: 'BELOW_GATE',
+        tier_label: 'BELOW GATE',
         tier_color: '#f85149',
         score_band_min: 0,
-        score_band_max: 54,
+        score_band_max: 49,
         final_score: 40,
         size_min_pct: 0,
         size_max_pct: 0,
         leaps_eligible: false,
-        consensus_required: false,
       });
       render(<ConvictionActionPanel ticker="XYZ" adjustedScore={40} />);
-      expect(screen.getByTestId('conviction-tier-label')).toHaveTextContent('WATCHLIST');
+      expect(screen.getByTestId('conviction-tier-label')).toHaveTextContent('BELOW GATE');
     });
   });
 
   describe('score band row', () => {
-    it('shows "85+" for TIER_1_CORE (no ceiling)', () => {
+    it('shows "85+" for T1_ELITE (no ceiling)', () => {
       mockData({ score_band_min: 85, score_band_max: null });
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.getByTestId('conviction-score-band')).toHaveTextContent('85+');
     });
 
-    it('shows "78–84" for GREY_ZONE', () => {
+    it('shows "80–84" for T1', () => {
       mockData({
-        tier: 'GREY_ZONE',
-        tier_label: 'GREY ZONE',
-        score_band_min: 78,
+        tier: 'T1',
+        tier_label: 'T1',
+        score_band_min: 80,
         score_band_max: 84,
-        consensus_required: true,
-        consensus_status: 'PENDING',
       });
       render(<ConvictionActionPanel ticker="MSFT" adjustedScore={80} />);
-      expect(screen.getByTestId('conviction-score-band')).toHaveTextContent('78–84');
+      expect(screen.getByTestId('conviction-score-band')).toHaveTextContent('80–84');
     });
   });
 
@@ -199,64 +202,38 @@ describe('ConvictionActionPanel', () => {
   });
 
   describe('consensus panel', () => {
-    it('shows consensus panel when consensus_required is true', () => {
-      mockData({
-        tier: 'GREY_ZONE',
-        tier_label: 'GREY ZONE',
-        consensus_required: true,
-        consensus_status: 'PENDING',
-        score_band_min: 78,
-        score_band_max: 84,
-      });
-      render(<ConvictionActionPanel ticker="MSFT" adjustedScore={80} />);
-      expect(screen.getByTestId('conviction-consensus-panel')).toBeInTheDocument();
-    });
-
-    it('does NOT show consensus panel when consensus_required is false', () => {
-      mockData({ consensus_required: false });
+    it('does NOT show consensus panel (consensus removed in v7.3.5)', () => {
+      mockData();
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.queryByTestId('conviction-consensus-panel')).not.toBeInTheDocument();
-    });
-
-    it('shows CONFIRMED consensus status chip', () => {
-      mockData({
-        tier: 'GREY_ZONE',
-        tier_label: 'GREY ZONE',
-        consensus_required: true,
-        consensus_status: 'CONFIRMED',
-        score_band_min: 78,
-        score_band_max: 84,
-      });
-      render(<ConvictionActionPanel ticker="MSFT" adjustedScore={80} />);
-      expect(screen.getByTestId('conviction-consensus-status')).toHaveTextContent('Confirmed');
     });
   });
 
   describe('LEAPS chip', () => {
     it('shows LEAPS chip when leaps_eligible is true', () => {
       mockData({ leaps_eligible: true });
+      useLeapsMock.mockReturnValue({ data: { leaps_eligible: true } });
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.getByTestId('conviction-leaps-chip')).toBeInTheDocument();
       expect(screen.getByTestId('conviction-leaps-chip')).toHaveTextContent('LEAPS ELIGIBLE');
     });
 
-    it('does NOT show LEAPS chip when leaps_eligible is false', () => {
-      mockData({ leaps_eligible: false });
-      render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
+    it('does NOT show LEAPS chip when tier is not T1_ELITE', () => {
+      mockData({ tier: 'T1', leaps_eligible: false });
+      render(<ConvictionActionPanel ticker="AAPL" adjustedScore={82} />);
       expect(screen.queryByTestId('conviction-leaps-chip')).not.toBeInTheDocument();
     });
   });
 
   describe('exit counter', () => {
-    it('shows exit counter for WATCHLIST tier', () => {
+    it('shows exit counter for BELOW_GATE tier', () => {
       mockData({
-        tier: 'WATCHLIST',
-        tier_label: 'WATCHLIST',
+        tier: 'BELOW_GATE',
+        tier_label: 'BELOW GATE',
         tier_color: '#f85149',
         score_band_min: 0,
-        score_band_max: 54,
+        score_band_max: 49,
         leaps_eligible: false,
-        consensus_required: false,
         exit_cycle_count: 1,
         exit_triggered: false,
       });
@@ -265,21 +242,20 @@ describe('ConvictionActionPanel', () => {
       expect(screen.getByTestId('conviction-exit-counter')).toHaveTextContent('1 / 2');
     });
 
-    it('does NOT show exit counter for non-WATCHLIST tiers', () => {
-      mockData({ tier: 'TIER_1_CORE' });
+    it('does NOT show exit counter for non-BELOW_GATE tiers', () => {
+      mockData({ tier: 'T1_ELITE' });
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.queryByTestId('conviction-exit-counter')).not.toBeInTheDocument();
     });
 
     it('shows exit alert when exit_triggered is true', () => {
       mockData({
-        tier: 'WATCHLIST',
-        tier_label: 'WATCHLIST',
+        tier: 'BELOW_GATE',
+        tier_label: 'BELOW GATE',
         tier_color: '#f85149',
         score_band_min: 0,
-        score_band_max: 54,
+        score_band_max: 49,
         leaps_eligible: false,
-        consensus_required: false,
         exit_cycle_count: 2,
         exit_triggered: true,
       });
@@ -298,11 +274,11 @@ describe('ConvictionActionPanel', () => {
   });
 
   describe('bottom message', () => {
-    it('shows tier default message when adds are permitted', () => {
-      mockData({ tier: 'TIER_2', adds_permitted: true, adds_blocked_reason: null });
+    it('shows tier default message when adds are permitted (T2)', () => {
+      mockData({ tier: 'T2', adds_permitted: true, adds_blocked_reason: null });
       render(<ConvictionActionPanel ticker="NVDA" adjustedScore={72} />);
       expect(screen.getByTestId('conviction-rationale')).toHaveTextContent(
-        'GTC adds permitted — size within tier',
+        'Small satellites only',
       );
     });
 
@@ -314,11 +290,11 @@ describe('ConvictionActionPanel', () => {
       );
     });
 
-    it('shows TIER_1_CORE message when adds are permitted', () => {
-      mockData({ tier: 'TIER_1_CORE', adds_permitted: true, adds_blocked_reason: null });
+    it('shows T1_ELITE message when adds are permitted', () => {
+      mockData({ tier: 'T1_ELITE', adds_permitted: true, adds_blocked_reason: null });
       render(<ConvictionActionPanel ticker="AAPL" adjustedScore={88} />);
       expect(screen.getByTestId('conviction-rationale')).toHaveTextContent(
-        'Hold full position and add on dips',
+        'Core holding — LEAPS eligible, add on dips',
       );
     });
   });

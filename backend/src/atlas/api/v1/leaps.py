@@ -8,7 +8,7 @@ POST /api/v1/leaps/refresh/{ticker}       → invalidate cache + re-evaluate
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from atlas.config import get_settings
@@ -33,6 +33,17 @@ router = APIRouter(prefix="/leaps", tags=["leaps"])
 async def get_leaps_eligibility(
     ticker: str,
     session: AsyncSession = Depends(get_db_session),
+    provided_score: int | None = Query(
+        default=None,
+        ge=0,
+        le=100,
+        alias="score",
+        description=(
+            "Optional override: pass the Framework 1 panel score so LEAPS "
+            "evaluation uses the same value the investor already sees, "
+            "avoiding a 1-point rounding divergence from independent re-computation."
+        ),
+    ),
 ) -> LeapsEligibility:
     """Evaluate LEAPS eligibility for *ticker*.
 
@@ -54,6 +65,7 @@ async def get_leaps_eligibility(
         sec_api_key=settings.sec_api_key,
         transcript_api_key=settings.earnings_transcript_api_key,
         benzinga_api_key=settings.benzinga_api_key,
+        provided_score=provided_score,
     )
 
 

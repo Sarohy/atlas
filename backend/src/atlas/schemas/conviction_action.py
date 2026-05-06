@@ -1,6 +1,6 @@
 """Pydantic schemas for the Framework 6 Conviction Action endpoint.
 
-v7.3.4 spec — Watchlist Tier Structure.
+v7.3.5 spec — New tier structure.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 class Tier(StrEnum):
     """Framework 6 conviction tier."""
 
-    TIER_1_CORE = "TIER_1_CORE"
-    GREY_ZONE = "GREY_ZONE"
-    TIER_2 = "TIER_2"
-    TIER_3 = "TIER_3"
-    WATCHLIST = "WATCHLIST"
+    T1_ELITE = "T1_ELITE"
+    T1 = "T1"
+    T2 = "T2"
+    T3 = "T3"
+    BELOW_GATE = "BELOW_GATE"
 
 
 class PositionSizeStatus(StrEnum):
@@ -74,11 +74,7 @@ class ConvictionActionResponse(BaseModel):
 
     # ── Action text ─────────────────────────────────────────────────────────
     action: str = Field(description="Primary action text for this tier.")
-    leaps_eligible: bool = Field(description="True only for TIER_1_CORE (score ≥ 85).")
-    consensus_required: bool = Field(description="True only for GREY_ZONE (score 78-84).")
-
-    # ── Consensus ──────────────────────────────────────────────────────────
-    consensus_status: ConsensusStatus = Field(description="3-AI consensus state.")
+    leaps_eligible: bool = Field(description="True only for T1_ELITE (score ≥ 85).")
 
     # ── Position size ───────────────────────────────────────────────────────
     current_weight_pct: float = Field(description="Current position weight as % of NAV.")
@@ -101,8 +97,8 @@ class ConvictionActionResponse(BaseModel):
     )
 
     # ── Exit cycle ──────────────────────────────────────────────────────────
-    exit_triggered: bool = Field(description="True after two consecutive Friday closes below 55.")
-    exit_cycle_count: int = Field(description="Number of consecutive Friday closes below 55 (0-2).")
+    exit_triggered: bool = Field(description="True after two consecutive Friday closes below 50.")
+    exit_cycle_count: int = Field(description="Number of consecutive Friday closes below 50 (0-2).")
 
     # ── Cluster (from Framework 14) ──────────────────────────────────────────
     cluster: str = Field(description="Correlation cluster name.")
@@ -127,7 +123,7 @@ class ConvictionActionResponse(BaseModel):
     f18_tier3_blocked: bool = Field(
         default=False,
         description=(
-            "True when f18_active=True and the ticker's tier is TIER_3. "
+            "True when f18_active=True and the ticker's tier is T3. "
             "Tier 3 adds are blocked while the gate is active."
         ),
     )

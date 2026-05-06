@@ -1,25 +1,23 @@
-"""Framework 6 — Conviction Action service (v7.3.4 Watchlist Tier Structure).
+"""Framework 6 — Conviction Action service (v7.3.5 New Tier Structure).
 
 Derives the investor conviction tier and position-size guidance from the
 regime-adjusted Framework Score (Framework 1 score, modified by Framework 2).
 
 Tier assignment (evaluated against the adjusted score):
-  score >= 85  -> TIER_1_CORE  : 3-5% NAV  -- Hold full, add on dips, LEAPS eligible
-  78-84        -> GREY_ZONE    : 1.5-2.5%  -- 3-AI consensus required before any adds
-  70-77        -> TIER_2       : 0.5-1.5%  -- GTC adds permitted
-  55-69        -> TIER_3       : 0.25-0.5% -- Satellite sizing only
-  below 55    → WATCHLIST    : 0%        — No capital, monitor, trigger exit rules
+  score >= 85  -> T1_ELITE : 5-10% NAV  -- LEAPS eligible
+  80-84        -> T1       : 2-4% NAV   -- Core position
+  70-79        -> T2       : 0.5-1.5%   -- GTC adds permitted
+  50-69        -> T3       : 0-0.5%     -- Small speculative position
+  below 50    → BELOW_GATE : 0%        — No capital; exit rules active
 
-Exit rule: two consecutive Friday closes below 55 → exit_triggered = True.
+Exit rule: two consecutive Friday closes below 50 → exit_triggered = True.
   Framework 16 owns exit execution; Framework 6 only sets the flag.
 
-Consensus (GREY_ZONE only): stored in in-memory dict (swap for Redis in prod).
-Exit cycle counts: same in-memory pattern.
+Exit cycle counts: stored in in-memory dict (swap for Redis in prod).
 
 Pure helpers (no I/O, fully unit-testable without mocks):
   assign_tier, get_tier_details, _compute_size_status, _compute_adds_permitted,
-  _score_band, update_exit_cycle, get_exit_cycle_count, reset_exit_cycle,
-  set_consensus_status, get_consensus_status_for_tier.
+  _score_band, update_exit_cycle, get_exit_cycle_count, reset_exit_cycle.
 """
 
 from __future__ import annotations
@@ -39,6 +37,7 @@ from atlas.schemas.conviction_action import (
     PositionSizeStatus,
     Tier,
 )
+# ConsensusStatus and ConsensusUpdateRequest retained for backward compatibility
 from atlas.schemas.regime_modifier import RegimeModifierResponse
 from atlas.services.framework13_service import is_beta_capped
 from atlas.services.framework14_service import (
@@ -105,44 +104,44 @@ def get_tier_details(tier: Tier) -> _TierDetails:
     Pure function -- no I/O.
     """
     details: dict[Tier, _TierDetails] = {
-        Tier.TIER_1_CORE: {
-            "label": "TIER 1 — CORE",
-            "size_min": 0.030,
-            "size_max": 0.050,
-            "action": "Hold full — add on dips",
+        Tier.T1_ELITE: {
+            "label": "T1 ELITE",
+            "size_min": 0.05,
+            "size_max": 0.10,
+            "action": "Hold full — add on dips. LEAPS eligible",
             "leaps": True,
             "consensus": False,
             "color": "#39d353",
         },
-        Tier.GREY_ZONE: {
-            "label": "GREY ZONE",
-            "size_min": 0.015,
-            "size_max": 0.025,
-            "action": "3-AI consensus required",
+        Tier.T1: {
+            "label": "T1",
+            "size_min": 0.02,
+            "size_max": 0.04,
+            "action": "Core position — GTC adds permitted",
             "leaps": False,
-            "consensus": True,
-            "color": "#a371f7",
+            "consensus": False,
+            "color": "#26c6a2",
         },
-        Tier.TIER_2: {
-            "label": "TIER 2",
+        Tier.T2: {
+            "label": "T2",
             "size_min": 0.005,
             "size_max": 0.015,
-            "action": "GTC adds permitted",
+            "action": "Small satellites only",
             "leaps": False,
             "consensus": False,
             "color": "#58a6ff",
         },
-        Tier.TIER_3: {
-            "label": "TIER 3",
-            "size_min": 0.0025,
+        Tier.T3: {
+            "label": "T3",
+            "size_min": 0.0,
             "size_max": 0.005,
-            "action": "Satellite sizing only",
+            "action": "Small speculative position only",
             "leaps": False,
             "consensus": False,
             "color": "#f0a500",
         },
-        Tier.WATCHLIST: {
-            "label": "WATCHLIST",
+        Tier.BELOW_GATE: {
+            "label": "BELOW GATE",
             "size_min": 0.0,
             "size_max": 0.0,
             "action": "No capital — monitor only",
@@ -166,7 +165,7 @@ def _compute_size_status(
 
     Pure function — no I/O.
     """
-    if tier == Tier.WATCHLIST:
+    if tier == Tier.BELOW_GATE:
         trim_suggested = position_weight > 0.0
         return (PositionSizeStatus.NO_POSITION, 0.0, trim_suggested)
     if position_weight < size_min:
@@ -181,7 +180,7 @@ def _compute_adds_permitted(
     beta_cap_active: bool,
     concentration_cap: bool,
     consensus_status: ConsensusStatus,
-    f15_blocks: bool | None = None,
+    f15_blocks: bool | None = False,
     f18_speculative_blocked: bool = False,
     f18_tier3_blocked: bool = False,
     f18_unknown_blocks: bool = False,
@@ -189,26 +188,23 @@ def _compute_adds_permitted(
     """Return (adds_permitted, blocking_reason).
 
     Priority order (spec §7 step 7):
-      1. WATCHLIST → blocked
+      1. BELOW_GATE → blocked
       2. Beta cap active → blocked
       3. Concentration cap active → blocked
-      4. GREY_ZONE without CONFIRMED consensus → blocked
-      5. F15 VIX session halt → blocked
-      6. F18 speculative starter blocked → blocked
-      7. F18 Tier 3 blocked → blocked
-      8. F18 data unknown → blocked (conservative)
-      9. F19 NVDA kill switch → blocked
+      4. F15 VIX session halt → blocked
+      5. F18 speculative starter blocked → blocked
+      6. F18 Tier 3 blocked → blocked
+      7. F18 data unknown → blocked (conservative)
+      8. F19 NVDA kill switch → blocked
 
     Pure function — no I/O.
     """
-    if tier == Tier.WATCHLIST:
-        return (False, "Watchlist — no capital permitted")
+    if tier == Tier.BELOW_GATE:
+        return (False, "Below gate — no capital permitted")
     if beta_cap_active:
         return (False, "Beta cap (F13) blocking adds")
     if concentration_cap:
         return (False, "Concentration cap (F14) blocking adds")
-    if tier == Tier.GREY_ZONE and consensus_status != ConsensusStatus.CONFIRMED:
-        return (False, "3-AI consensus required")
     if f15_blocks is True:
         return (False, "F15 VIX session halt active — no new orders this session")
     if f15_blocks is None:
@@ -230,11 +226,11 @@ def _score_band(tier: Tier) -> tuple[int, int | None]:
     Pure function — no I/O.
     """
     band: dict[Tier, tuple[int, int | None]] = {
-        Tier.TIER_1_CORE: (85, None),
-        Tier.GREY_ZONE: (78, 84),
-        Tier.TIER_2: (70, 77),
-        Tier.TIER_3: (55, 69),
-        Tier.WATCHLIST: (0, 54),
+        Tier.T1_ELITE: (85, None),
+        Tier.T1: (80, 84),
+        Tier.T2: (70, 79),
+        Tier.T3: (50, 69),
+        Tier.BELOW_GATE: (0, 49),
     }
     return band[tier]
 
@@ -247,11 +243,11 @@ def _build_rationale(tier: Tier, exit_triggered: bool) -> str:
     if exit_triggered:
         return "Exit triggered — delegate to Framework 16"
     messages: dict[Tier, str] = {
-        Tier.TIER_1_CORE: "Hold full position and add on dips",
-        Tier.GREY_ZONE: "Run 3-AI consensus before adding",
-        Tier.TIER_2: "GTC adds permitted — size within tier",
-        Tier.TIER_3: "Satellite only — max 0.5% NAV",
-        Tier.WATCHLIST: "No capital — monitor every Friday",
+        Tier.T1_ELITE: "Hold full position and add on dips — LEAPS eligible",
+        Tier.T1: "Core position — GTC adds permitted",
+        Tier.T2: "GTC adds permitted — size within tier",
+        Tier.T3: "Speculative small position only — max 0.5% NAV",
+        Tier.BELOW_GATE: "No capital — monitor every Friday",
     }
     return messages[tier]
 
@@ -294,16 +290,8 @@ def set_consensus_status(ticker: str, status: ConsensusStatus) -> None:
 
 
 def get_consensus_status_for_tier(ticker: str, tier: Tier) -> ConsensusStatus:
-    """Return the consensus status, auto-initialising to PENDING for GREY_ZONE.
-
-    Non-grey-zone tiers always return NOT_REQUIRED.
-    """
-    if tier != Tier.GREY_ZONE:
-        return ConsensusStatus.NOT_REQUIRED
-    upper = ticker.strip().upper()
-    if upper not in _consensus_store:
-        _consensus_store[upper] = ConsensusStatus.PENDING
-    return _consensus_store[upper]
+    """Consensus concept removed in v7.3.5 — always returns NOT_REQUIRED."""
+    return ConsensusStatus.NOT_REQUIRED
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +303,7 @@ class ConvictionActionService:
     """Computes Framework 6 conviction-action guidance for a single ticker.
 
     Calls Framework 2 (Regime Modifier) to obtain the regime-adjusted score,
-    then applies the v7.3.4 tier logic.  Framework 13 (beta cap) and
+    then applies the v7.3.5 tier logic.  Framework 13 (beta cap) and
     Framework 14 (concentration cap + cluster) are consulted for blocking
     conditions and display data.
     """
@@ -435,7 +423,7 @@ class ConvictionActionService:
                     )
 
                 # Tier 3 adds are blocked when gate is active.
-                if tier == Tier.TIER_3:
+                if tier == Tier.T3:
                     _f18_tier3_blocked = True
                     _f18_note = (
                         f"F18 active — Tier 3 adds blocked. "
@@ -481,7 +469,7 @@ class ConvictionActionService:
 
         # ── Step 10: Exit cycle ───────────────────────────────────────────
         exit_count = get_exit_cycle_count(upper)
-        exit_triggered = tier == Tier.WATCHLIST and exit_count >= _EXIT_CYCLE_TRIGGER
+        exit_triggered = tier == Tier.BELOW_GATE and exit_count >= _EXIT_CYCLE_TRIGGER
 
         # ── Step 11: Score band ───────────────────────────────────────────
         band_min, band_max = _score_band(tier)
@@ -498,8 +486,6 @@ class ConvictionActionService:
             size_max_pct=size_max * 100.0,
             action=details["action"],
             leaps_eligible=details["leaps"],
-            consensus_required=details["consensus"],
-            consensus_status=consensus_status,
             current_weight_pct=round(position_weight * 100.0, 2),
             position_size_status=size_status,
             room_to_add_pct=round(room_to_add * 100.0, 2),

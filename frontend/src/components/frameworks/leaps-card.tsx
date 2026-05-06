@@ -84,6 +84,8 @@ function eligibilityLabel(eligible: boolean | null, undetermined: boolean): stri
 type LeapsCardProps = {
   /** Active ticker driven by the shared ticker selector. */
   ticker: string;
+  /** Optional F1-panel adjusted score to sync with Framework 1 display. */
+  score?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -106,9 +108,9 @@ type LeapsCardProps = {
  *  10. Warning messages (if any)
  *  11. Data age footer
  */
-export function LeapsCard({ ticker }: LeapsCardProps) {
+export function LeapsCard({ ticker, score }: LeapsCardProps) {
   const hasTicker = ticker.trim().length > 0;
-  const { data, isLoading, isError, error } = useLeaps(ticker);
+  const { data, isLoading, isError, error } = useLeaps(ticker, score);
   const errorMsg =
     error instanceof Error ? error.message : 'Failed to load LEAPS eligibility data.';
 

@@ -12,12 +12,16 @@ import { z } from 'zod';
 /**
  * Fetch LEAPS eligibility for a specific ticker.
  * Calls GET /api/v1/leaps/eligibility/{ticker}.
+ * Pass the optional `score` to sync with the F1-panel score and avoid
+ * a 1-point rounding divergence from independent re-computation.
  */
-export function fetchLeapsEligibility(ticker: string): Promise<LeapsEligibility> {
-  return apiFetch(
-    `/api/v1/leaps/eligibility/${encodeURIComponent(ticker.toUpperCase())}`,
-    leapsEligibilitySchema,
-  );
+export function fetchLeapsEligibility(
+  ticker: string,
+  score?: number,
+): Promise<LeapsEligibility> {
+  const base = `/api/v1/leaps/eligibility/${encodeURIComponent(ticker.toUpperCase())}`;
+  const url = score !== undefined ? `${base}?score=${score}` : base;
+  return apiFetch(url, leapsEligibilitySchema);
 }
 
 /**

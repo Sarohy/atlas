@@ -1,7 +1,7 @@
 """Framework Score service — aggregates F1-F5 into a single conviction score.
 
 Formula (Factor_Mapping_Guide §Final Score):
-  Raw Total   = (F1 x 0.15) + (F2 x 0.25) + (F3 x 0.15) + (F4 x 0.15) + (F5 x 0.30)
+  Raw Total   = (F1 x 0.20) + (F2 x 0.25) + (F3 x 0.15) + (F4 x 0.15) + (F5 x 0.25)
   Final Score = round(Raw Total), clamped [0, 100]
 
   Maximum raw total = 100 (all factors at 100, weights sum to 1.00).
@@ -42,21 +42,17 @@ from atlas.services.momentum_service import MomentumService
 
 logger = logging.getLogger(__name__)
 
-# Staleness threshold for Framework 8 data (minutes).  If F8 reports
-# data_age_minutes above this value the f8_stale flag is set in the response.
-_F8_STALE_THRESHOLD_MINUTES: Final[int] = 30
-
 # ---------------------------------------------------------------------------
 # Framework-level weights (Factor_Mapping_Guide §Final Score)
 # ---------------------------------------------------------------------------
 
 # Each factor is scored 0-100; multiplied by its weight to contribute to the
 # raw total.  Weights sum to 1.00 (maximum raw total = 100).
-_W_F1: Final[float] = 0.15  # Momentum
+_W_F1: Final[float] = 0.20  # Momentum
 _W_F2: Final[float] = 0.25  # Earnings Quality
 _W_F3: Final[float] = 0.15  # Analyst Sentiment
 _W_F4: Final[float] = 0.15  # Options Flow
-_W_F5: Final[float] = 0.30  # Fundamental Quality
+_W_F5: Final[float] = 0.25  # Fundamental Quality
 
 # Neutral fallback score when a factor service is unavailable.
 _NEUTRAL_SCORE: Final[int] = 50
@@ -189,46 +185,17 @@ class FrameworkScoreService:
         )
         f5_raw_score = f5_score  # preserve pre-cap value for response metadata
 
-        # --- Framework 8 insider cap (Rule 1-10 per Data Sync Rules) ---
+        # --- Framework 8 insider buying bonus ---
         # F8 is fetched fresh in parallel above — never cached here.
         if isinstance(f8_data, Exception):
-            f8_data = {
-                "available": False,
-                "flag_active": None,
-                "f5_cap": None,
-                "reason": repr(f8_data),
-                "data_age_minutes": 0,
-            }
+            f8_data = {}
 
-        f8_available: bool = bool(f8_data.get("available", False))
-        f8_flag_active: bool | None = f8_data.get("flag_active")
-        f8_cap: int | None = f8_data.get("f5_cap")
-        f8_data_age: int = int(f8_data.get("data_age_minutes", 0))
-        f8_stale: bool = f8_available and f8_data_age > _F8_STALE_THRESHOLD_MINUTES
-        f5_capped = False
-        f5_cap_applied: int | None = None
-        f5_cap_source: str | None = None
-
-        if not f8_available:
-            flags.append(
-                f"Framework 8 unavailable — {f8_data.get('reason', 'unknown error')}. "
-                "F5 cap could not be verified. Using raw F5 score. "
-                "Verify insider flag manually before acting."
-            )
-        elif f8_stale:
-            flags.append(
-                f"Framework 8 data is {f8_data_age} minutes old. "
-                "F5 cap value may be stale. Refresh recommended."
-            )
-
-        if f8_available and f8_flag_active is True and f8_cap is not None and f5_score > f8_cap:
-            f5_capped = True
-            f5_score = f8_cap
-            f5_cap_applied = f8_cap
-            f5_cap_source = f8_data.get("cap_reason", "Framework 8 insider flag active")
-            flags.append(
-                f"F5 capped at {f8_cap} by Framework 8 insider flag. Raw F5 was {f5_raw_score}."
-            )
+        f8_buying_bonus: int = (
+            int(f8_data.get("buying_bonus", 0)) if isinstance(f8_data, dict) else 0
+        )
+        f8_clustered_selling_note: str | None = (
+            f8_data.get("clustered_selling_note") if isinstance(f8_data, dict) else None
+        )
 
         # --- F5 block detection ---
         f5_blocked = False
@@ -266,7 +233,8 @@ class FrameworkScoreService:
 
         # --- Final calculation ---
         raw_total = round(_compute_raw_total(f1_score, f2_score, f3_score, f4_score, f5_score), 4)
-        final_score = _compute_final_score(raw_total)
+        # Apply F8 buying bonus additively before clamping to final score.
+        final_score = _compute_final_score(raw_total + f8_buying_bonus)
         action, action_tone = _map_action(final_score)
 
         return FrameworkScoreResponse(
@@ -298,12 +266,8 @@ class FrameworkScoreService:
                 else None
             ),
             f5_raw_score=f5_raw_score,
-            f5_capped=f5_capped,
-            f5_cap_applied=f5_cap_applied,
-            f5_cap_source=f5_cap_source,
-            f8_available=f8_available,
-            f8_flag_active=f8_flag_active,
-            f8_stale=f8_stale,
+            f8_buying_bonus=f8_buying_bonus,
+            f8_clustered_selling_note=f8_clustered_selling_note,
         )
 
     # ------------------------------------------------------------------
@@ -410,38 +374,24 @@ class FrameworkScoreService:
         )
 
     async def _fetch_f8(self, ticker: str) -> dict[str, Any]:
-        """Fetch Framework 8 insider flag status for *ticker*.
+        """Fetch Framework 8 insider buying bonus for *ticker*.
 
-        Called fresh on every evaluation — no caching of the cap value.
-        On any failure returns a safe dict with available=False so the caller
-        can surface a warning without blocking Framework 1 scoring.
+        Called fresh on every evaluation — no caching at this layer.
+        On any failure returns an empty dict so the caller applies zero bonus.
         """
         try:
             service = Framework8Service(sec_api_key=self._sec_key)
             result = await service.compute(ticker)
             return {
-                "available": True,
-                "flag_active": result.flag_active,
-                "f5_cap": result.f5_cap,
-                "cap_reason": (
-                    f"Framework 8 insider flag — "
-                    f"largest sale ${(result.largest_sale_usd or 0) / 1_000_000:.1f}M "
-                    f"(filer tier: {result.filer_tier})"
-                ),
-                "data_age_minutes": 0,
+                "buying_bonus": result.buying_bonus,
+                "clustered_selling_note": result.clustered_selling_note,
             }
         except Exception as exc:
             logger.warning(
-                "Framework 8 fetch failed — F5 cap cannot be verified",
+                "Framework 8 fetch failed - buying bonus will be zero",
                 extra={"ticker": ticker, "error": repr(exc)},
             )
-            return {
-                "available": False,
-                "flag_active": None,
-                "f5_cap": None,
-                "reason": repr(exc),
-                "data_age_minutes": 0,
-            }
+            return {}
 
     # ------------------------------------------------------------------
     # Private — score extraction with fallback

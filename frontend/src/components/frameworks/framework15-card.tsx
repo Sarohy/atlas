@@ -413,9 +413,12 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       </div>
 
       {/* ── Section 7: Data source badges ──────────────────────────────── */}
+      {/* Outside market hours F15 short-circuits and doesn't call Polygon   */}
+      {/* or F2 — those sources aren't offline, they were just not needed.   */}
+      {/* Show ONLINE when market is closed to avoid a misleading OFFLINE.   */}
       <div className="atlas-f15-sources" data-testid="f15-sources">
-        <DataSourceBadge label="POLYGON" available={data.polygon_available} />
-        <DataSourceBadge label="F2 REGIME" available={data.regime_available} />
+        <DataSourceBadge label="POLYGON" available={data.market_open ? data.polygon_available : true} />
+        <DataSourceBadge label="F2 REGIME" available={data.market_open ? data.regime_available : true} />
       </div>
 
       {/* ── Warnings ───────────────────────────────────────────────────── */}

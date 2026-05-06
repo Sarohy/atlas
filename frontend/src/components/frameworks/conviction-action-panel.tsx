@@ -14,11 +14,11 @@ const EXIT_CYCLE_TRIGGER = 2;
 
 /** Tier color lookup — overrides inline style when available via CSS class. */
 const TIER_COLOR_CLASS: Record<Tier, string> = {
-  TIER_1_CORE: 'is-green',
-  GREY_ZONE: 'is-purple',
-  TIER_2: 'is-blue',
-  TIER_3: 'is-amber',
-  WATCHLIST: 'is-red',
+  T1_ELITE: 'is-green',
+  T1: 'is-teal',
+  T2: 'is-blue',
+  T3: 'is-amber',
+  BELOW_GATE: 'is-red',
 };
 
 const SIZE_STATUS_LABEL: Record<string, string> = {
@@ -55,15 +55,15 @@ type ConvictionActionPanelProps = {
 // ---------------------------------------------------------------------------
 
 /**
- * Framework 6 — Conviction Action panel (v7.3.4 Watchlist Tier Structure).
+ * Framework 6 — Conviction Action panel (v7.3.5 New Tier Structure).
  *
- * Displays the conviction tier, position sizing guidance, consensus status,
+ * Displays the conviction tier, position sizing guidance,
  * cluster info, LEAPS eligibility, and exit cycle counter for a given ticker.
  */
 export function ConvictionActionPanel({ ticker, adjustedScore }: ConvictionActionPanelProps) {
   const activeTicker = ticker.trim().length > 0;
   const { data, isLoading, isError, error } = useConvictionAction(ticker, adjustedScore);
-  const { data: leapsData } = useLeaps(ticker);
+  const { data: leapsData } = useLeaps(ticker, adjustedScore ?? undefined);
   const leapsEligible: boolean | null = leapsData?.leaps_eligible ?? null;
   const hasData = activeTicker && data !== undefined;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load conviction data.';
@@ -109,11 +109,11 @@ export function ConvictionActionPanel({ ticker, adjustedScore }: ConvictionActio
 
 /** Named constants for per-tier bottom messages. */
 const TIER_MESSAGES: Record<string, string> = {
-  TIER_1_CORE: 'Hold full position and add on dips',
-  GREY_ZONE: 'Run 3-AI consensus before adding',
-  TIER_2: 'GTC adds permitted — size within tier',
-  TIER_3: 'Satellite only — max size apply',
-  WATCHLIST: 'No capital — monitor every Friday',
+  T1_ELITE: 'Core holding — LEAPS eligible, add on dips',
+  T1: 'Core position — add within tier range',
+  T2: 'Small satellites only',
+  T3: 'Minimal exposure — monitor closely',
+  BELOW_GATE: 'No capital — below conviction gate',
 };
 
 function getTierMessage(tier: string): string {
@@ -195,26 +195,6 @@ function ConvictionContent({
         )}
       </div>
 
-      {/* ── Section 4: Consensus panel (GREY_ZONE only) ───────────────────── */}
-      {data.consensus_required && (
-        <div className="atlas-conviction-consensus-panel" data-testid="conviction-consensus-panel">
-          <p className="atlas-conviction-consensus-panel__title">3-AI Consensus Required</p>
-          <div className="atlas-conviction-consensus-panel__status">
-            <span className="atlas-conviction-consensus-panel__label">Status</span>
-            <span
-              className={cn(
-                'atlas-conviction-consensus-panel__chip',
-                data.consensus_status === 'CONFIRMED' ? 'is-green' : '',
-                data.consensus_status === 'FAILED' ? 'is-red' : '',
-                data.consensus_status === 'PENDING' ? 'is-amber' : '',
-              )}
-              data-testid="conviction-consensus-status"
-            >
-              {CONSENSUS_STATUS_LABEL[data.consensus_status] ?? data.consensus_status}
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* ── Section 5: Cluster panel ──────────────────────────────────────── */}
       <div className="atlas-conviction-cluster-panel" data-testid="conviction-cluster-panel">
@@ -232,8 +212,8 @@ function ConvictionContent({
         </div>
       </div>
 
-      {/* ── Section 6: LEAPS chip (TIER_1_CORE only, tristate) ─────────── */}
-      {data.tier === 'TIER_1_CORE' && (
+      {/* ── Section 6: LEAPS chip (T1_ELITE only, tristate) ─────────── */}
+      {data.tier === 'T1_ELITE' && (
         <div
           className={cn(
             'atlas-conviction-leaps-chip',
@@ -253,8 +233,8 @@ function ConvictionContent({
         </div>
       )}
 
-      {/* ── Section 7: Exit counter (WATCHLIST only) ─────────────────────── */}
-      {data.tier === 'WATCHLIST' && (
+      {/* ── Section 7: Exit counter (BELOW_GATE only) ─────────────────────── */}
+      {data.tier === 'BELOW_GATE' && (
         <div className="atlas-conviction-exit-counter" data-testid="conviction-exit-counter">
           <p className="atlas-conviction-exit-counter__label">
             Exit Cycle: {data.exit_cycle_count} / {EXIT_CYCLE_TRIGGER}

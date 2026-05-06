@@ -9,9 +9,10 @@ Eligibility (tristate: True | False | None):
   None  — required data unavailable; decision deferred
 
 Tier rules:
-  TIER_1 (score ≥ 85): auto-eligible when IV ≤ 90% and gates clear
-  TIER_2 (70-84): eligible only with $500K+ dark pool flow from F9
-  TIER_3 / WATCHLIST: ineligible
+  T1_ELITE (score ≥ 85): auto-eligible when IV ≤ 90% and gates clear
+  T1 (80-84): eligible only with $500K+ dark pool flow from F9
+  T2 (70-79): eligible only with $500K+ dark pool flow from F9
+  T3 / BELOW_GATE: ineligible
 
 IV hard rule:
   IV > 90% always blocks LEAPS regardless of tier.
@@ -57,6 +58,7 @@ from atlas.schemas.leaps import (
 from atlas.schemas.leaps import (
     LeapsPosition as LeapsPositionSchema,
 )
+from atlas.core.scoring import classify_tier
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +82,10 @@ F1_SCORE_FIELD: Final[str] = "adjusted_score"
 _SCORE_MIN: Final[int] = 0
 _SCORE_MAX: Final[int] = 100
 
-# Tier score thresholds.
-_TIER_1_SCORE_MIN: Final[int] = 85
-_TIER_2_SCORE_MIN: Final[int] = 70
+# Tier score thresholds — derived from core/scoring.py (single source of truth).
+# These are kept as named constants for clarity in LEAPS-specific rules only.
+_TIER_1_SCORE_MIN: Final[int] = 85   # T1_ELITE
+_TIER_2_SCORE_MIN: Final[int] = 70   # Minimum score for any LEAPS eligibility (T2 and above)
 
 # IV hard-block threshold (as a decimal fraction, e.g. 0.90 = 90%).
 _IV_BLOCK_THRESHOLD: Final[float] = 0.90
@@ -252,12 +255,8 @@ async def _resolve_current_score(
 
 
 def _determine_tier(score: int) -> str:
-    """Map score to tier label. Pure function."""
-    if score >= _TIER_1_SCORE_MIN:
-        return "TIER_1"
-    if score >= _TIER_2_SCORE_MIN:
-        return "TIER_2"
-    return "TIER_3"
+    """Map score to tier label using the canonical classify_tier() function."""
+    return classify_tier(score)["tier"]
 
 
 def _check_iv_block(iv_current: float | None) -> bool | None:
@@ -470,8 +469,8 @@ def _compute_eligibility(
             f"Score {score} below LEAPS minimum ({_TIER_2_SCORE_MIN})."
         )
 
-    if tier == "TIER_3":
-        block_reasons.append("Tier 3 positions are not eligible for LEAPS.")
+    if tier in ("T3", "BELOW_GATE"):
+        block_reasons.append("Tier 3 / Below Gate positions are not eligible for LEAPS.")
 
     if gate_f7_active is True:
         block_reasons.append("F7 earnings gate active — LEAPS blocked during gate window.")
@@ -523,16 +522,16 @@ def _compute_eligibility(
         has_unknown = True
         warning_messages.append("Regime data unavailable — eligibility deferred.")
 
-    # Tier 2 requires dark pool flow confirmation.
-    if tier == "TIER_2":
+    # T1 and T2 require dark pool flow confirmation.
+    if tier in ("T1", "T2"):
         if flow_confirmed is False:
             block_reasons.append(
-                f"Tier 2 LEAPS requires \u2265${_TIER_2_DARK_POOL_FLOW_USD:,.0f} "
+                f"T1/T2 LEAPS requires \u2265${_TIER_2_DARK_POOL_FLOW_USD:,.0f} "
                 "dark pool flow (F9). Not confirmed."
             )
         elif flow_confirmed is None:
             has_unknown = True
-            warning_messages.append("F9 dark pool flow data unavailable for Tier 2 check.")
+            warning_messages.append("F9 dark pool flow data unavailable for T1/T2 check.")
 
     # --- Gap-day block (spec: "Never buy LEAPS into a gap") ---
     if gap_detected is True:
@@ -743,6 +742,7 @@ async def check_leaps_eligibility(
     sec_api_key: str = "",
     transcript_api_key: str = "",
     benzinga_api_key: str = "",
+    provided_score: int | None = None,
 ) -> LeapsEligibility:
     """Evaluate LEAPS eligibility for a specific ticker.
 
@@ -809,16 +809,29 @@ async def check_leaps_eligibility(
     # (~500 ms). All other heavy fetches (F9, F29, F30, IV) are still
     # served from the cached result. On score change, the entry is
     # invalidated and a full re-evaluation runs.
-    current_score, current_tier, prefetched_f7 = await _resolve_current_score(
-        normalised,
-        polygon_api_key=polygon_api_key,
-        uw_api_key=uw_api_key,
-        alphavantage_api_key=alphavantage_api_key,
-        sec_api_key=sec_api_key,
-        transcript_api_key=transcript_api_key,
-        benzinga_api_key=benzinga_api_key,
-        session=session,
-    )
+    #
+    # When the caller supplies ``provided_score`` (e.g. the F1-panel
+    # score already displayed to the investor), skip the F7 + regime
+    # re-fetch to avoid a 1-point rounding divergence caused by
+    # independent per-factor computations in the two code paths.
+    if provided_score is not None:
+        current_score: int | None = provided_score
+        current_tier: str | None = _determine_tier(provided_score)
+        # Use a sentinel so the downstream F7-reuse logic triggers a fresh
+        # fetch (the isinstance(…, BaseException) guard treats this as "not
+        # pre-fetched" and calls f7_service.compute() instead of replaying).
+        prefetched_f7: object = RuntimeError("score provided externally — F7 not pre-fetched")
+    else:
+        current_score, current_tier, prefetched_f7 = await _resolve_current_score(
+            normalised,
+            polygon_api_key=polygon_api_key,
+            uw_api_key=uw_api_key,
+            alphavantage_api_key=alphavantage_api_key,
+            sec_api_key=sec_api_key,
+            transcript_api_key=transcript_api_key,
+            benzinga_api_key=benzinga_api_key,
+            session=session,
+        )
 
     cached, age_minutes = _cache_get(normalised)
     if (

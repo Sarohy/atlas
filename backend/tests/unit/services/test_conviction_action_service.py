@@ -1,10 +1,14 @@
-"""Unit tests for the Framework 6 (v7.3.4) conviction-action service pure helpers.
+"""Unit tests for the Framework 6 (v8) conviction-action service pure helpers.
 
-Tests cover assign_tier, get_tier_details, _compute_size_status,
-_compute_adds_permitted, _score_band, update_exit_cycle, get_exit_cycle_count,
-set_consensus_status, and get_consensus_status_for_tier.
+New tier structure (no GREY_ZONE):
+  >= 85   T1_ELITE    — Highest-conviction. Full allocation, LEAPs eligible. 5-10%+ NAV
+  80-84   T1          — Strong direct beneficiaries. Core / meaningful satellite. 2-4%
+  70-79   T2          — Secondary / complementary. Small satellite. 0.5-1.5%
+  50-69   T3          — Indirect / lower-quality. Rare, ≤ 0.5%
+   < 50   BELOW_GATE  — Avoid entirely. 0%
 
-All 13 spec test cases are covered by the classes below.
+Exit threshold dropped from 55 → 50.
+GREY_ZONE and 3-AI consensus removed entirely.
 """
 
 from __future__ import annotations
@@ -17,75 +21,89 @@ from atlas.services.conviction_action_service import (
     _compute_size_status,
     _score_band,
     assign_tier,
-    get_consensus_status_for_tier,
     get_exit_cycle_count,
     get_tier_details,
     reset_exit_cycle,
-    set_consensus_status,
     update_exit_cycle,
 )
 
 # ---------------------------------------------------------------------------
-# Spec test cases 7-10 - assign_tier boundary conditions
+# assign_tier — boundary conditions
 # ---------------------------------------------------------------------------
 
 
 class TestAssignTier:
-    """Tests 7-10 from spec: verify tier boundary conditions exactly."""
+    # ── T1 Elite (≥ 85) ────────────────────────────────────────────────────
+    def test_score_85_is_t1_elite(self) -> None:
+        assert assign_tier(85) == Tier.T1_ELITE
 
-    # Test 9: score 85 → TIER_1_CORE (not GREY_ZONE)
-    def test_score_85_is_tier1_core(self) -> None:
-        assert assign_tier(85) == Tier.TIER_1_CORE
+    def test_score_100_is_t1_elite(self) -> None:
+        assert assign_tier(100) == Tier.T1_ELITE
 
-    # Test 9 inverse: score 84 → GREY_ZONE (not TIER_1_CORE)
-    def test_score_84_is_grey_zone_not_tier1(self) -> None:
-        assert assign_tier(84) == Tier.GREY_ZONE
+    def test_score_91_is_t1_elite(self) -> None:
+        assert assign_tier(91) == Tier.T1_ELITE
 
-    # Test 10: score 84 → GREY_ZONE
-    def test_score_84_is_grey_zone(self) -> None:
-        assert assign_tier(84) == Tier.GREY_ZONE
+    # ── T1 (80-84) ─────────────────────────────────────────────────────────
+    def test_score_84_is_t1_not_elite(self) -> None:
+        assert assign_tier(84) == Tier.T1
 
-    # Test 8: score 78 → GREY_ZONE (not TIER_2)
-    def test_score_78_is_grey_zone_not_tier2(self) -> None:
-        assert assign_tier(78) == Tier.GREY_ZONE
+    def test_score_80_is_t1(self) -> None:
+        assert assign_tier(80) == Tier.T1
 
-    # Test 7: score 77 → TIER_2 (not GREY_ZONE)
-    def test_score_77_is_tier2_not_grey_zone(self) -> None:
-        assert assign_tier(77) == Tier.TIER_2
+    def test_score_83_is_t1(self) -> None:
+        assert assign_tier(83) == Tier.T1
 
-    def test_score_70_is_tier2(self) -> None:
-        assert assign_tier(70) == Tier.TIER_2
+    # Boundary: 79 must NOT be T1
+    def test_score_79_is_t2_not_t1(self) -> None:
+        assert assign_tier(79) == Tier.T2
 
-    def test_score_69_is_tier3(self) -> None:
-        assert assign_tier(69) == Tier.TIER_3
+    # ── T2 (70-79) ─────────────────────────────────────────────────────────
+    def test_score_79_is_t2(self) -> None:
+        assert assign_tier(79) == Tier.T2
 
-    def test_score_55_is_tier3(self) -> None:
-        assert assign_tier(55) == Tier.TIER_3
+    def test_score_70_is_t2(self) -> None:
+        assert assign_tier(70) == Tier.T2
 
-    def test_score_54_is_watchlist(self) -> None:
-        assert assign_tier(54) == Tier.WATCHLIST
+    # Boundary: 69 must NOT be T2
+    def test_score_69_is_t3_not_t2(self) -> None:
+        assert assign_tier(69) == Tier.T3
 
-    # Test 2: AVGO score 91 → TIER_1_CORE
-    def test_score_91_is_tier1_core(self) -> None:
-        assert assign_tier(91) == Tier.TIER_1_CORE
+    # ── T3 (50-69) ─────────────────────────────────────────────────────────
+    def test_score_69_is_t3(self) -> None:
+        assert assign_tier(69) == Tier.T3
 
-    # Tests 5 & 6: MRVL score 83 → GREY_ZONE
-    def test_score_83_is_grey_zone(self) -> None:
-        assert assign_tier(83) == Tier.GREY_ZONE
+    def test_score_66_is_t3(self) -> None:
+        assert assign_tier(66) == Tier.T3
 
-    # Test 3: TSEM score 66 → TIER_3
-    def test_score_66_is_tier3(self) -> None:
-        assert assign_tier(66) == Tier.TIER_3
+    def test_score_50_is_t3(self) -> None:
+        assert assign_tier(50) == Tier.T3
 
-    # Test 4: NEM score 48 → WATCHLIST
-    def test_score_48_is_watchlist(self) -> None:
-        assert assign_tier(48) == Tier.WATCHLIST
+    # Boundary: 49 must NOT be T3
+    def test_score_49_is_below_gate_not_t3(self) -> None:
+        assert assign_tier(49) == Tier.BELOW_GATE
 
-    def test_score_100_is_tier1(self) -> None:
-        assert assign_tier(100) == Tier.TIER_1_CORE
+    # ── Below Gate (< 50) ──────────────────────────────────────────────────
+    def test_score_48_is_below_gate(self) -> None:
+        assert assign_tier(48) == Tier.BELOW_GATE
 
-    def test_score_0_is_watchlist(self) -> None:
-        assert assign_tier(0) == Tier.WATCHLIST
+    def test_score_0_is_below_gate(self) -> None:
+        assert assign_tier(0) == Tier.BELOW_GATE
+
+    # ── GREY_ZONE must no longer exist ─────────────────────────────────────
+    def test_no_grey_zone_tier_at_78(self) -> None:
+        # 78 used to be GREY_ZONE; now it must be T2
+        assert assign_tier(78) == Tier.T2
+
+    def test_no_grey_zone_tier_at_82(self) -> None:
+        # 82 used to be GREY_ZONE; now it must be T1
+        assert assign_tier(82) == Tier.T1
+
+    # ── Old exit threshold (55) is gone — 54 is now T3 ─────────────────────
+    def test_score_55_is_t3_not_below_gate(self) -> None:
+        assert assign_tier(55) == Tier.T3
+
+    def test_score_54_is_t3(self) -> None:
+        assert assign_tier(54) == Tier.T3
 
 
 # ---------------------------------------------------------------------------
@@ -94,289 +112,246 @@ class TestAssignTier:
 
 
 class TestGetTierDetails:
-    def test_tier1_core_label(self) -> None:
-        d = get_tier_details(Tier.TIER_1_CORE)
-        assert d["label"] == "TIER 1 — CORE"
+    # ── T1 Elite ───────────────────────────────────────────────────────────
+    def test_t1_elite_label(self) -> None:
+        assert get_tier_details(Tier.T1_ELITE)["label"] == "T1 ELITE"
 
-    def test_tier1_core_leaps_eligible(self) -> None:
-        d = get_tier_details(Tier.TIER_1_CORE)
-        assert d["leaps"] is True
+    def test_t1_elite_leaps_eligible(self) -> None:
+        assert get_tier_details(Tier.T1_ELITE)["leaps"] is True
 
-    def test_tier1_core_consensus_not_required(self) -> None:
-        d = get_tier_details(Tier.TIER_1_CORE)
-        assert d["consensus"] is False
+    def test_t1_elite_no_consensus_required(self) -> None:
+        assert get_tier_details(Tier.T1_ELITE)["consensus"] is False
 
-    def test_tier1_core_size_range(self) -> None:
-        d = get_tier_details(Tier.TIER_1_CORE)
-        assert d["size_min"] == pytest.approx(0.030)
-        assert d["size_max"] == pytest.approx(0.050)
+    def test_t1_elite_size_range(self) -> None:
+        d = get_tier_details(Tier.T1_ELITE)
+        assert d["size_min"] == pytest.approx(0.05)
+        assert d["size_max"] == pytest.approx(0.10)
 
-    def test_tier1_core_color(self) -> None:
-        assert get_tier_details(Tier.TIER_1_CORE)["color"] == "#39d353"
+    # ── T1 ─────────────────────────────────────────────────────────────────
+    def test_t1_label(self) -> None:
+        assert get_tier_details(Tier.T1)["label"] == "T1"
 
-    def test_grey_zone_consensus_required(self) -> None:
-        assert get_tier_details(Tier.GREY_ZONE)["consensus"] is True
+    def test_t1_no_leaps(self) -> None:
+        assert get_tier_details(Tier.T1)["leaps"] is False
 
-    def test_grey_zone_no_leaps(self) -> None:
-        assert get_tier_details(Tier.GREY_ZONE)["leaps"] is False
+    def test_t1_no_consensus(self) -> None:
+        assert get_tier_details(Tier.T1)["consensus"] is False
 
-    def test_grey_zone_label(self) -> None:
-        assert get_tier_details(Tier.GREY_ZONE)["label"] == "GREY ZONE"
+    def test_t1_size_range(self) -> None:
+        d = get_tier_details(Tier.T1)
+        assert d["size_min"] == pytest.approx(0.02)
+        assert d["size_max"] == pytest.approx(0.04)
 
-    def test_grey_zone_color(self) -> None:
-        assert get_tier_details(Tier.GREY_ZONE)["color"] == "#a371f7"
+    # ── T2 ─────────────────────────────────────────────────────────────────
+    def test_t2_label(self) -> None:
+        assert get_tier_details(Tier.T2)["label"] == "T2"
 
-    def test_tier2_action(self) -> None:
-        assert get_tier_details(Tier.TIER_2)["action"] == "GTC adds permitted"
+    def test_t2_action(self) -> None:
+        assert get_tier_details(Tier.T2)["action"] == "Small satellites only"
 
-    def test_tier2_size_range(self) -> None:
-        d = get_tier_details(Tier.TIER_2)
+    def test_t2_size_range(self) -> None:
+        d = get_tier_details(Tier.T2)
         assert d["size_min"] == pytest.approx(0.005)
         assert d["size_max"] == pytest.approx(0.015)
 
-    def test_tier3_size_range(self) -> None:
-        d = get_tier_details(Tier.TIER_3)
-        assert d["size_min"] == pytest.approx(0.0025)
+    # ── T3 ─────────────────────────────────────────────────────────────────
+    def test_t3_size_range(self) -> None:
+        d = get_tier_details(Tier.T3)
+        assert d["size_min"] == pytest.approx(0.0)
         assert d["size_max"] == pytest.approx(0.005)
 
-    def test_watchlist_zero_size(self) -> None:
-        d = get_tier_details(Tier.WATCHLIST)
+    # ── Below Gate ─────────────────────────────────────────────────────────
+    def test_below_gate_zero_size(self) -> None:
+        d = get_tier_details(Tier.BELOW_GATE)
         assert d["size_min"] == 0.0
         assert d["size_max"] == 0.0
 
-    def test_watchlist_label(self) -> None:
-        assert get_tier_details(Tier.WATCHLIST)["label"] == "WATCHLIST"
+    def test_below_gate_label(self) -> None:
+        assert get_tier_details(Tier.BELOW_GATE)["label"] == "BELOW GATE"
 
-    def test_watchlist_color(self) -> None:
-        assert get_tier_details(Tier.WATCHLIST)["color"] == "#f85149"
+    # ── GREY_ZONE must not appear in details ───────────────────────────────
+    def test_grey_zone_not_in_tier_enum(self) -> None:
+        with pytest.raises(Exception):
+            Tier("GREY_ZONE")
 
 
 # ---------------------------------------------------------------------------
-# _compute_size_status — test cases 3 (TSEM) and OVERWEIGHT/UNDERWEIGHT
+# _compute_size_status
 # ---------------------------------------------------------------------------
 
 
 class TestComputeSizeStatus:
-    def test_watchlist_no_position_status(self) -> None:
-        status, room, trim = _compute_size_status(Tier.WATCHLIST, 0.0, 0.0, 0.0)
+    def test_below_gate_no_position_status(self) -> None:
+        status, room, trim = _compute_size_status(Tier.BELOW_GATE, 0.0, 0.0, 0.0)
         assert status == PositionSizeStatus.NO_POSITION
         assert room == pytest.approx(0.0)
         assert trim is False
 
-    def test_watchlist_trim_suggested_when_holding(self) -> None:
-        _, _, trim = _compute_size_status(Tier.WATCHLIST, 0.002, 0.0, 0.0)
+    def test_below_gate_trim_suggested_when_holding(self) -> None:
+        _, _, trim = _compute_size_status(Tier.BELOW_GATE, 0.002, 0.0, 0.0)
         assert trim is True
 
     def test_underweight(self) -> None:
-        status, room, trim = _compute_size_status(Tier.TIER_2, 0.003, 0.005, 0.015)
+        status, room, trim = _compute_size_status(Tier.T2, 0.003, 0.005, 0.015)
         assert status == PositionSizeStatus.UNDERWEIGHT
         assert room == pytest.approx(0.012)
         assert trim is False
 
     def test_in_range(self) -> None:
-        status, room, trim = _compute_size_status(Tier.TIER_2, 0.010, 0.005, 0.015)
+        status, room, trim = _compute_size_status(Tier.T2, 0.010, 0.005, 0.015)
         assert status == PositionSizeStatus.IN_RANGE
         assert room == pytest.approx(0.005)
         assert trim is False
 
-    # Test 3: TSEM score=66, weight=0.005, tier_max=0.005 → IN_RANGE, room=0%
-    def test_tsem_at_max_of_tier3(self) -> None:
-        status, room, trim = _compute_size_status(Tier.TIER_3, 0.005, 0.0025, 0.005)
-        assert status == PositionSizeStatus.IN_RANGE
-        assert room == pytest.approx(0.0)
-        assert trim is False
-
     def test_overweight(self) -> None:
-        status, room, trim = _compute_size_status(Tier.TIER_2, 0.020, 0.005, 0.015)
+        status, room, trim = _compute_size_status(Tier.T2, 0.020, 0.005, 0.015)
         assert status == PositionSizeStatus.OVERWEIGHT
         assert room == pytest.approx(0.0)
         assert trim is True
 
-    def test_in_range_at_min(self) -> None:
-        status, _, _ = _compute_size_status(Tier.TIER_3, 0.0025, 0.0025, 0.005)
+    def test_t3_at_max(self) -> None:
+        # T3 max is 0.005; holding exactly at max → IN_RANGE, room=0
+        status, room, trim = _compute_size_status(Tier.T3, 0.005, 0.0, 0.005)
         assert status == PositionSizeStatus.IN_RANGE
+        assert room == pytest.approx(0.0)
+        assert trim is False
 
 
 # ---------------------------------------------------------------------------
-# _compute_adds_permitted — test cases 1, 2, 5, 6
+# _compute_adds_permitted — no consensus branch
 # ---------------------------------------------------------------------------
 
 
 class TestComputeAddsPermitted:
-    # Test 4 / WATCHLIST: blocked regardless of caps
-    def test_watchlist_blocked(self) -> None:
+    def test_below_gate_blocked(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.WATCHLIST, False, False, ConsensusStatus.NOT_REQUIRED
+            Tier.BELOW_GATE, False, False, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is False
-        assert reason == "Watchlist — no capital permitted"
+        assert reason is not None
 
-    # Test 1: beta_cap wins over consensus (checked before consensus)
-    def test_beta_cap_blocks_adds(self) -> None:
+    def test_beta_cap_blocks_t1_elite(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.GREY_ZONE, True, False, ConsensusStatus.PENDING
+            Tier.T1_ELITE, True, False, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is False
-        assert reason == "Beta cap (F13) blocking adds"
+        assert "Beta cap" in (reason or "")
 
-    def test_concentration_cap_blocks_adds(self) -> None:
+    def test_concentration_cap_blocks_t1(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.TIER_2, False, True, ConsensusStatus.NOT_REQUIRED
+            Tier.T1, False, True, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is False
-        assert reason == "Concentration cap (F14) blocking adds"
+        assert "Concentration cap" in (reason or "")
 
-    # Test 6: grey zone + PENDING consensus → blocked
-    def test_grey_zone_pending_blocks(self) -> None:
+    def test_t1_elite_no_caps_permitted(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.GREY_ZONE, False, False, ConsensusStatus.PENDING
-        )
-        assert permitted is False
-        assert reason == "3-AI consensus required"
-
-    def test_grey_zone_failed_blocks(self) -> None:
-        permitted, reason = _compute_adds_permitted(
-            Tier.GREY_ZONE, False, False, ConsensusStatus.FAILED
-        )
-        assert permitted is False
-        assert reason == "3-AI consensus required"
-
-    # Test 5: grey zone + CONFIRMED → permitted
-    def test_grey_zone_confirmed_permits(self) -> None:
-        permitted, reason = _compute_adds_permitted(
-            Tier.GREY_ZONE, False, False, ConsensusStatus.CONFIRMED
+            Tier.T1_ELITE, False, False, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is True
         assert reason is None
 
-    # Test 2: AVGO tier1 + no caps → permitted
-    def test_tier1_no_caps_permits(self) -> None:
+    def test_t1_no_caps_permitted(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.TIER_1_CORE, False, False, ConsensusStatus.NOT_REQUIRED
+            Tier.T1, False, False, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is True
         assert reason is None
 
-    # Test 7: tier2 + no caps → permitted
-    def test_tier2_no_caps_permits(self) -> None:
+    def test_t2_no_caps_permitted(self) -> None:
         permitted, reason = _compute_adds_permitted(
-            Tier.TIER_2, False, False, ConsensusStatus.NOT_REQUIRED
+            Tier.T2, False, False, ConsensusStatus.NOT_REQUIRED
         )
         assert permitted is True
         assert reason is None
 
-    # beta_cap takes priority over concentration_cap
+    def test_t3_no_caps_permitted(self) -> None:
+        # T3 allows small satellite sizing — no cap means permitted
+        permitted, _ = _compute_adds_permitted(
+            Tier.T3, False, False, ConsensusStatus.NOT_REQUIRED
+        )
+        assert permitted is True
+
     def test_beta_cap_priority_over_concentration(self) -> None:
-        _, reason = _compute_adds_permitted(Tier.TIER_2, True, True, ConsensusStatus.NOT_REQUIRED)
-        assert reason == "Beta cap (F13) blocking adds"
+        _, reason = _compute_adds_permitted(Tier.T2, True, True, ConsensusStatus.NOT_REQUIRED)
+        assert "Beta cap" in (reason or "")
 
 
 # ---------------------------------------------------------------------------
-# _score_band — verify band boundaries
+# _score_band — new boundaries
 # ---------------------------------------------------------------------------
 
 
 class TestScoreBand:
-    def test_tier1_core_band(self) -> None:
-        lo, hi = _score_band(Tier.TIER_1_CORE)
+    def test_t1_elite_band(self) -> None:
+        lo, hi = _score_band(Tier.T1_ELITE)
         assert lo == 85
         assert hi is None
 
-    def test_grey_zone_band(self) -> None:
-        lo, hi = _score_band(Tier.GREY_ZONE)
-        assert lo == 78
+    def test_t1_band(self) -> None:
+        lo, hi = _score_band(Tier.T1)
+        assert lo == 80
         assert hi == 84
 
-    def test_tier2_band(self) -> None:
-        lo, hi = _score_band(Tier.TIER_2)
+    def test_t2_band(self) -> None:
+        lo, hi = _score_band(Tier.T2)
         assert lo == 70
-        assert hi == 77
+        assert hi == 79
 
-    def test_tier3_band(self) -> None:
-        lo, hi = _score_band(Tier.TIER_3)
-        assert lo == 55
+    def test_t3_band(self) -> None:
+        lo, hi = _score_band(Tier.T3)
+        assert lo == 50
         assert hi == 69
 
-    def test_watchlist_band(self) -> None:
-        lo, hi = _score_band(Tier.WATCHLIST)
+    def test_below_gate_band(self) -> None:
+        lo, hi = _score_band(Tier.BELOW_GATE)
         assert lo == 0
-        assert hi == 54
+        assert hi == 49
 
 
 # ---------------------------------------------------------------------------
-# Exit cycle tracking — test case 11
+# Exit cycle — threshold now 50 (not 55)
 # ---------------------------------------------------------------------------
 
 
 class TestExitCycle:
     def setup_method(self) -> None:
-        # Reset store before each test so tests are independent.
         reset_exit_cycle("NEM")
-        reset_exit_cycle("TSEM")
 
-    # Test 4: starts at 0, not triggered
     def test_initial_count_is_zero(self) -> None:
         assert get_exit_cycle_count("NEM") == 0
 
-    # Test 11: week 1 → count=1, not triggered
-    def test_count_increments_on_sub55_score(self) -> None:
-        count = update_exit_cycle("NEM", 52.0)
+    def test_count_increments_on_sub50_score(self) -> None:
+        count = update_exit_cycle("NEM", 49.0)
         assert count == 1
 
-    # Test 11: week 2 → count=2, exit triggered
     def test_count_reaches_two(self) -> None:
-        update_exit_cycle("NEM", 52.0)
-        count = update_exit_cycle("NEM", 48.0)
+        update_exit_cycle("NEM", 49.0)
+        count = update_exit_cycle("NEM", 45.0)
         assert count == 2
 
-    # Test 11 reset: score recovers above 55 → reset to 0
-    def test_count_resets_on_score_above_55(self) -> None:
-        update_exit_cycle("NEM", 52.0)
-        count = update_exit_cycle("NEM", 58.0)
+    def test_score_50_does_not_increment(self) -> None:
+        # 50 is T3 now — should NOT trigger exit counter
+        count = update_exit_cycle("NEM", 50.0)
+        assert count == 0
+
+    def test_score_55_does_not_increment(self) -> None:
+        # 55 used to trigger exit; now it's T3 — no exit
+        count = update_exit_cycle("NEM", 55.0)
+        assert count == 0
+
+    def test_count_resets_on_score_at_threshold(self) -> None:
+        update_exit_cycle("NEM", 49.0)
+        count = update_exit_cycle("NEM", 50.0)
         assert count == 0
 
     def test_reset_function_clears_count(self) -> None:
-        update_exit_cycle("NEM", 52.0)
+        update_exit_cycle("NEM", 49.0)
         reset_exit_cycle("NEM")
         assert get_exit_cycle_count("NEM") == 0
 
     def test_ticker_uppercase_normalised(self) -> None:
-        update_exit_cycle("nem", 52.0)
+        update_exit_cycle("nem", 49.0)
         assert get_exit_cycle_count("NEM") == 1
 
 
-# ---------------------------------------------------------------------------
-# Consensus status tracking — test cases 5, 6, 12
-# ---------------------------------------------------------------------------
-
-
-class TestConsensusStatus:
-    def setup_method(self) -> None:
-        reset_exit_cycle("MRVL")  # reuse to clear any state
-        set_consensus_status("MRVL", ConsensusStatus.PENDING)
-
-    # Test 6: PENDING → adds blocked
-    def test_consensus_pending_returned(self) -> None:
-        status = get_consensus_status_for_tier("MRVL", Tier.GREY_ZONE)
-        assert status == ConsensusStatus.PENDING
-
-    # Test 5: CONFIRMED → adds permitted
-    def test_consensus_confirmed_returned(self) -> None:
-        set_consensus_status("MRVL", ConsensusStatus.CONFIRMED)
-        status = get_consensus_status_for_tier("MRVL", Tier.GREY_ZONE)
-        assert status == ConsensusStatus.CONFIRMED
-
-    # Non-grey-zone tiers always return NOT_REQUIRED
-    def test_non_grey_zone_returns_not_required(self) -> None:
-        status = get_consensus_status_for_tier("MRVL", Tier.TIER_2)
-        assert status == ConsensusStatus.NOT_REQUIRED
-
-    # Test 12: regime change should reset consensus
-    def test_set_pending_acts_as_reset(self) -> None:
-        set_consensus_status("MRVL", ConsensusStatus.CONFIRMED)
-        set_consensus_status("MRVL", ConsensusStatus.PENDING)
-        assert get_consensus_status_for_tier("MRVL", Tier.GREY_ZONE) == ConsensusStatus.PENDING
-
-    def test_ticker_uppercase_normalised(self) -> None:
-        set_consensus_status("mrvl", ConsensusStatus.CONFIRMED)
-        assert get_consensus_status_for_tier("MRVL", Tier.GREY_ZONE) == ConsensusStatus.CONFIRMED

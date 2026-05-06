@@ -1,14 +1,15 @@
-"""Unit tests for Framework 8 — Insider Activity Flag (pure helpers only).
+"""Unit tests for Framework 8 — Insider Buying Detector (pure helpers only).
 
 All tests are synchronous and cover only the pure functions:
   - _is_financial_sponsor
   - _has_10b51_language
   - _classify_filer_tier
-  - _is_hard_pass
-  - _resolve_f5_cap
   - _build_insider_analysis
+  - _compute_buying_bonus
+  - _detect_clustered_csuite_selling
+  - _parse_form4_xml
 
-The async network methods (_fetch_rss, compute) are tested via integration
+The async network methods (_fetch_filings, compute) are tested via integration
 tests that mock httpx.
 """
 
@@ -20,11 +21,11 @@ from atlas.services.framework8_service import (
     InsiderTier,
     _build_insider_analysis,
     _classify_filer_tier,
+    _compute_buying_bonus,
+    _detect_clustered_csuite_selling,
     _has_10b51_language,
     _is_financial_sponsor,
-    _is_hard_pass,
     _parse_form4_xml,
-    _resolve_f5_cap,
 )
 
 
@@ -149,76 +150,226 @@ class TestClassifyFilerTier:
 
 
 # ---------------------------------------------------------------------------
-# _is_hard_pass
+# _compute_buying_bonus
 # ---------------------------------------------------------------------------
 
 
-class TestIsHardPass:
-    """Hard pass = many sales, zero purchases → remove from universe."""
+class TestBuyingDetection:
+    """Open-market purchases and awards yield an additive buying bonus."""
 
-    def test_many_sales_zero_purchases_is_hard_pass(self) -> None:
-        assert _is_hard_pass(sale_count=8, purchase_count=0) is True
+    def test_purchase_transaction_gives_bonus(self) -> None:
+        filing = {
+            "transactionCode": "P",
+            "reportingOwnerName": "Jane Doe",
+            "transactionAmounts": {"transactionTotalValue": 200_000.0},
+            "filingTitle": "Chief Executive Officer",
+            "footnotes": "",
+        }
+        assert _compute_buying_bonus([filing]) > 0
 
-    def test_threshold_sales_zero_purchases_is_hard_pass(self) -> None:
-        # Exactly at the threshold (5 sales) with no purchases
-        assert _is_hard_pass(sale_count=5, purchase_count=0) is True
+    def test_award_transaction_gives_bonus(self) -> None:
+        filing = {
+            "transactionCode": "A",
+            "reportingOwnerName": "Jane Doe",
+            "transactionAmounts": {"transactionTotalValue": 500_000.0},
+            "filingTitle": "Chief Financial Officer",
+            "footnotes": "",
+        }
+        assert _compute_buying_bonus([filing]) > 0
 
-    def test_below_threshold_sales_is_not_hard_pass(self) -> None:
-        assert _is_hard_pass(sale_count=3, purchase_count=0) is False
+    def test_no_transactions_gives_zero_bonus(self) -> None:
+        assert _compute_buying_bonus([]) == 0
 
-    def test_sales_with_any_purchase_is_not_hard_pass(self) -> None:
-        assert _is_hard_pass(sale_count=10, purchase_count=1) is False
+    def test_sale_only_gives_zero_bonus(self) -> None:
+        """Selling transactions must not reduce or affect the buying bonus."""
+        filing = {
+            "transactionCode": "S",
+            "reportingOwnerName": "Jane Doe",
+            "transactionAmounts": {"transactionTotalValue": 2_000_000.0},
+            "filingTitle": "Chief Executive Officer",
+            "footnotes": "",
+        }
+        assert _compute_buying_bonus([filing]) == 0
 
-    def test_zero_sales_is_not_hard_pass(self) -> None:
-        assert _is_hard_pass(sale_count=0, purchase_count=0) is False
+    def test_sponsor_buy_counts(self) -> None:
+        """A financial sponsor buying should still yield a bonus."""
+        filing = {
+            "transactionCode": "P",
+            "reportingOwnerName": "Blackstone Group Holdings",
+            "transactionAmounts": {"transactionTotalValue": 10_000_000.0},
+            "filingTitle": "Director",
+            "footnotes": "",
+        }
+        assert _compute_buying_bonus([filing]) > 0
+
+    def test_multiple_buys_increase_bonus(self) -> None:
+        """Multiple purchase transactions should yield a higher bonus than one."""
+        single = {
+            "transactionCode": "P",
+            "reportingOwnerName": "Jane Doe",
+            "transactionAmounts": {"transactionTotalValue": 100_000.0},
+            "filingTitle": "Chief Executive Officer",
+            "footnotes": "",
+        }
+        bonus_one = _compute_buying_bonus([single])
+        bonus_many = _compute_buying_bonus([single, single, single])
+        assert bonus_many >= bonus_one
+
+    def test_bonus_is_non_negative(self) -> None:
+        """Buying bonus can never be negative."""
+        assert _compute_buying_bonus([]) >= 0
+
+    def test_sale_mixed_with_purchase_still_gives_bonus(self) -> None:
+        """A mixed set of filings with at least one purchase yields a bonus."""
+        filings = [
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "Jane Doe",
+                "transactionAmounts": {"transactionTotalValue": 1_000_000.0},
+                "filingTitle": "Chief Executive Officer",
+                "footnotes": "",
+            },
+            {
+                "transactionCode": "P",
+                "reportingOwnerName": "Jane Doe",
+                "transactionAmounts": {"transactionTotalValue": 300_000.0},
+                "filingTitle": "Chief Executive Officer",
+                "footnotes": "",
+            },
+        ]
+        assert _compute_buying_bonus(filings) > 0
 
 
 # ---------------------------------------------------------------------------
-# _resolve_f5_cap
+# _detect_clustered_csuite_selling
 # ---------------------------------------------------------------------------
 
 
-class TestResolveF5Cap:
-    """Large sales or Tier 1 filers cap F5 at 68; standard cap is 72."""
+class TestClusteredCsuiteSelling:
+    """Multiple Tier1 discretionary sales produce a display-only note."""
 
-    # Large sale (above $1M) always → 68
-    def test_large_sale_above_1m_gives_cap_68(self) -> None:
-        assert _resolve_f5_cap(sale_usd=1_500_000.0, tier=InsiderTier.TIER3) == 68
+    def _make_tier1_sale(self, name: str = "Jane Doe", footnote: str = "") -> dict:  # type: ignore[type-arg]
+        return {
+            "transactionCode": "S",
+            "reportingOwnerName": name,
+            "transactionAmounts": {"transactionTotalValue": 400_000.0},
+            "filingTitle": "Chief Executive Officer",
+            "footnotes": footnote,
+        }
 
-    def test_sale_exactly_1m_gives_cap_68(self) -> None:
-        assert _resolve_f5_cap(sale_usd=1_000_000.0, tier=InsiderTier.TIER3) == 68
+    def _make_tier3_sale(self) -> dict:  # type: ignore[type-arg]
+        return {
+            "transactionCode": "S",
+            "reportingOwnerName": "Random VP",
+            "transactionAmounts": {"transactionTotalValue": 50_000.0},
+            "filingTitle": "Vice President",
+            "footnotes": "",
+        }
 
-    # Tier 1 filer regardless of amount → 68
-    def test_tier1_small_sale_gives_cap_68(self) -> None:
-        assert _resolve_f5_cap(sale_usd=200_000.0, tier=InsiderTier.TIER1) == 68
+    def test_multiple_tier1_sales_no_10b51_gives_note(self) -> None:
+        filings = [
+            self._make_tier1_sale("CEO Person"),
+            self._make_tier1_sale("CFO Person"),
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        assert note is not None
 
-    # Standard: Tier 2/3 + below $1M → 72
-    def test_tier2_small_sale_gives_cap_72(self) -> None:
-        assert _resolve_f5_cap(sale_usd=500_000.0, tier=InsiderTier.TIER2) == 72
+    def test_note_is_non_empty_string(self) -> None:
+        filings = [
+            self._make_tier1_sale("CEO Person"),
+            self._make_tier1_sale("CFO Person"),
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        assert isinstance(note, str) and len(note) > 0
 
-    def test_tier3_small_sale_gives_cap_72(self) -> None:
-        assert _resolve_f5_cap(sale_usd=999_999.0, tier=InsiderTier.TIER3) == 72
+    def test_10b51_suppresses_note(self) -> None:
+        """When all selling Tier1 filings have 10b5-1 plans, no note is raised."""
+        filings = [
+            self._make_tier1_sale("CEO Person", footnote="Pursuant to a 10b5-1 plan"),
+            self._make_tier1_sale("CFO Person", footnote="Pre-planned sale per Rule 10b5-1"),
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        assert note is None
+
+    def test_single_csuite_sale_no_note(self) -> None:
+        """Only 1 Tier1 sale is not 'clustered' — no note."""
+        note = _detect_clustered_csuite_selling([self._make_tier1_sale()])
+        assert note is None
+
+    def test_no_filings_no_note(self) -> None:
+        note = _detect_clustered_csuite_selling([])
+        assert note is None
+
+    def test_sponsor_sale_excluded_from_clustered_detection(self) -> None:
+        """Sponsor selling doesn't count toward clustered C-suite detection."""
+        filings = [
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "Bain Capital Investors LLC",
+                "transactionAmounts": {"transactionTotalValue": 5_000_000.0},
+                "filingTitle": "Director",
+                "footnotes": "",
+            },
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "KKR & Co Inc",
+                "transactionAmounts": {"transactionTotalValue": 4_000_000.0},
+                "filingTitle": "Director",
+                "footnotes": "",
+            },
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        assert note is None
+
+    def test_tier3_selling_no_note(self) -> None:
+        """Non-C-suite selling (Tier3) does not trigger the note."""
+        note = _detect_clustered_csuite_selling([self._make_tier3_sale(), self._make_tier3_sale()])
+        assert note is None
+
+    def test_note_has_no_score_impact_buying_bonus_unaffected(self) -> None:
+        """When a clustered selling note is produced, the buying bonus is still 0
+        (note is display-only, carries no scoring effect)."""
+        filings = [
+            self._make_tier1_sale("CEO Person"),
+            self._make_tier1_sale("CFO Person"),
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        bonus = _compute_buying_bonus(filings)
+        assert note is not None
+        assert bonus == 0  # selling-only set → zero buying bonus
+
+    def test_mixed_tier1_with_and_without_10b51(self) -> None:
+        """If at least one Tier1 sale lacks 10b5-1, a note is produced."""
+        filings = [
+            self._make_tier1_sale("CEO Person", footnote="Pursuant to 10b5-1 plan"),
+            self._make_tier1_sale("CFO Person", footnote=""),  # no plan
+        ]
+        note = _detect_clustered_csuite_selling(filings)
+        assert note is not None
 
 
 # ---------------------------------------------------------------------------
-# _build_insider_analysis — three-filter pipeline
+# _build_insider_analysis
 # ---------------------------------------------------------------------------
 
 
 class TestBuildInsiderAnalysis:
-    """Discretionary-sale detection over pre-fetched Form 4 filings."""
+    """Integration of buying bonus + clustered selling note in the analysis result."""
 
-    def test_no_filings_has_flag_inactive(self) -> None:
+    def test_no_filings_gives_zero_buying_bonus(self) -> None:
         result = _build_insider_analysis("AAPL", filings=[])
-        assert result.flag_active is False
+        assert result.buying_bonus == 0
 
-    def test_no_filings_case_insensitive(self) -> None:
+    def test_no_filings_gives_no_clustered_selling_note(self) -> None:
+        result = _build_insider_analysis("AAPL", filings=[])
+        assert result.clustered_selling_note is None
+
+    def test_ticker_uppercased(self) -> None:
         result = _build_insider_analysis("aapl", filings=[])
-        assert result.flag_active is False
         assert result.ticker == "AAPL"
 
-    def test_sponsor_sale_no_flag(self) -> None:
-        """Sponsor sales are ignored — flag stays off."""
+    def test_sponsor_sale_no_note(self) -> None:
+        """Sponsor sales are ignored — no clustered note."""
         filing = {
             "transactionCode": "S",
             "reportingOwnerName": "Bain Capital Investors LLC",
@@ -227,103 +378,92 @@ class TestBuildInsiderAnalysis:
             "footnotes": "",
         }
         result = _build_insider_analysis("COHR", filings=[filing])
-        assert result.flag_active is False
+        assert result.clustered_selling_note is None
 
-    def test_unknown_ticker_sponsor_sale_no_flag(self) -> None:
-        """Sponsor sales are ignored — flag stays off for any ticker."""
+    def test_non_sale_transaction_gives_bonus(self) -> None:
+        """An award transaction ('A') yields a positive buying bonus."""
         filing = {
-            "transactionCode": "S",
-            "reportingOwnerName": "Bain Capital Investors LLC",
-            "transactionAmounts": {"transactionTotalValue": 5_000_000.0},
-            "filingTitle": "Director",
-            "footnotes": "",
-        }
-        result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.flag_active is False
-
-    def test_discretionary_sale_activates_flag(self) -> None:
-        filing = {
-            "transactionCode": "S",
-            "reportingOwnerName": "Jane Doe",
-            "transactionAmounts": {"transactionTotalValue": 600_000.0},
-            "filingTitle": "Chief Executive Officer",
-            "footnotes": "",
-        }
-        result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.flag_active is True
-
-    def test_non_sale_transaction_ignored(self) -> None:
-        filing = {
-            "transactionCode": "A",  # Award
+            "transactionCode": "A",
             "reportingOwnerName": "Jane Doe",
             "transactionAmounts": {"transactionTotalValue": 2_000_000.0},
             "filingTitle": "Chief Executive Officer",
             "footnotes": "",
         }
         result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.flag_active is False
+        assert result.buying_bonus > 0
 
-    def test_10b51_sale_ignored(self) -> None:
-        filing = {
-            "transactionCode": "S",
-            "reportingOwnerName": "Jane Doe",
-            "transactionAmounts": {"transactionTotalValue": 2_000_000.0},
-            "filingTitle": "Chief Executive Officer",
-            "footnotes": "Pursuant to a Rule 10b5-1 plan adopted in advance",
-        }
-        result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.flag_active is False
-
-    def test_hard_pass_detected(self) -> None:
+    def test_10b51_sale_ignored_for_note(self) -> None:
+        """10b5-1 sales don't count toward clustered selling note."""
         filings = [
             {
                 "transactionCode": "S",
-                "reportingOwnerName": "Jane Doe",
-                "transactionAmounts": {"transactionTotalValue": 200_000.0},
-                "filingTitle": "Director",
-                "footnotes": "",
-            }
-        ] * 6  # six sales, zero purchases
+                "reportingOwnerName": "CEO One",
+                "transactionAmounts": {"transactionTotalValue": 400_000.0},
+                "filingTitle": "Chief Executive Officer",
+                "footnotes": "Pursuant to a Rule 10b5-1 plan adopted in advance",
+            },
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "CFO Two",
+                "transactionAmounts": {"transactionTotalValue": 300_000.0},
+                "filingTitle": "Chief Financial Officer",
+                "footnotes": "Pre-planned Rule 10b5-1 sale",
+            },
+        ]
         result = _build_insider_analysis("XYZ", filings=filings)
-        assert result.hard_pass is True
-        assert result.flag_active is True
+        assert result.clustered_selling_note is None
 
-    def test_f5_cap_68_for_large_discretionary_sale(self) -> None:
+    def test_purchase_gives_positive_buying_bonus(self) -> None:
         filing = {
-            "transactionCode": "S",
+            "transactionCode": "P",
             "reportingOwnerName": "Jane Doe",
-            "transactionAmounts": {"transactionTotalValue": 1_200_000.0},
-            "filingTitle": "Director",
+            "transactionAmounts": {"transactionTotalValue": 500_000.0},
+            "filingTitle": "Chief Executive Officer",
             "footnotes": "",
         }
         result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.f5_cap == 68
+        assert result.buying_bonus > 0
 
-    def test_f5_cap_72_for_standard_discretionary_sale(self) -> None:
-        filing = {
-            "transactionCode": "S",
-            "reportingOwnerName": "Jane Doe",
-            "transactionAmounts": {"transactionTotalValue": 400_000.0},
-            "filingTitle": "Director",
-            "footnotes": "",
-        }
-        result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.f5_cap == 72
+    def test_clustered_selling_triggers_note(self) -> None:
+        filings = [
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "CEO Person",
+                "transactionAmounts": {"transactionTotalValue": 400_000.0},
+                "filingTitle": "Chief Executive Officer",
+                "footnotes": "",
+            },
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "CFO Person",
+                "transactionAmounts": {"transactionTotalValue": 300_000.0},
+                "filingTitle": "Chief Financial Officer",
+                "footnotes": "",
+            },
+        ]
+        result = _build_insider_analysis("XYZ", filings=filings)
+        assert result.clustered_selling_note is not None
 
-    def test_f5_cap_none_when_flag_inactive(self) -> None:
-        result = _build_insider_analysis("AAPL", filings=[])
-        assert result.f5_cap is None
-
-    def test_tier_set_on_active_flag(self) -> None:
-        filing = {
-            "transactionCode": "S",
-            "reportingOwnerName": "Jane Doe",
-            "transactionAmounts": {"transactionTotalValue": 600_000.0},
-            "filingTitle": "Chief Financial Officer",
-            "footnotes": "",
-        }
-        result = _build_insider_analysis("XYZ", filings=[filing])
-        assert result.filer_tier == InsiderTier.TIER1
+    def test_clustered_selling_does_not_reduce_buying_bonus(self) -> None:
+        """A clustered selling note must have zero effect on the buying bonus."""
+        filings = [
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "CEO Person",
+                "transactionAmounts": {"transactionTotalValue": 400_000.0},
+                "filingTitle": "Chief Executive Officer",
+                "footnotes": "",
+            },
+            {
+                "transactionCode": "S",
+                "reportingOwnerName": "CFO Person",
+                "transactionAmounts": {"transactionTotalValue": 300_000.0},
+                "filingTitle": "Chief Financial Officer",
+                "footnotes": "",
+            },
+        ]
+        result = _build_insider_analysis("XYZ", filings=filings)
+        assert result.buying_bonus == 0  # selling set → no bonus
 
 
 # ---------------------------------------------------------------------------

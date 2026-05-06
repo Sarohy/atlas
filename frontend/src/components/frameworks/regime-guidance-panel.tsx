@@ -11,15 +11,15 @@ const SCORE_BAR_SEGMENTS = 10;
 
 function tierToTone(tier: PositionTier): string {
   switch (tier) {
-    case 'TIER_1':
+    case 'T1_ELITE':
       return 'is-green';
-    case 'TIER_2_GREY':
-      return 'is-purple';
-    case 'TIER_2':
+    case 'T1':
+      return 'is-teal';
+    case 'T2':
       return 'is-blue';
-    case 'TIER_3':
+    case 'T3':
       return 'is-yellow';
-    case 'WATCHLIST':
+    case 'BELOW_GATE':
       return 'is-red';
   }
 }
@@ -109,15 +109,15 @@ function ActionContent({
   const tone = tierToTone(data.tier);
   const filledSegs = Math.round(data.conviction_score / SCORE_BAR_SEGMENTS);
 
-  // TIER_3 fix: backend hardcodes adds_permitted=false for all TIER_3 entries,
+  // T3 fix: backend hardcodes adds_permitted=false for all T3 entries,
   // but the correct value is true when no blocking condition exists. F7 gate
   // is the only blocking condition available at this layer.
   const addsPermitted =
-    data.tier === 'TIER_3' ? !f7GateActive : data.adds_permitted;
+    data.tier === 'T3' ? !f7GateActive : data.adds_permitted;
 
-  // TIER_3 fix: override the backend display_message with corrected guidance.
+  // T3 fix: override the backend display_message with corrected guidance.
   const displayMessage =
-    data.tier === 'TIER_3'
+    data.tier === 'T3'
       ? addsPermitted
         ? 'Small position only — max 0.5% NAV. Satellite sizing.'
         : 'Adds blocked — F7 earnings gate active.'

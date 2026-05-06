@@ -1,16 +1,16 @@
 """ATLAS conviction score tier classification — single source of truth.
 
-Per ATLAS v7.3.3 Section 13.3.
+Per ATLAS v7.3.5 Section 13.3.
 
 ALL tier decisions in the system must call ``classify_tier()``.
 Never duplicate the band boundaries or label strings elsewhere.
 
 Score bands (inclusive lower bounds, integer comparison):
-  >= 85   TIER_1_CORE  — Core position, LEAPS eligible
-  78-84   GREY_ZONE    — 3-AI consensus required before any add
-  70-77   TIER_2       — GTC adds permitted
-  55-69   TIER_3       — Small position only
-   < 55   WATCHLIST    — No new capital; exit rules active
+  >= 85   T1_ELITE  — Core position, LEAPS eligible, 5-10% NAV
+  80-84   T1        — Core position, 2-4% NAV
+  70-79   T2        — Starter position, 0.5-1.5% NAV
+  50-69   T3        — Small speculative position, ≤ 0.5% NAV
+   < 50   BELOW_GATE — No new capital; exit rules active
 """
 
 from __future__ import annotations
@@ -21,18 +21,18 @@ from typing import Final, TypedDict
 # Named band boundaries — the only place these numbers live
 # ---------------------------------------------------------------------------
 
-TIER_1_MIN: Final[int] = 85   # score >= 85 → TIER_1_CORE
-GREY_ZONE_MIN: Final[int] = 78  # score >= 78 → GREY_ZONE
-TIER_2_MIN: Final[int] = 70   # score >= 70 → TIER_2
-TIER_3_MIN: Final[int] = 55   # score >= 55 → TIER_3
-                               # score <  55 → WATCHLIST
+TIER_1_ELITE_MIN: Final[int] = 85  # score >= 85 → T1_ELITE
+TIER_1_MIN: Final[int] = 80        # score >= 80 → T1
+TIER_2_MIN: Final[int] = 70        # score >= 70 → T2
+TIER_3_MIN: Final[int] = 50        # score >= 50 → T3
+                                   # score <  50 → BELOW_GATE
 
 # Tone classes for the frontend CSS (must match ACTION_TONE_CLASS map in panel)
-_TONE_TIER1: Final[str] = "tone-green"
-_TONE_GREY: Final[str] = "tone-purple"
+_TONE_T1_ELITE: Final[str] = "tone-green"
+_TONE_T1: Final[str] = "tone-teal"
 _TONE_TIER2: Final[str] = "tone-blue"
 _TONE_TIER3: Final[str] = "tone-yellow"
-_TONE_WATCHLIST: Final[str] = "tone-red"
+_TONE_BELOW_GATE: Final[str] = "tone-red"
 
 
 # ---------------------------------------------------------------------------
@@ -82,45 +82,45 @@ def classify_tier(score: float) -> TierResult:
     # Integer conversion first — spec uses integer bands (Rule 4).
     s: int = int(score)
 
-    if s >= TIER_1_MIN:
+    if s >= TIER_1_ELITE_MIN:
         return TierResult(
-            tier="TIER_1_CORE",
-            tier_label="TIER 1 CORE",
+            tier="T1_ELITE",
+            tier_label="T1 ELITE",
             action="LEAPS ELIGIBLE",
-            action_tone=_TONE_TIER1,
+            action_tone=_TONE_T1_ELITE,
             score_band="85-100",
-            band_min=TIER_1_MIN,
+            band_min=TIER_1_ELITE_MIN,
             band_max=100,
-            target_size_min=2.0,
-            target_size_max=5.0,
+            target_size_min=5.0,
+            target_size_max=10.0,
             leaps_eligible=True,
             adds_permitted=True,
         )
 
-    if s >= GREY_ZONE_MIN:
+    if s >= TIER_1_MIN:
         return TierResult(
-            tier="GREY_ZONE",
-            tier_label="GREY ZONE",
-            action="3-AI CONSENSUS REQUIRED",
-            action_tone=_TONE_GREY,
-            score_band="78-84",
-            band_min=GREY_ZONE_MIN,
+            tier="T1",
+            tier_label="T1",
+            action="CORE POSITION",
+            action_tone=_TONE_T1,
+            score_band="80-84",
+            band_min=TIER_1_MIN,
             band_max=84,
-            target_size_min=1.5,
-            target_size_max=2.0,
+            target_size_min=2.0,
+            target_size_max=4.0,
             leaps_eligible=False,
             adds_permitted=True,
         )
 
     if s >= TIER_2_MIN:
         return TierResult(
-            tier="TIER_2",
-            tier_label="TIER 2",
+            tier="T2",
+            tier_label="T2",
             action="GTC ADDS PERMITTED",
             action_tone=_TONE_TIER2,
-            score_band="70-77",
+            score_band="70-79",
             band_min=TIER_2_MIN,
-            band_max=77,
+            band_max=79,
             target_size_min=0.5,
             target_size_max=1.5,
             leaps_eligible=False,
@@ -129,28 +129,28 @@ def classify_tier(score: float) -> TierResult:
 
     if s >= TIER_3_MIN:
         return TierResult(
-            tier="TIER_3",
-            tier_label="TIER 3",
+            tier="T3",
+            tier_label="T3",
             action="SMALL POSITION ONLY",
             action_tone=_TONE_TIER3,
-            score_band="55-69",
+            score_band="50-69",
             band_min=TIER_3_MIN,
             band_max=69,
-            target_size_min=0.25,
+            target_size_min=0.0,
             target_size_max=0.5,
             leaps_eligible=False,
             adds_permitted=True,
         )
 
-    # score < 55 → WATCHLIST
+    # score < 50 → BELOW_GATE
     return TierResult(
-        tier="WATCHLIST",
-        tier_label="WATCHLIST",
+        tier="BELOW_GATE",
+        tier_label="BELOW GATE",
         action="NO NEW CAPITAL",
-        action_tone=_TONE_WATCHLIST,
-        score_band="0-54",
+        action_tone=_TONE_BELOW_GATE,
+        score_band="0-49",
         band_min=0,
-        band_max=54,
+        band_max=49,
         target_size_min=0.0,
         target_size_max=0.0,
         leaps_eligible=False,

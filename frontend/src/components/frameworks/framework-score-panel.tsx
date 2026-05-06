@@ -20,17 +20,17 @@ import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/fram
 /** Number of score-bar segments for the full 100-pt scale. */
 const SCORE_BAR_SEGMENTS = 10;
 
-/** Inclusive lower bounds for Framework 3 / Score Action Map bands (v7.3.4). */
-const ACTION_TIER1_MIN = 85;       // >= 85  → CORE / LEAPS ELIGIBLE
-const ACTION_GREY_ZONE_MIN = 78;   // 78-84  → GREY ZONE
-const ACTION_TIER2_MIN = 70;       // 70-77  → GTC ADDS PERMITTED
-const ACTION_TIER3_MIN = 55;       // 55-69  → SMALL POSITION ONLY
-                                   // < 55   → WATCHLIST
+/** Inclusive lower bounds for Framework 3 / Score Action Map bands (v7.3.5). */
+const ACTION_T1_ELITE_MIN = 85;    // >= 85  → T1 ELITE / LEAPS ELIGIBLE
+const ACTION_T1_MIN = 80;          // 80-84  → T1 CORE
+const ACTION_TIER2_MIN = 70;       // 70-79  → GTC ADDS PERMITTED
+const ACTION_TIER3_MIN = 50;       // 50-69  → SMALL POSITION ONLY
+                                   // < 50   → BELOW GATE
 
 /** CSS tone class for each action_tone string from the backend. */
 const ACTION_TONE_CLASS: Record<string, string> = {
   'tone-green': 'is-green',
-  'tone-purple': 'is-purple',
+  'tone-teal': 'is-teal',
   'tone-blue': 'is-blue',
   'tone-yellow': 'is-yellow',
   'tone-red': 'is-red',
@@ -108,13 +108,9 @@ export function FrameworkScorePanel({
   // F9 override, F5 fundamental, F8 insider) own their own polling cadence.
   // When any of them returns a different value than the last render, we
   // invalidate the aggregate `framework-score` query so the backend
-  // recomputes raw_total / final_score / f5_capped with the fresh inputs.
-  // F8 is included so the panel re-renders when the insider flag toggles or
-  // the cap value changes (e.g. a new Form 4 just landed) even if no F1-F5
-  // score moved on its own. We compare against previously-seen values via a
-  // ref so we only fire on real changes (defined → different-defined), not
-  // on initial undefined → value transitions which would cause redundant
-  // fetches at mount.
+  // recomputes raw_total / final_score with the fresh inputs.
+  // F8 is included so the panel re-renders when the buying bonus changes
+  // (e.g. a new Form 4 purchase just landed) even if no F1-F5 score moved.
   const queryClient = useQueryClient();
   const prevFactorScoresRef = useRef<{
     f1: number | undefined;
@@ -122,16 +118,14 @@ export function FrameworkScorePanel({
     f3: number | undefined;
     f4: number | undefined;
     f5: number | undefined;
-    f8FlagActive: boolean | undefined;
-    f8Cap: number | null | undefined;
+    f8BuyingBonus: number | undefined;
   }>({
     f1: undefined,
     f2: undefined,
     f3: undefined,
     f4: undefined,
     f5: undefined,
-    f8FlagActive: undefined,
-    f8Cap: undefined,
+    f8BuyingBonus: undefined,
   });
 
   const f1Score = momentumData?.f1_score ?? undefined;
@@ -142,8 +136,7 @@ export function FrameworkScorePanel({
   // mismatch between the F1 summary row and the F4 detail panel.
   const f4Score = optionsFlowData?.f4_score ?? undefined;
   const f5Score = fundamentalData?.f5_score ?? undefined;
-  const f8FlagActive = framework8Data?.flag_active ?? undefined;
-  const f8Cap = framework8Data?.f5_cap ?? undefined;
+  const f8BuyingBonus = framework8Data?.buying_bonus ?? undefined;
 
   useEffect(() => {
     const prev = prevFactorScoresRef.current;
@@ -153,19 +146,15 @@ export function FrameworkScorePanel({
       f3: f3Score,
       f4: f4Score,
       f5: f5Score,
-      f8FlagActive,
-      f8Cap,
+      f8BuyingBonus,
     };
     const numericChanged = (['f1', 'f2', 'f3', 'f4', 'f5'] as const).some(
       (k) => prev[k] !== undefined && next[k] !== undefined && prev[k] !== next[k],
     );
     const f8Changed =
-      (prev.f8FlagActive !== undefined &&
-        next.f8FlagActive !== undefined &&
-        prev.f8FlagActive !== next.f8FlagActive) ||
-      (prev.f8Cap !== undefined &&
-        next.f8Cap !== undefined &&
-        prev.f8Cap !== next.f8Cap);
+      prev.f8BuyingBonus !== undefined &&
+      next.f8BuyingBonus !== undefined &&
+      prev.f8BuyingBonus !== next.f8BuyingBonus;
     prevFactorScoresRef.current = next;
     if (numericChanged || f8Changed) {
       void queryClient.invalidateQueries({ queryKey: ['framework-score', ticker] });
@@ -176,29 +165,18 @@ export function FrameworkScorePanel({
     f3Score,
     f4Score,
     f5Score,
-    f8FlagActive,
-    f8Cap,
+    f8BuyingBonus,
     ticker,
     queryClient,
   ]);
 
-  // Gate the regime modifier on F8 having resolved. The backend's
-  // `final_score` (and its `regimeAdjustedScore`) reflects the F8 cap on F5,
-  // so applying the regime modifier before F8 has reported its flag/cap can
-  // briefly show a number computed from the wrong (uncapped) base. Once
-  // `framework8Data` lands, both the table values and the headline reflect
-  // the same cap state and we can safely subtract the regime modifier.
+  // Gate the regime modifier on F8 having resolved so the headline reflects
+  // the buying bonus before we apply the regime modifier.
   const f8Ready = framework8Data !== undefined;
   const effectiveRegimeModifier = f8Ready ? regimeModifier : 0;
 
-  // Apply the F8 cap to the individual-hook F5 score so the summary table
-  // and the F5 detail card always show the same capped value.
-  const f5DisplayOverride =
-    f5Score !== undefined
-      ? f8FlagActive === true && typeof f8Cap === 'number'
-        ? Math.min(f5Score, f8Cap)
-        : f5Score
-      : undefined;
+  // F5 display uses the raw score — no cap applied.
+  const f5DisplayOverride = f5Score;
 
   const displayData = data
     ? buildDisplayFrameworkScore(
@@ -373,18 +351,6 @@ function FrameworkScoreContent({
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
-      {/* ── F8 stale / unavailable warnings ── */}
-      {data.f8_stale && (
-        <div className="atlas-fws-f8-warning" data-testid="fws-f8-stale-warning">
-          ⚠ Framework 8 data is stale. F5 cap value may be outdated. Refresh Framework 8 recommended.
-        </div>
-      )}
-      {!data.f8_available && (
-        <div className="atlas-fws-f8-warning" data-testid="fws-f8-unavailable-warning">
-          ⚠ Framework 8 unavailable. F5 cap could not be verified. Raw F5 score used. Verify insider flag manually.
-        </div>
-      )}
-
       {/* ── Hero ── */}
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
@@ -443,18 +409,16 @@ function FrameworkScoreContent({
             key={f.key}
             factor={f}
             f4GapBadge={f.key === 'f4' ? f4GapBadge : null}
-            f5CapApplied={f.key === 'f5' && data.f5_capped ? data.f5_cap_applied : null}
+            f5CapApplied={null}
             f5RawScore={f.key === 'f5' ? data.f5_raw_score : null}
-            f5CapSource={f.key === 'f5' ? data.f5_cap_source : null}
+            f5CapSource={null}
           />
         ))}
 
-        {/* ── F5 cap amber note ── */}
-        {data.f5_capped && data.f5_cap_applied != null && (
-          <div className="atlas-fws-f8-cap-note" data-testid="fws-f5-cap-note">
-            ⚠ F5 capped at {data.f5_cap_applied} by Framework 8 insider selling flag. Raw F5 was{' '}
-            {data.f5_raw_score}. Cap reduces contribution by{' '}
-            {(((data.f5_raw_score ?? 0) - data.f5_cap_applied) * 0.3).toFixed(2)} points.
+        {/* ── F8 clustered selling note ── */}
+        {data.f8_clustered_selling_note != null && (
+          <div className="atlas-fws-f8-note" data-testid="fws-f8-clustered-note">
+            ℹ {data.f8_clustered_selling_note}
           </div>
         )}
 
@@ -470,13 +434,10 @@ function FrameworkScoreContent({
           <span className="atlas-fws-calc-label">Raw total</span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
         </div>
-        {/* ── Raw total cap impact note ── */}
-        {data.f5_capped && data.f5_cap_applied != null && data.f5_raw_score != null && (
-          <div className="atlas-fws-f8-cap-note atlas-fws-f8-cap-note--calc" data-testid="fws-f5-cap-calc-note">
-            Note: F5 capped by Framework 8. Without cap: raw{' '}
-            {(data.raw_total + (data.f5_raw_score - data.f5_cap_applied) * 0.3).toFixed(2)}, pre-regime{' '}
-            {Math.round(data.raw_total + (data.f5_raw_score - data.f5_cap_applied) * 0.3)}. With cap: raw{' '}
-            {data.raw_total.toFixed(2)}, pre-regime {data.final_score}.
+        {/* ── F8 buying bonus note ── */}
+        {data.f8_buying_bonus > 0 && (
+          <div className="atlas-fws-f8-note" data-testid="fws-f8-bonus-note">
+            ⬆ F8 insider buying bonus: +{data.f8_buying_bonus} pts added to raw total.
           </div>
         )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
@@ -523,13 +484,9 @@ function buildDisplayFrameworkScore(
   const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));
   const [action, actionTone] = mapAction(adjustedScore);
 
-  // When the individual-hook F5 score is used as an override and F8 is active,
-  // update f5_raw_score to reflect the hook's value so the cap note is accurate.
+  // When the individual-hook F5 score is used as an override, keep f5_raw_score in sync.
   const f5Override = scoreOverrides['f5'];
-  const f5RawScore =
-    data.f5_capped && f5Override !== undefined && f5Override !== null
-      ? f5Override
-      : data.f5_raw_score;
+  const f5RawScore = f5Override !== undefined && f5Override !== null ? f5Override : data.f5_raw_score;
 
   return {
     ...data,
@@ -571,11 +528,11 @@ function calculateFinalScore(rawTotal: number): number {
 }
 
 function mapAction(finalScore: number): [string, string] {
-  if (finalScore >= ACTION_TIER1_MIN) {
-    return ['CORE / LEAPS ELIGIBLE', 'tone-green'];
+  if (finalScore >= ACTION_T1_ELITE_MIN) {
+    return ['T1 ELITE — LEAPS ELIGIBLE', 'tone-green'];
   }
-  if (finalScore >= ACTION_GREY_ZONE_MIN) {
-    return ['GREY ZONE', 'tone-purple'];
+  if (finalScore >= ACTION_T1_MIN) {
+    return ['T1 CORE', 'tone-teal'];
   }
   if (finalScore >= ACTION_TIER2_MIN) {
     return ['GTC ADDS PERMITTED', 'tone-blue'];
@@ -583,7 +540,7 @@ function mapAction(finalScore: number): [string, string] {
   if (finalScore >= ACTION_TIER3_MIN) {
     return ['SMALL POSITION ONLY', 'tone-yellow'];
   }
-  return ['WATCHLIST', 'tone-red'];
+  return ['BELOW GATE', 'tone-red'];
 }
 
 // ---------------------------------------------------------------------------

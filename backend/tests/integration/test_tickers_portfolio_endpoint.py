@@ -172,3 +172,52 @@ async def test_delete_ticker_returns_404_for_missing_id(
 
     response = await client.delete("/api/v1/tickers/999")
     assert response.status_code == 404
+
+
+# ── GET /tickers/beta/live ────────────────────────────────────────────────────
+
+
+async def test_live_beta_returns_200_with_beta_map(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """GET /tickers/beta/live returns 200 with {ticker: beta} dict."""
+    from unittest.mock import patch
+    from decimal import Decimal
+
+    tickers = [
+        _make_ticker(ticker_id=1, ticker="MU"),
+        _make_ticker(ticker_id=2, ticker="AAPL"),
+    ]
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = tickers
+    mock_session.execute = AsyncMock(return_value=result_mock)
+
+    with (
+        patch("atlas.api.v1.tickers.get_settings") as mock_settings,
+        patch("atlas.api.v1.tickers.MarketDataService") as mock_svc_cls,
+    ):
+        mock_settings.return_value.alphavantage_api_key = "av-key"
+        instance = mock_svc_cls.return_value
+        instance.fetch_live_betas = AsyncMock(
+            return_value={"MU": Decimal("1.919"), "AAPL": Decimal("1.23")}
+        )
+
+        response = await client.get("/api/v1/tickers/beta/live")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["MU"] == pytest.approx(1.919, rel=1e-3)
+    assert data["AAPL"] == pytest.approx(1.23, rel=1e-3)
+
+
+async def test_live_beta_returns_503_when_no_av_key(
+    client: AsyncClient, mock_session: AsyncMock
+) -> None:
+    """GET /tickers/beta/live returns 503 when ALPHAVANTAGE_API_KEY is not configured."""
+    from unittest.mock import patch
+
+    with patch("atlas.api.v1.tickers.get_settings") as mock_settings:
+        mock_settings.return_value.alphavantage_api_key = ""
+        response = await client.get("/api/v1/tickers/beta/live")
+
+    assert response.status_code == 503

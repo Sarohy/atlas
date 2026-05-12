@@ -513,3 +513,375 @@ class TestSyncTickers:
         assert t.previous_close == Decimal("148.0")
         assert t.beta is not None
         assert abs(float(t.beta) - 2.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# _fetch_alpha_vantage_beta
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAlphaVantageBeta:
+    """Tests for the Alpha Vantage OVERVIEW beta fetch helper."""
+
+    def _make_service(self, mock_client: AsyncMock) -> MarketDataService:
+        return MarketDataService(
+            api_key="polygon-key",
+            alphavantage_api_key="av-key",
+            session=AsyncMock(),
+            client=mock_client,
+        )
+
+    async def test_returns_beta_from_successful_response(self) -> None:
+        client = AsyncMock()
+        client.get = AsyncMock(
+            return_value=_http_ok({"Symbol": "MU", "Beta": "1.919"})
+        )
+        svc = self._make_service(client)
+
+        result = await svc._fetch_alpha_vantage_beta("MU")
+
+        assert result == Decimal("1.919")
+
+    async def test_returns_none_when_beta_field_missing(self) -> None:
+        client = AsyncMock()
+        client.get = AsyncMock(
+            return_value=_http_ok({"Symbol": "MU", "Name": "Micron Technology"})
+        )
+        svc = self._make_service(client)
+
+        result = await svc._fetch_alpha_vantage_beta("MU")
+
+        assert result is None
+
+    async def test_returns_none_when_beta_field_is_none_string(self) -> None:
+        client = AsyncMock()
+        client.get = AsyncMock(
+            return_value=_http_ok({"Symbol": "MU", "Beta": "None"})
+        )
+        svc = self._make_service(client)
+
+        result = await svc._fetch_alpha_vantage_beta("MU")
+
+        assert result is None
+
+    async def test_returns_none_on_http_error(self) -> None:
+        import httpx
+
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "429 Too Many Requests",
+                request=MagicMock(),
+                response=MagicMock(status_code=429),
+            )
+        )
+        svc = self._make_service(client)
+
+        result = await svc._fetch_alpha_vantage_beta("MU")
+
+        assert result is None
+
+    async def test_sends_correct_params(self) -> None:
+        client = AsyncMock()
+        client.get = AsyncMock(
+            return_value=_http_ok({"Beta": "1.5"})
+        )
+        svc = self._make_service(client)
+
+        await svc._fetch_alpha_vantage_beta("MU")
+
+        call_params = client.get.call_args.kwargs.get("params", {})
+        assert call_params.get("function") == "OVERVIEW"
+        assert call_params.get("symbol") == "MU"
+        assert call_params.get("apikey") == "av-key"
+
+    async def test_returns_none_when_no_av_key_configured(self) -> None:
+        client = AsyncMock()
+        svc = MarketDataService(
+            api_key="polygon-key",
+            alphavantage_api_key="",
+            session=AsyncMock(),
+            client=client,
+        )
+
+        result = await svc._fetch_alpha_vantage_beta("MU")
+
+        client.get.assert_not_called()
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# sync_tickers — Alpha Vantage as primary beta source
+# ---------------------------------------------------------------------------
+
+
+class TestSyncTickersAlphaVantageBeta:
+    async def test_uses_alpha_vantage_beta_when_available(self) -> None:
+        """AV beta is used as primary source; Polygon agg bars still fetched for SPY."""
+        ticker = _make_ticker(ticker="MU", shares=Decimal("5"))
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [ticker]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        snap_payload = {
+            "status": "OK",
+            "tickers": [
+                {
+                    "ticker": "MU",
+                    "day": {"c": 100.0},
+                    "prevDay": {"c": 98.0},
+                    "todaysChange": 2.0,
+                    "todaysChangePerc": 2.04,
+                }
+            ],
+        }
+
+        client = AsyncMock()
+
+        async def mock_get(url: str, **kwargs: object) -> MagicMock:  # type: ignore[return]
+            params = kwargs.get("params", {})
+            if "alphavantage" in url:
+                return _http_ok({"Beta": "1.919"})
+            if "snapshot" in url:
+                return _http_ok(snap_payload)
+            # Agg endpoint returns empty (AV beta takes priority)
+            return _http_ok({"status": "OK", "results": []})
+
+        client.get = mock_get
+
+        svc = MarketDataService(
+            api_key="polygon-key",
+            alphavantage_api_key="av-key",
+            session=session,
+            client=client,
+        )
+        result = await svc.sync_tickers()
+
+        assert len(result) == 1
+        assert result[0].beta == Decimal("1.919")
+
+    async def test_falls_back_to_computed_beta_when_av_unavailable(self) -> None:
+        """Falls back to Polygon-computed beta when AV returns None."""
+        ticker = _make_ticker(ticker="MU", shares=Decimal("5"))
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [ticker]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        spy_ret_seq = [0.01, -0.005, 0.02, -0.01, 0.015, -0.008] * 10
+        spy_closes = [100.0]
+        ticker_closes = [100.0]
+        for r in spy_ret_seq:
+            spy_closes.append(spy_closes[-1] * (1.0 + r))
+            ticker_closes.append(ticker_closes[-1] * (1.0 + 2.0 * r))
+
+        spy_bars = _make_agg_bars(spy_closes)
+        ticker_agg_bars = _make_agg_bars(ticker_closes)
+
+        snap_payload = {
+            "status": "OK",
+            "tickers": [{"ticker": "MU", "day": {"c": 100.0}, "prevDay": {"c": 98.0}}],
+        }
+
+        client = AsyncMock()
+
+        async def mock_get(url: str, **kwargs: object) -> MagicMock:  # type: ignore[return]
+            if "alphavantage" in url:
+                return _http_ok({"Beta": "None"})
+            if "snapshot" in url:
+                return _http_ok(snap_payload)
+            if "SPY" in url:
+                return _http_ok({"status": "OK", "results": spy_bars})
+            return _http_ok({"status": "OK", "results": ticker_agg_bars})
+
+        client.get = mock_get
+
+        svc = MarketDataService(
+            api_key="polygon-key",
+            alphavantage_api_key="av-key",
+            session=session,
+            client=client,
+        )
+        result = await svc.sync_tickers()
+
+        assert len(result) == 1
+        assert result[0].beta is not None
+        assert abs(float(result[0].beta) - 2.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# _fetch_yahoo_beta
+# ---------------------------------------------------------------------------
+
+
+class TestFetchYahooBeta:
+    """Tests for the Yahoo Finance beta fetch helper."""
+
+    def _make_service(self) -> MarketDataService:
+        return MarketDataService(
+            api_key="polygon-key",
+            alphavantage_api_key="av-key",
+            session=AsyncMock(),
+            client=AsyncMock(),
+        )
+
+    async def test_returns_beta_from_yahoo_finance(self) -> None:
+        from unittest.mock import patch
+
+        svc = self._make_service()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"beta": 2.97}
+            result = await svc._fetch_yahoo_beta("SNDK")
+
+        assert result == Decimal("2.97")
+
+    async def test_returns_none_when_beta_missing_from_info(self) -> None:
+        from unittest.mock import patch
+
+        svc = self._make_service()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"symbol": "SNDK"}
+            result = await svc._fetch_yahoo_beta("SNDK")
+
+        assert result is None
+
+    async def test_returns_none_when_beta_value_is_none(self) -> None:
+        from unittest.mock import patch
+
+        svc = self._make_service()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"beta": None}
+            result = await svc._fetch_yahoo_beta("SNDK")
+
+        assert result is None
+
+    async def test_returns_none_on_exception(self) -> None:
+        from unittest.mock import patch
+
+        svc = self._make_service()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.side_effect = Exception("network error")
+            result = await svc._fetch_yahoo_beta("SNDK")
+
+        assert result is None
+
+    async def test_passes_correct_ticker_symbol(self) -> None:
+        from unittest.mock import patch
+
+        svc = self._make_service()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"beta": 1.5}
+            await svc._fetch_yahoo_beta("AAPL")
+            mock_yf.assert_called_once_with("AAPL")
+
+
+# ---------------------------------------------------------------------------
+# sync_tickers — Yahoo Finance as secondary beta source (AV → YF → Polygon)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncTickersYahooBetaFallback:
+    async def test_uses_yahoo_beta_when_av_returns_none(self) -> None:
+        """When AV returns None, Yahoo Finance beta is used before Polygon OLS."""
+        from unittest.mock import patch
+
+        ticker = _make_ticker(ticker="SNDK", shares=Decimal("40"))
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [ticker]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        snap_payload = {
+            "status": "OK",
+            "tickers": [
+                {
+                    "ticker": "SNDK",
+                    "day": {"c": 1547.56},
+                    "prevDay": {"c": 1591.64},
+                    "todaysChange": -44.08,
+                    "todaysChangePerc": -2.77,
+                }
+            ],
+        }
+
+        client = AsyncMock()
+
+        async def mock_get(url: str, **kwargs: object) -> MagicMock:  # type: ignore[return]
+            if "alphavantage" in url:
+                return _http_ok({"Beta": "None"})  # AV has no data for SNDK
+            if "snapshot" in url:
+                return _http_ok(snap_payload)
+            return _http_ok({"status": "OK", "results": []})
+
+        client.get = mock_get
+
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"beta": 2.97}
+            svc = MarketDataService(
+                api_key="polygon-key",
+                alphavantage_api_key="av-key",
+                session=session,
+                client=client,
+            )
+            result = await svc.sync_tickers()
+
+        assert len(result) == 1
+        assert result[0].beta == Decimal("2.97")
+
+    async def test_falls_back_to_polygon_ols_when_av_and_yahoo_both_none(self) -> None:
+        """When both AV and Yahoo return None, Polygon OLS regression is used."""
+        from unittest.mock import patch
+
+        ticker = _make_ticker(ticker="SNDK", shares=Decimal("40"))
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [ticker]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        spy_ret_seq = [0.01, -0.005, 0.02, -0.01, 0.015, -0.008] * 10
+        spy_closes = [100.0]
+        ticker_closes = [100.0]
+        for r in spy_ret_seq:
+            spy_closes.append(spy_closes[-1] * (1.0 + r))
+            ticker_closes.append(ticker_closes[-1] * (1.0 + 2.0 * r))
+
+        spy_bars = _make_agg_bars(spy_closes)
+        ticker_agg_bars = _make_agg_bars(ticker_closes)
+
+        snap_payload = {
+            "status": "OK",
+            "tickers": [{"ticker": "SNDK", "day": {"c": 1547.56}, "prevDay": {"c": 1591.64}}],
+        }
+
+        client = AsyncMock()
+
+        async def mock_get(url: str, **kwargs: object) -> MagicMock:  # type: ignore[return]
+            if "alphavantage" in url:
+                return _http_ok({"Beta": "None"})
+            if "snapshot" in url:
+                return _http_ok(snap_payload)
+            if "SPY" in url:
+                return _http_ok({"status": "OK", "results": spy_bars})
+            return _http_ok({"status": "OK", "results": ticker_agg_bars})
+
+        client.get = mock_get
+
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {}  # Yahoo also has no beta
+            svc = MarketDataService(
+                api_key="polygon-key",
+                alphavantage_api_key="av-key",
+                session=session,
+                client=client,
+            )
+            result = await svc.sync_tickers()
+
+        assert len(result) == 1
+        assert result[0].beta is not None
+        assert abs(float(result[0].beta) - 2.0) < 0.01
+

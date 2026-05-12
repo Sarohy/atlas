@@ -264,7 +264,7 @@ def _calculate_modifier(
     - CRISIS HALT (1):  geo irrelevant → always −10
     - CAUTION (2):      ESCALATING → −7  (ONLY special case)
                         all others → −5
-    - None (default):   → −5 (safe default)
+    - None (default):   → +5 (CLEAR — market data unavailable)
 
     Pure function — no I/O.
     """
@@ -279,7 +279,7 @@ def _calculate_modifier(
         if geopolitical_state == "ESCALATING":
             return _RULE2_SCORE_DELTA_ESCALATING  # −7
         return _RULE2_SCORE_DELTA           # −5
-    return _RULE2_SCORE_DELTA               # safe default −5
+    return _RULE4_SCORE_DELTA               # CLEAR default when market data unavailable
 
 
 def _get_brent_label(brent: float) -> str:
@@ -342,9 +342,9 @@ def _get_cash_floor(rule: int | None) -> float:
         2: _CASH_FLOOR_RULE2,  # CAUTION: 20%
         3: _CASH_FLOOR_RULE3,  # SOFT CAUTION: 15%
         4: _CASH_FLOOR_RULE4,  # CLEAR: 8%
-        None: _CASH_FLOOR_RULE2,  # default: 20%
+        None: _CASH_FLOOR_RULE4,  # CLEAR default when market data unavailable
     }
-    return floors.get(rule, _CASH_FLOOR_RULE2)
+    return floors.get(rule, _CASH_FLOOR_RULE4)
 
 
 def _count_consecutive_brent_closes_below_95(closes: list[float]) -> int:
@@ -365,7 +365,7 @@ def _rule_name(rule: int | None) -> str:
         2: "CAUTION",
         3: "SOFT CAUTION",
         4: "CLEAR",
-        None: "CAUTION",  # default regime
+        None: "CLEAR",  # CLEAR default when market data unavailable
     }[rule]
 
 

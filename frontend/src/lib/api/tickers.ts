@@ -42,3 +42,10 @@ export function searchTickers(query: string): Promise<TickerSearchResult[]> {
     z.array(tickerSearchResultSchema),
   );
 }
+
+/** Fetch live Beta values from Alpha Vantage for all portfolio tickers.
+ *  Returns a ``{ticker: beta | null}`` map — always fresh, never from DB.
+ */
+export function fetchLiveBeta(): Promise<Record<string, number | null>> {
+  return apiFetch('/api/v1/tickers/beta/live', z.record(z.string(), z.number().nullable()));
+}

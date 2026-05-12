@@ -7,6 +7,7 @@ import {
   updateTicker,
   deleteTicker,
   searchTickers,
+  fetchLiveBeta,
 } from '@/lib/api/tickers';
 
 vi.mock('@/lib/api/client');
@@ -76,5 +77,14 @@ describe('searchTickers', () => {
     const results = await searchTickers('apple');
     expect(results).toHaveLength(1);
     expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/tickers/search?q=apple', expect.anything());
+  });
+});
+
+describe('fetchLiveBeta', () => {
+  it('calls GET /api/v1/tickers/beta/live and returns the beta map', async () => {
+    mockApiFetch.mockResolvedValueOnce({ AAPL: 1.23, MU: 1.919 });
+    const result = await fetchLiveBeta();
+    expect(result).toEqual({ AAPL: 1.23, MU: 1.919 });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/tickers/beta/live', expect.anything());
   });
 });

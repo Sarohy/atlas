@@ -281,15 +281,15 @@ class TestDetermineRule:
 
     # ── Default fallback ───────────────────────────────────────────────────
 
-    def test_default_fallback_is_caution_when_no_conditions_met(self) -> None:
-        """When no regime conditions match, default is CAUTION (rule 2)."""
+    def test_default_fallback_is_clear_when_no_conditions_met(self) -> None:
+        """When no regime conditions match, default is CLEAR (rule 4)."""
         rule = _determine_rule(
             brent_price=85.0,
             vix_value=20.0,
             brent_consecutive_below_95_count=0,
             geopolitical_state="NONE",
         )
-        assert rule == 2
+        assert rule == 4
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +363,8 @@ class TestCalculateModifier:
 
     # ── None rule — safe default ───────────────────────────────────────────
 
-    def test_none_rule_returns_minus5_as_safe_default(self) -> None:
-        assert _calculate_modifier(rule=None, geopolitical_state="NONE") == -5
+    def test_none_rule_returns_plus5_as_clear_default(self) -> None:
+        assert _calculate_modifier(rule=None, geopolitical_state="NONE") == 5
 
 
 # ---------------------------------------------------------------------------
@@ -493,8 +493,8 @@ class TestGetCashFloor:
     def test_crisis_halt_floor_is_30_percent(self) -> None:
         assert _get_cash_floor(1) == pytest.approx(0.30)
 
-    def test_none_rule_defaults_to_20_percent(self) -> None:
-        assert _get_cash_floor(None) == pytest.approx(0.20)
+    def test_none_rule_defaults_to_8_percent_clear(self) -> None:
+        assert _get_cash_floor(None) == pytest.approx(0.08)
 
 
 # ---------------------------------------------------------------------------
@@ -748,9 +748,9 @@ class TestDeriveEffectiveRegime:
     def test_rule4_gives_clear(self) -> None:
         assert _derive_effective_regime(automatic_rule=4, geopolitical_state="RESOLVED") == "CLEAR"
 
-    def test_none_gives_caution(self) -> None:
-        """rule=None defaults to CAUTION (market-only architecture)."""
-        assert _derive_effective_regime(automatic_rule=None, geopolitical_state="NONE") == "CAUTION"
+    def test_none_gives_clear(self) -> None:
+        """rule=None defaults to CLEAR when market data unavailable."""
+        assert _derive_effective_regime(automatic_rule=None, geopolitical_state="NONE") == "CLEAR"
 
 
 # ---------------------------------------------------------------------------

@@ -120,17 +120,27 @@ class PtUpsideIndicator(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     current_price: float | None = Field(None, description="Latest closing price (USD).")
-    consensus_pt: float | None = Field(None, description="Consensus 12-month price target (USD).")
+    highest_pt: float | None = Field(
+        None,
+        description=(
+            "Highest individual analyst 12-month price target (USD) from Yahoo Finance. "
+            "This value drives the price-vs-target formula (Priority 5)."
+        ),
+    )
+    consensus_pt: float | None = Field(
+        None,
+        description="Consensus (mean) 12-month price target (USD) — kept for display only.",
+    )
     upside_pct: float | None = Field(
         None,
         description=(
-            "Traditional upside from current price to PT. "
+            "Upside from current price to highest_pt (falls back to consensus_pt). "
             "Positive = stock below target (upside), negative = above."
         ),
     )
     price_vs_target: float | None = Field(
         None,
-        description="(current_price - consensus_pt) / consensus_pt, rounded to 4 dp.",
+        description="(current_price - highest_pt) / highest_pt, rounded to 4 dp.",
     )
     price_vs_target_band: str | None = Field(
         None,

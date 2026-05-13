@@ -72,6 +72,7 @@ async def sync_watchlist_market_data(
     async with httpx.AsyncClient() as client:
         service = MarketDataService(
             api_key=settings.polygon_api_key,
+            alphavantage_api_key=settings.alphavantage_api_key,
             session=session,
             client=client,
         )

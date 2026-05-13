@@ -20,6 +20,7 @@ dependencies = [
     "structlog>=25.5.0",
     "uvicorn[standard]>=0.44.0",
     "types-pytz>=2026.1.1.20260408",
+    "yfinance>=0.2.50",
 ]
 
 [build-system]

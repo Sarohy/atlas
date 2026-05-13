@@ -28,6 +28,7 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 import httpx
+import yfinance as yf
 
 from atlas.schemas.analyst import (
     AnalystCoverageIndicator,
@@ -454,22 +455,33 @@ def _build_analyst_response(
     current_price: float | None,
     has_coverage: bool,
     ratings_data: dict[str, int] | None,
+    *,
+    highest_pt: float | None = None,
 ) -> AnalystResponse:
-    """Assemble an AnalystResponse from raw fetched values using v7.3.4 scoring."""
+    """Assemble an AnalystResponse from raw fetched values using v7.3.4 scoring.
+
+    ``highest_pt`` (Yahoo Finance ``targetHighPrice``) is the primary driver of the
+    price-vs-target formula (Priority 5).  ``consensus_pt`` (mean target) is retained
+    for display only.  When ``highest_pt`` is None the formula falls back to
+    ``consensus_pt`` to preserve the original behaviour.
+    """
     total_analysts = strong_buy + buy + hold + sell + strong_sell
     effective_count = (
         (num_analysts if num_analysts is not None else total_analysts) if has_coverage else 0
     )
+
+    # The PT used in the formula: highest_pt preferred, falls back to consensus_pt.
+    formula_pt: float | None = highest_pt if highest_pt is not None else consensus_pt
 
     # Buy percentage for consensus label derivation
     buy_pct: float | None = None
     if has_coverage and total_analysts > 0:
         buy_pct = (strong_buy + buy) / total_analysts * 100.0
 
-    # Traditional upside (for display)
+    # Upside — computed against formula_pt for display consistency with the formula.
     upside_pct: float | None = None
-    if current_price and consensus_pt and current_price > 0 and consensus_pt > 0:
-        upside_pct = (consensus_pt - current_price) / current_price * 100.0
+    if current_price and formula_pt and current_price > 0 and formula_pt > 0:
+        upside_pct = (formula_pt - current_price) / current_price * 100.0
 
     # PT revision data
     pt_raises = ratings_data["raises"] if ratings_data is not None else 0
@@ -490,7 +502,7 @@ def _build_analyst_response(
     override_applied = False
     override_reason: str | None = None
 
-    if has_coverage and current_price and consensus_pt and current_price > 0 and consensus_pt > 0:
+    if has_coverage and current_price and formula_pt and current_price > 0 and formula_pt > 0:
         sell_count = sell + strong_sell
         consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
         # Use "HOLD" when no distribution data (zero total analysts)
@@ -503,7 +515,7 @@ def _build_analyst_response(
             pt_revision_direction=direction_label if direction_label != "NO_DATA" else "NO_CHANGE",
             net_upgrades_30d=raw_net_upgrades,
             current_price=current_price,
-            analyst_target=consensus_pt,
+            analyst_target=formula_pt,
             sell_count=sell_count,
         )
 
@@ -514,7 +526,7 @@ def _build_analyst_response(
         pvt_adj = fs.breakdown["price_vs_target_adjustment"]
         override_applied = fs.override_applied
         override_reason = fs.override_reason
-    elif has_coverage and (not current_price or not consensus_pt):
+    elif has_coverage and (not current_price or not formula_pt):
         # Coverage exists but no price data — score without price adjustment
         sell_count = sell + strong_sell
         consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
@@ -594,6 +606,7 @@ def _build_analyst_response(
 
     pt_upside_indicator = PtUpsideIndicator(
         current_price=current_price,
+        highest_pt=highest_pt,
         consensus_pt=consensus_pt,
         upside_pct=upside_pct,
         price_vs_target=pvt,
@@ -654,17 +667,29 @@ class AnalystService:
         *,
         overview_task: asyncio.Task[dict[str, Any]] | None = None,
     ) -> AnalystResponse:
-        """Fetch data from Benzinga + Polygon and return an AnalystResponse."""
+        """Fetch data from Benzinga + Polygon + Yahoo Finance and return an AnalystResponse.
+
+        Highest analyst PT (``targetHighPrice``) is fetched from yfinance concurrently
+        with the other network calls and used as the primary input to the price-vs-target
+        formula (Priority 5).  Consensus PT (mean) is kept for display only.
+        """
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            consensus_data = await self._fetch_consensus(client, ticker)
+            consensus_task = asyncio.create_task(self._fetch_consensus(client, ticker))
+            ratings_task = asyncio.create_task(self._fetch_recent_ratings(client, ticker))
+            price_task = asyncio.create_task(self._fetch_current_price(client, ticker))
+            yf_pt_task = asyncio.create_task(self._fetch_yfinance_pt(ticker))
+
+            consensus_data = await consensus_task
             if not consensus_data:
                 consensus_data = await self._fetch_consensus_av(
                     client, ticker, overview_task=overview_task
                 )
             if not consensus_data:
                 consensus_data = await self._fetch_consensus_fmp(client, ticker)
-            ratings_data = await self._fetch_recent_ratings(client, ticker)
-            current_price = await self._fetch_current_price(client, ticker)
+
+            ratings_data = await ratings_task
+            current_price = await price_task
+            highest_pt = await yf_pt_task
 
         has_coverage = bool(consensus_data)
         strong_buy = consensus_data.get("strong_buy", 0)
@@ -684,10 +709,38 @@ class AnalystService:
             strong_sell=strong_sell,
             num_analysts=num_analysts,
             consensus_pt=consensus_pt,
+            highest_pt=highest_pt,
             current_price=current_price,
             has_coverage=has_coverage,
             ratings_data=ratings_data,
         )
+
+    # ------------------------------------------------------------------
+    # Yahoo Finance — highest analyst price target
+    # ------------------------------------------------------------------
+
+    async def _fetch_yfinance_pt(self, ticker: str) -> float | None:
+        """Return the highest individual analyst price target from Yahoo Finance.
+
+        yfinance's ``targetHighPrice`` is the 12-month high end of the analyst PT
+        range, sourced from Yahoo Finance quotes pages.  Runs the synchronous
+        yfinance call in a thread-pool executor to avoid blocking the event loop.
+        Returns None on any error or missing value.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            raw = await loop.run_in_executor(
+                None,
+                lambda: yf.Ticker(ticker).info.get("targetHighPrice"),
+            )
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
 
     # ------------------------------------------------------------------
     # Benzinga — consensus ratings

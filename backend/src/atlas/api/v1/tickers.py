@@ -86,7 +86,43 @@ async def sync_market_data(
     async with httpx.AsyncClient() as client:
         service = MarketDataService(
             api_key=settings.polygon_api_key,
+            alphavantage_api_key=settings.alphavantage_api_key,
             session=session,
             client=client,
         )
         return await service.sync_tickers()  # type: ignore[return-value]
+
+
+@router.get("/beta/live", response_model=dict[str, float | None])
+async def get_live_beta(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, float | None]:
+    """Fetch live Beta for every portfolio ticker directly from Alpha Vantage.
+
+    Returns a ``{ticker: beta}`` map — values are floats or null when AV has
+    no usable beta for a symbol.  Always fetches fresh; never reads from DB.
+    Returns 503 when ``ALPHAVANTAGE_API_KEY`` is not configured.
+    """
+    settings = get_settings()
+    if not settings.alphavantage_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Live beta is unavailable: ALPHAVANTAGE_API_KEY is not configured.",
+        )
+
+    from atlas.services.ticker_service import TickerService  # local import avoids circular
+
+    ticker_service = TickerService(session)
+    tickers = await ticker_service.list_tickers()
+    symbols = [t.ticker for t in tickers]
+
+    async with httpx.AsyncClient() as client:
+        service = MarketDataService(
+            api_key=settings.polygon_api_key,
+            alphavantage_api_key=settings.alphavantage_api_key,
+            session=session,
+            client=client,
+        )
+        beta_map = await service.fetch_live_betas(symbols)
+
+    return {k: float(v) if v is not None else None for k, v in beta_map.items()}

@@ -805,3 +805,163 @@ class TestFetchCurrentPrice:
         result = await service._fetch_current_price(client, "AAOI")
         assert result is None
         client.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _fetch_yfinance_pt — highest analyst price target from yfinance
+# ---------------------------------------------------------------------------
+
+
+class TestFetchYfinancePt:
+    """Tests for the yfinance highest PT helper."""
+
+    async def test_returns_highest_pt_from_yfinance(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"targetHighPrice": 1000.0, "targetMeanPrice": 573.0}
+            result = await service._fetch_yfinance_pt("MU")
+
+        assert result == 1000.0
+
+    async def test_returns_none_when_target_high_price_missing(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"targetMeanPrice": 573.0}
+            result = await service._fetch_yfinance_pt("MU")
+
+        assert result is None
+
+    async def test_returns_none_when_target_high_price_is_none(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"targetHighPrice": None}
+            result = await service._fetch_yfinance_pt("MU")
+
+        assert result is None
+
+    async def test_returns_none_on_exception(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.side_effect = Exception("network error")
+            result = await service._fetch_yfinance_pt("MU")
+
+        assert result is None
+
+    async def test_passes_correct_ticker_symbol(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {"targetHighPrice": 800.0}
+            await service._fetch_yfinance_pt("MU")
+            mock_yf.assert_called_once_with("MU")
+
+
+# ---------------------------------------------------------------------------
+# _build_analyst_response — highest_pt used in formula
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAnalystResponseHighestPt:
+    """Verify highest_pt drives the pvt formula, consensus_pt is kept for display."""
+
+    def test_pvt_uses_highest_pt_not_consensus_pt(self) -> None:
+        """When highest_pt differs from consensus_pt, formula uses highest_pt."""
+        response = _build_analyst_response(
+            ticker="MU",
+            strong_buy=20,
+            buy=18,
+            hold=2,
+            sell=0,
+            strong_sell=0,
+            num_analysts=40,
+            consensus_pt=573.90,   # mean — kept for display only
+            highest_pt=1000.0,     # drives formula
+            current_price=766.58,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=3, lowers=0, net_upgrades=2),
+        )
+        # pvt = (766.58 - 1000.0) / 1000.0 = -0.2334 → 20%+ below target → +10 adj
+        assert response.pt_upside.highest_pt == 1000.0
+        assert response.pt_upside.consensus_pt == pytest.approx(573.90, abs=0.01)
+        assert response.pt_upside.adjustment == 10
+
+    def test_upside_pct_uses_highest_pt_when_available(self) -> None:
+        """upside_pct on the indicator reflects the highest_pt."""
+        response = _build_analyst_response(
+            ticker="MU",
+            strong_buy=20,
+            buy=18,
+            hold=2,
+            sell=0,
+            strong_sell=0,
+            num_analysts=40,
+            consensus_pt=573.90,
+            highest_pt=1000.0,
+            current_price=766.58,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
+        )
+        # upside_pct = (1000 - 766.58) / 766.58 * 100 ≈ +30.45
+        assert response.pt_upside.upside_pct is not None
+        assert response.pt_upside.upside_pct == pytest.approx(30.45, abs=0.1)
+
+    def test_hard_cap_triggered_when_above_highest_pt_by_more_than_20pct(self) -> None:
+        """Hard cap fires when price > 120% of highest_pt."""
+        response = _build_analyst_response(
+            ticker="XX",
+            strong_buy=15,
+            buy=10,
+            hold=0,
+            sell=0,
+            strong_sell=0,
+            num_analysts=25,
+            consensus_pt=100.0,
+            highest_pt=100.0,
+            current_price=125.0,   # 25% above → cap at 45
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
+        )
+        assert response.f3_score is not None
+        assert response.f3_score <= 45
+
+    def test_falls_back_to_consensus_pt_when_highest_pt_is_none(self) -> None:
+        """If yfinance highest PT unavailable, formula uses consensus_pt (old behaviour)."""
+        r_with = _build_analyst_response(
+            ticker="MU",
+            strong_buy=20,
+            buy=18,
+            hold=2,
+            sell=0,
+            strong_sell=0,
+            num_analysts=40,
+            consensus_pt=460.0,
+            highest_pt=None,    # not available
+            current_price=400.0,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=1, lowers=0, net_upgrades=1),
+        )
+        r_without = _build_analyst_response(
+            ticker="MU",
+            strong_buy=20,
+            buy=18,
+            hold=2,
+            sell=0,
+            strong_sell=0,
+            num_analysts=40,
+            consensus_pt=460.0,
+            highest_pt=None,
+            current_price=400.0,
+            has_coverage=True,
+            ratings_data=_make_ratings(raises=1, lowers=0, net_upgrades=1),
+        )
+        assert r_with.f3_score == r_without.f3_score
+

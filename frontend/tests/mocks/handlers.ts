@@ -51,7 +51,10 @@ export const handlers = [
   http.delete(`${BASE}/api/v1/tickers/:id`, () => {
     return new HttpResponse(null, { status: 204 });
   }),
-
+  // ── Live beta ────────────────────────────────────────────────────────────────
+  http.get(`${BASE}/api/v1/tickers/beta/live`, () => {
+    return HttpResponse.json({ AAPL: 1.23 });
+  }),
   // ── Ticker search ─────────────────────────────────────────────────────────────
   http.get(`${BASE}/api/v1/tickers/search`, () => {
     return HttpResponse.json([

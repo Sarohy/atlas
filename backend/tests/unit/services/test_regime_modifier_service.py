@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,6 +19,11 @@ from atlas.services.regime_modifier_service import (
     _get_trigger_logic,
     _get_vix_label,
     _parse_yahoo_vix_payload,
+    get_geo_flag_current,
+    load_geo_flag_from_db,
+    persist_geo_flag_to_db,
+    reset_geo_flag_current,
+    set_geo_flag_current,
 )
 
 # ---------------------------------------------------------------------------
@@ -281,15 +287,15 @@ class TestDetermineRule:
 
     # ── Default fallback ───────────────────────────────────────────────────
 
-    def test_default_fallback_is_caution_when_no_conditions_met(self) -> None:
-        """When no regime conditions match, default is CAUTION (rule 2)."""
+    def test_default_fallback_is_clear_when_no_conditions_met(self) -> None:
+        """When no regime conditions match, default is CLEAR (rule 4)."""
         rule = _determine_rule(
             brent_price=85.0,
             vix_value=20.0,
             brent_consecutive_below_95_count=0,
             geopolitical_state="NONE",
         )
-        assert rule == 2
+        assert rule == 4
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +369,8 @@ class TestCalculateModifier:
 
     # ── None rule — safe default ───────────────────────────────────────────
 
-    def test_none_rule_returns_minus5_as_safe_default(self) -> None:
-        assert _calculate_modifier(rule=None, geopolitical_state="NONE") == -5
+    def test_none_rule_returns_plus5_as_clear_default(self) -> None:
+        assert _calculate_modifier(rule=None, geopolitical_state="NONE") == 5
 
 
 # ---------------------------------------------------------------------------
@@ -493,8 +499,8 @@ class TestGetCashFloor:
     def test_crisis_halt_floor_is_30_percent(self) -> None:
         assert _get_cash_floor(1) == pytest.approx(0.30)
 
-    def test_none_rule_defaults_to_20_percent(self) -> None:
-        assert _get_cash_floor(None) == pytest.approx(0.20)
+    def test_none_rule_defaults_to_8_percent_clear(self) -> None:
+        assert _get_cash_floor(None) == pytest.approx(0.08)
 
 
 # ---------------------------------------------------------------------------
@@ -748,9 +754,9 @@ class TestDeriveEffectiveRegime:
     def test_rule4_gives_clear(self) -> None:
         assert _derive_effective_regime(automatic_rule=4, geopolitical_state="RESOLVED") == "CLEAR"
 
-    def test_none_gives_caution(self) -> None:
-        """rule=None defaults to CAUTION (market-only architecture)."""
-        assert _derive_effective_regime(automatic_rule=None, geopolitical_state="NONE") == "CAUTION"
+    def test_none_gives_clear(self) -> None:
+        """rule=None defaults to CLEAR when market data unavailable."""
+        assert _derive_effective_regime(automatic_rule=None, geopolitical_state="NONE") == "CLEAR"
 
 
 # ---------------------------------------------------------------------------
@@ -958,3 +964,107 @@ class TestParseYahooVixPayload:
         result = _parse_yahoo_vix_payload(payload)
         assert isinstance(result, float)
         assert result == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# Geo flag DB persistence helpers
+# ---------------------------------------------------------------------------
+
+
+class TestGeoFlagInMemoryStore:
+    """Verify the in-memory geo flag store getters/setters."""
+
+    def setup_method(self) -> None:
+        reset_geo_flag_current()
+
+    def teardown_method(self) -> None:
+        reset_geo_flag_current()
+
+    def test_default_is_none(self) -> None:
+        assert get_geo_flag_current() == "NONE"
+
+    def test_set_and_get(self) -> None:
+        set_geo_flag_current("RESOLVED")
+        assert get_geo_flag_current() == "RESOLVED"
+
+    def test_set_normalises_to_upper(self) -> None:
+        set_geo_flag_current("escalating")
+        assert get_geo_flag_current() == "ESCALATING"
+
+    def test_set_strips_whitespace(self) -> None:
+        set_geo_flag_current("  ACTIVE_RISK  ")
+        assert get_geo_flag_current() == "ACTIVE_RISK"
+
+    def test_reset_returns_to_none(self) -> None:
+        set_geo_flag_current("RESOLVED")
+        reset_geo_flag_current()
+        assert get_geo_flag_current() == "NONE"
+
+
+class TestPersistGeoFlagToDb:
+    """persist_geo_flag_to_db upserts the regime_geo_state key in atlas_config."""
+
+    async def test_executes_upsert_and_commits(self) -> None:
+        session = AsyncMock()
+        await persist_geo_flag_to_db("RESOLVED", session)
+        session.execute.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    async def test_persists_none_value(self) -> None:
+        session = AsyncMock()
+        await persist_geo_flag_to_db("NONE", session)
+        session.execute.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    async def test_upsert_statement_contains_correct_key(self) -> None:
+        """The executed statement should reference the regime_geo_state key."""
+        session = AsyncMock()
+        await persist_geo_flag_to_db("ESCALATING", session)
+        call_args = session.execute.call_args
+        stmt = call_args[0][0]
+        # The compiled statement should reference the key
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "regime_geo_state" in compiled
+        assert "ESCALATING" in compiled
+
+
+class TestLoadGeoFlagFromDb:
+    """load_geo_flag_from_db reads atlas_config and updates in-memory store."""
+
+    def setup_method(self) -> None:
+        reset_geo_flag_current()
+
+    def teardown_method(self) -> None:
+        reset_geo_flag_current()
+
+    async def test_loads_persisted_value_into_memory(self) -> None:
+        from atlas.models.atlas_config import AtlasConfig
+
+        row = MagicMock(spec=AtlasConfig)
+        row.value = "DE_ESCALATING"
+        session = AsyncMock()
+        session.get.return_value = row
+
+        await load_geo_flag_from_db(session)
+
+        assert get_geo_flag_current() == "DE_ESCALATING"
+
+    async def test_does_not_change_memory_when_no_db_row(self) -> None:
+        session = AsyncMock()
+        session.get.return_value = None
+
+        set_geo_flag_current("ACTIVE_RISK")
+        await load_geo_flag_from_db(session)
+
+        # Memory should be unchanged when there is no persisted row
+        assert get_geo_flag_current() == "ACTIVE_RISK"
+
+    async def test_queries_correct_key(self) -> None:
+        from atlas.models.atlas_config import AtlasConfig
+
+        session = AsyncMock()
+        session.get.return_value = None
+
+        await load_geo_flag_from_db(session)
+
+        session.get.assert_awaited_once_with(AtlasConfig, "regime_geo_state")

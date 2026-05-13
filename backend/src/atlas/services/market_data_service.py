@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 import httpx
+import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,10 +36,13 @@ _POLYGON_SNAPSHOT_URL = (
     "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
 )
 
-# Daily aggregate bars — used exclusively for the rolling beta calculation.
+# Daily aggregate bars — used exclusively for the rolling beta fallback calculation.
 _POLYGON_AGGS_URL = (
     "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
 )
+
+# Alpha Vantage company overview — primary source of Beta value.
+_ALPHA_VANTAGE_OVERVIEW_URL = "https://www.alphavantage.co/query"
 
 # ---------------------------------------------------------------------------
 # Named constants
@@ -66,21 +70,44 @@ _MIN_VALID_PRICE = Decimal("0")
 
 
 class MarketDataService:
-    """Fetches real-time quotes and computes 1-year rolling beta via Polygon."""
+    """Fetches real-time quotes and beta (Alpha Vantage primary, Polygon fallback)."""
 
     def __init__(
         self,
         api_key: str,
         session: AsyncSession,
         client: httpx.AsyncClient,
+        alphavantage_api_key: str = "",
     ) -> None:
         self._api_key = api_key
+        self._alphavantage_api_key = alphavantage_api_key
         self._session = session
         self._client = client
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def fetch_live_betas(self, symbols: list[str]) -> dict[str, Decimal | None]:
+        """Fetch live beta for each symbol; return {ticker: beta | None}.
+
+        Priority chain (first non-None wins):
+          1. Alpha Vantage OVERVIEW (fast, no rate-limit cost for paid key)
+          2. Yahoo Finance (yfinance) — free, 5-year monthly methodology
+
+        Polygon OLS regression is NOT run here (reserved for scheduled syncs).
+        """
+        semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+        async def _one(symbol: str) -> tuple[str, Decimal | None]:
+            async with semaphore:
+                beta = await self._fetch_alpha_vantage_beta(symbol)
+                if beta is None:
+                    beta = await self._fetch_yahoo_beta(symbol)
+            return symbol, beta
+
+        pairs = await asyncio.gather(*(_one(s) for s in symbols))
+        return dict(pairs)
 
     async def sync_tickers(self) -> list[Ticker]:
         """Fetch live quotes + beta for all tickers; persist to DB.
@@ -102,24 +129,44 @@ class MarketDataService:
         # Phase 1: batch snapshot — ⌈N/250⌉ requests cover all tickers.
         snapshot_map = await self._fetch_snapshot_batch([t.ticker for t in tickers])
 
-        # Phase 2: SPY daily bars first (needed by every beta calculation).
-        spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
-        spy_close_by_ts = self._build_close_map(spy_bars)
-
-        # Fetch each ticker's agg bars concurrently (rate-limited by semaphore).
+        # Phase 2: Beta — AV primary → Yahoo Finance secondary.
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
 
-        async def _fetch_one(t: Ticker) -> tuple[Ticker, list[dict]]:  # type: ignore[type-arg]
+        async def _fetch_best_beta(t: Ticker) -> tuple[Ticker, Decimal | None]:
             async with semaphore:
-                bars = await self._fetch_raw_bars(t.ticker, from_date, to_date)
-            return t, bars
+                beta = await self._fetch_alpha_vantage_beta(t.ticker)
+                if beta is None:
+                    beta = await self._fetch_yahoo_beta(t.ticker)
+            return t, beta
 
-        agg_pairs = await asyncio.gather(*(_fetch_one(t) for t in tickers))
+        beta_pairs = await asyncio.gather(*(_fetch_best_beta(t) for t in tickers))
+        av_beta_map: dict[str, Decimal | None] = {
+            t.ticker: beta for t, beta in beta_pairs
+        }
+
+        # Phase 3: Polygon OLS regression — only for tickers where both AV and Yahoo returned None.
+        missing = [t for t in tickers if av_beta_map.get(t.ticker) is None]
+        spy_close_by_ts: dict[int, float] = {}
+        agg_bar_map: dict[str, list[dict]] = {}  # type: ignore[type-arg]
+        if missing:
+            spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
+            spy_close_by_ts = self._build_close_map(spy_bars)
+
+            async def _fetch_agg(t: Ticker) -> tuple[Ticker, list[dict]]:  # type: ignore[type-arg]
+                async with semaphore:
+                    bars = await self._fetch_raw_bars(t.ticker, from_date, to_date)
+                return t, bars
+
+            agg_pairs = await asyncio.gather(*(_fetch_agg(t) for t in missing))
+            agg_bar_map = {t.ticker: bars for t, bars in agg_pairs}
 
         now = datetime.now(tz=timezone.utc)
-        for ticker, agg_bars in agg_pairs:
+        for ticker in tickers:
             snap = snapshot_map.get(ticker.ticker)
-            beta = self._compute_beta(agg_bars, spy_close_by_ts)
+            agg_bars = agg_bar_map.get(ticker.ticker, [])
+            beta = av_beta_map.get(ticker.ticker) or self._compute_beta(
+                agg_bars, spy_close_by_ts
+            )
             self._apply_market_data(ticker, snap, agg_bars, beta, now)
 
         return tickers
@@ -142,22 +189,44 @@ class MarketDataService:
 
         snapshot_map = await self._fetch_snapshot_batch([i.ticker for i in items])
 
-        spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
-        spy_close_by_ts = self._build_close_map(spy_bars)
-
+        # Beta — AV primary → Yahoo Finance secondary.
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
 
-        async def _fetch_one(item: WatchlistItem) -> tuple[WatchlistItem, list[dict]]:  # type: ignore[type-arg]
+        async def _fetch_best_beta_wl(item: WatchlistItem) -> tuple[WatchlistItem, Decimal | None]:
             async with semaphore:
-                bars = await self._fetch_raw_bars(item.ticker, from_date, to_date)
-            return item, bars
+                beta = await self._fetch_alpha_vantage_beta(item.ticker)
+                if beta is None:
+                    beta = await self._fetch_yahoo_beta(item.ticker)
+            return item, beta
 
-        agg_pairs = await asyncio.gather(*(_fetch_one(i) for i in items))
+        av_beta_pairs_wl = await asyncio.gather(*(_fetch_best_beta_wl(i) for i in items))
+        av_beta_map_wl: dict[str, Decimal | None] = {
+            i.ticker: beta for i, beta in av_beta_pairs_wl
+        }
+
+        # Polygon OLS regression — only for items where both AV and Yahoo returned None.
+        missing_wl = [i for i in items if av_beta_map_wl.get(i.ticker) is None]
+        spy_close_by_ts_wl: dict[int, float] = {}
+        agg_bar_map_wl: dict[str, list[dict]] = {}  # type: ignore[type-arg]
+        if missing_wl:
+            spy_bars = await self._fetch_raw_bars(_BENCHMARK_TICKER, from_date, to_date)
+            spy_close_by_ts_wl = self._build_close_map(spy_bars)
+
+            async def _fetch_agg_wl(item: WatchlistItem) -> tuple[WatchlistItem, list[dict]]:  # type: ignore[type-arg]
+                async with semaphore:
+                    bars = await self._fetch_raw_bars(item.ticker, from_date, to_date)
+                return item, bars
+
+            agg_pairs_wl = await asyncio.gather(*(_fetch_agg_wl(i) for i in missing_wl))
+            agg_bar_map_wl = {i.ticker: bars for i, bars in agg_pairs_wl}
 
         now = datetime.now(tz=timezone.utc)
-        for item, agg_bars in agg_pairs:
+        for item in items:
             snap = snapshot_map.get(item.ticker)
-            beta = self._compute_beta(agg_bars, spy_close_by_ts)
+            agg_bars = agg_bar_map_wl.get(item.ticker, [])
+            beta = av_beta_map_wl.get(item.ticker) or self._compute_beta(
+                agg_bars, spy_close_by_ts_wl
+            )
             self._apply_watchlist_market_data(item, snap, agg_bars, beta, now)
 
         return items
@@ -165,6 +234,63 @@ class MarketDataService:
     # ------------------------------------------------------------------
     # Private helpers — network
     # ------------------------------------------------------------------
+
+    async def _fetch_alpha_vantage_beta(self, ticker: str) -> Decimal | None:
+        """Return the Beta field from Alpha Vantage OVERVIEW for a single ticker.
+
+        Returns None when:
+          - no alphavantage_api_key is configured,
+          - the Beta field is absent or equals "None",
+          - any HTTP error occurs.
+        """
+        if not self._alphavantage_api_key:
+            return None
+        try:
+            response = await self._client.get(
+                _ALPHA_VANTAGE_OVERVIEW_URL,
+                params={
+                    "function": "OVERVIEW",
+                    "symbol": ticker,
+                    "apikey": self._alphavantage_api_key,
+                },
+                timeout=15.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            return None
+
+        payload: dict = response.json()  # type: ignore[type-arg]
+        raw = payload.get("Beta")
+        if raw is None or str(raw).strip().lower() in ("none", "n/a", "-", ""):
+            return None
+        try:
+            return Decimal(str(raw))
+        except InvalidOperation:
+            return None
+
+    async def _fetch_yahoo_beta(self, ticker: str) -> Decimal | None:
+        """Return the beta from Yahoo Finance (yfinance) for a single ticker.
+
+        yfinance computes beta using a 5-year monthly regression vs S&P 500 —
+        the same methodology shown on Yahoo Finance quotes pages.
+
+        Runs the synchronous yfinance call in a thread-pool executor to avoid
+        blocking the event loop.  Returns None on any error or missing value.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            raw = await loop.run_in_executor(
+                None,
+                lambda: yf.Ticker(ticker).info.get("beta"),
+            )
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        try:
+            return Decimal(str(raw))
+        except InvalidOperation:
+            return None
 
     async def _fetch_snapshot_batch(
         self, symbols: list[str]

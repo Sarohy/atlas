@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LogoutButton } from '@/components/auth/logout-button';
 import { useAdjustCash, usePortfolioSummary } from '@/lib/hooks/use-portfolio-summary';
-import { useTickers, useSyncTickers } from '@/lib/hooks/use-tickers';
+import { useTickers, useSyncTickers, useLiveBeta } from '@/lib/hooks/use-tickers';
 import { useClusters } from '@/lib/hooks/use-clusters';
 import type { PortfolioSummary } from '@/lib/schemas/portfolio-summary';
 import type { ClusterResponse } from '@/lib/schemas/cluster';
@@ -159,6 +159,7 @@ export function AtlasNavigation({ labels }: { labels: readonly PortfolioNavItem[
 export function AtlasHoldingsRail() {
   const { data: tickers, isLoading } = useTickers();
   const { data: clusters } = useClusters();
+  const { data: liveBetaMap } = useLiveBeta();
 
   /** Map of cluster id → hex colour string, e.g. '#4a90d9'. */
   const clusterColorMap = new Map((clusters ?? []).map((c) => [c.id, c.color]));
@@ -186,7 +187,9 @@ export function AtlasHoldingsRail() {
     if (totalValue > 0 && t.position_value != null) {
       parts.push(`${((t.position_value / totalValue) * 100).toFixed(1)}%`);
     }
-    if (t.beta != null) parts.push(`\u03b2${t.beta.toFixed(2)}`);
+    // Prefer live AV beta; fall back to DB-cached beta.
+    const beta = liveBetaMap?.[t.ticker] ?? t.beta;
+    if (beta != null) parts.push(`\u03b2${beta.toFixed(2)}`);
     return parts.join(' \u00b7 ') || t.company_name;
   }
 

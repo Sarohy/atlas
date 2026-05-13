@@ -77,16 +77,86 @@ _YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/
 _YAHOO_BRENT_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/BZ%3DF"
 _YAHOO_HEADERS: Final[dict[str, str]] = {"User-Agent": "Mozilla/5.0"}
 
-# Polygon breadth ticker (requires plan upgrade — kept for future use).
-_POLYGON_BREADTH_TICKER: Final[str] = "I:S5O"  # S&P 500 % above 50-DMA index
-
-# Polygon aggs base URL (breadth only).
+# Polygon aggs base URL (used for individual ticker breadth computation).
 _POLYGON_AGGS_URL: Final[str] = (
     "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
 )
 
 # Unusual Whales API base URL.
 _UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
+
+# Signal 4 breadth — computed from individual S&P 500 components via Polygon aggs.
+# Sessions to fetch per ticker: 50-day SMA window + 20 history days + 10 buffer.
+_BREADTH_FETCH_SESSIONS: Final[int] = 80
+# Max concurrent Polygon aggs requests during breadth computation.
+_BREADTH_SEMAPHORE_SIZE: Final[int] = 50
+# Minimum tickers with valid data required to emit a breadth series.
+_BREADTH_MIN_VALID_TICKERS: Final[int] = 150
+
+# S&P 500 component tickers used for Signal 4 breadth computation.
+# Updated periodically; small staleness (a few rebalancings) is acceptable for
+# a breadth indicator — 480 of 503 correct tickers is more than sufficient.
+# fmt: off
+_SP500_TICKERS: Final[tuple[str, ...]] = (
+    "A", "AAL", "AAPL", "ABBV", "ABNB", "ABT", "ACGL", "ACN", "ADBE", "ADI",
+    "ADM", "ADP", "ADSK", "AEE", "AEP", "AES", "AFL", "AIG", "AIZ", "AJG",
+    "AKAM", "ALB", "ALGN", "ALL", "ALLE", "AMAT", "AMCR", "AMD", "AME", "AMGN",
+    "AMP", "AMT", "AMZN", "ANET", "ANSS", "AON", "AOS", "APD", "APH", "APTV",
+    "ARE", "ATO", "AVB", "AVGO", "AVY", "AWK", "AXON", "AXP", "AZO",
+    "BAC", "BALL", "BAX", "BBWI", "BDX", "BEN", "BG", "BIIB", "BK", "BKNG",
+    "BKR", "BLK", "BMY", "BR", "BRK.B", "BSX", "BX",
+    "CAG", "CAH", "CARR", "CAT", "CB", "CBOE", "CBRE", "CCI", "CCL", "CDW",
+    "CE", "CEG", "CF", "CFG", "CHD", "CHRW", "CHTR", "CI", "CINF", "CL",
+    "CLX", "CMA", "CMCSA", "CME", "CMG", "CMI", "CMS", "CNC", "CNP", "COF",
+    "COO", "COP", "COST", "CPAY", "CPB", "CPRT", "CRM", "CRWD", "CSCO",
+    "CTAS", "CTLT", "CTSH", "CTVA", "CVS", "CVX",
+    "D", "DAL", "DD", "DE", "DECK", "DELL", "DFS", "DG", "DGX", "DHI",
+    "DHR", "DIS", "DLTR", "DOC", "DOV", "DOW", "DPZ", "DRI", "DTE", "DUK",
+    "DVA", "DVN", "DXCM",
+    "EA", "EBAY", "ECL", "ED", "EFX", "EG", "EIX", "EL", "ELV", "EMN",
+    "EMR", "ENPH", "EOG", "EPAM", "EQIX", "EQR", "EQT", "ES", "ESS", "ETN",
+    "ETR", "ETSY", "EVRG", "EW", "EXC", "EXPD", "EXPE",
+    "F", "FAST", "FCX", "FDS", "FDX", "FE", "FFIV", "FI", "FICO", "FITB",
+    "FMC", "FOX", "FOXA", "FRT", "FSLR", "FTNT",
+    "GD", "GDDY", "GE", "GEHC", "GEN", "GILD", "GIS", "GL", "GLW", "GM",
+    "GOOG", "GOOGL", "GPC", "GPN", "GRMN", "GS", "GWW",
+    "HAL", "HAS", "HBAN", "HCA", "HD", "HES", "HIG", "HII", "HLT", "HOLX",
+    "HON", "HPE", "HPQ", "HRL", "HSIC", "HST", "HSY", "HUBB", "HUM",
+    "IBM", "ICE", "IDXX", "IEX", "IFF", "ILMN", "INCY", "INTC", "INTU",
+    "INVH", "IP", "IPG", "IQV", "IR", "IRM", "ISRG", "IT", "ITW",
+    "JBHT", "JCI", "JKHY", "JNJ", "JNPR", "JPM",
+    "K", "KDP", "KEY", "KEYS", "KHC", "KIM", "KLAC", "KMB", "KMI", "KMX",
+    "KO", "KR",
+    "L", "LDOS", "LEN", "LH", "LHX", "LIN", "LKQ", "LLY", "LMT", "LNT",
+    "LOW", "LRCX", "LULU", "LUV", "LVS", "LW", "LYB", "LYV",
+    "MA", "MAA", "MAR", "MAS", "MCD", "MCHP", "MCK", "MCO", "MDLZ", "MDT",
+    "MET", "META", "MGM", "MHK", "MKC", "MKTX", "MLM", "MMC", "MMM",
+    "MNST", "MO", "MOH", "MPC", "MPWR", "MRK", "MRNA", "MS", "MSCI",
+    "MSFT", "MSI", "MTB", "MTCH", "MU",
+    "NEE", "NEM", "NET", "NFLX", "NI", "NKE", "NOW", "NRG", "NSC", "NTAP",
+    "NTRS", "NUE", "NVDA", "NVR", "NWS", "NWSA", "NXPI",
+    "O", "ODFL", "OMC", "ON", "ORCL", "ORLY", "OTIS", "OXY",
+    "PANW", "PARA", "PAYC", "PAYX", "PCAR", "PCG", "PEG", "PEP", "PFE",
+    "PFG", "PG", "PGR", "PH", "PHM", "PKG", "PLD", "PLTR", "PM", "PNC",
+    "PNR", "PNW", "POOL", "PPG", "PPL", "PSA", "PSX", "PTC", "PWR", "PYPL",
+    "QCOM",
+    "RCL", "REG", "REGN", "RF", "RJF", "RL", "RMD", "ROK", "ROL", "ROP",
+    "ROST", "RSG", "RTX",
+    "SBAC", "SBUX", "SCHW", "SHW", "SJM", "SLB", "SNA", "SNPS", "SO",
+    "SPG", "SPGI", "SRE", "STE", "STLD", "STX", "STZ", "SWK", "SYF",
+    "SYK", "SYY",
+    "T", "TAP", "TDG", "TDY", "TEL", "TER", "TFC", "TGT", "TJX", "TMO",
+    "TMUS", "TPR", "TRGP", "TRMB", "TROW", "TRV", "TSCO", "TSLA", "TSN",
+    "TTWO", "TT", "TXN", "TXT", "TYL",
+    "UAL", "UBER", "UDR", "UHS", "ULTA", "UNH", "UNP", "UPS", "URI", "USB",
+    "V", "VICI", "VLO", "VLTO", "VMC", "VRSK", "VRSN", "VRTX", "VST", "VZ",
+    "WAB", "WAT", "WBD", "WDC", "WELL", "WFC", "WHR", "WM", "WMB", "WMT",
+    "WRB", "WST", "WTW", "WY", "WYNN",
+    "XEL", "XOM", "XYL",
+    "YUM",
+    "ZBH", "ZBRA", "ZTS",
+)
+# fmt: on
 
 # ---------------------------------------------------------------------------
 # Module-level state
@@ -427,6 +497,126 @@ async def _fetch_uw_pcr_from_options_volume(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Signal 4 breadth helpers — computed from S&P 500 components via Polygon
+# ---------------------------------------------------------------------------
+
+
+def _compute_breadth_pct_series(
+    ticker_closes_map: dict[str, list[float]],
+    history_days: int = 20,
+    sma_window: int = 50,
+) -> list[float]:
+    """Compute % of tickers above their sma_window-day SMA for each of the last history_days sessions.
+
+    Pure function — no I/O. ``ticker_closes_map`` values must be ascending chronological closes.
+    A ticker is skipped for a given day when it has fewer than ``sma_window + 1`` closes
+    available up to that day. Returns a list of length ≤ ``history_days`` (oldest to newest).
+    Values are rounded to 2 decimal places.
+    """
+    breadth_series: list[float] = []
+    for day_offset in range(history_days - 1, -1, -1):
+        above = 0
+        total = 0
+        for closes in ticker_closes_map.values():
+            close_idx = len(closes) - 1 - day_offset
+            sma_start = close_idx - sma_window
+            if sma_start < 0 or close_idx < 0:
+                continue
+            sma = sum(closes[sma_start:close_idx]) / sma_window
+            if closes[close_idx] > sma:
+                above += 1
+            total += 1
+        if total > 0:
+            breadth_series.append(round(above / total * 100.0, 2))
+    return breadth_series
+
+
+async def _fetch_single_ticker_closes(
+    ticker: str,
+    num_sessions: int,
+    api_key: str,
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+) -> tuple[str, list[float] | None]:
+    """Fetch the last ``num_sessions`` daily closes for one ticker from Polygon aggs.
+
+    Returns ``(ticker, closes)`` where closes is ascending chronological, or
+    ``(ticker, None)`` on any HTTP or parsing error. The semaphore limits
+    concurrent requests.
+    """
+    async with semaphore:
+        to_date = date.today()
+        from_date = to_date - timedelta(days=num_sessions * 2)  # buffer for weekends/holidays
+        url = _POLYGON_AGGS_URL.format(
+            ticker=ticker,
+            from_date=from_date.isoformat(),
+            to_date=to_date.isoformat(),
+        )
+        try:
+            resp = await client.get(
+                url,
+                params={"apiKey": api_key, "sort": "asc", "limit": num_sessions + 30},
+                timeout=15.0,
+            )
+            if resp.status_code != 200:
+                return ticker, None
+            results = resp.json().get("results") or []
+            closes = [float(b["c"]) for b in results if "c" in b]
+            return ticker, closes if closes else None
+        except Exception:
+            return ticker, None
+
+
+async def _fetch_sp500_breadth_series(
+    polygon_api_key: str,
+    client: httpx.AsyncClient,
+) -> list[float] | None:
+    """Compute S&P 500 breadth time series: % of components above 50-DMA per session.
+
+    Fetches the last ``_BREADTH_FETCH_SESSIONS`` daily closes for each ticker in
+    ``_SP500_TICKERS`` in parallel (bounded by ``_BREADTH_SEMAPHORE_SIZE`` concurrent
+    requests), then calls ``_compute_breadth_pct_series`` to produce a breadth %
+    time series suitable for ``_check_signal4_breadth``.
+
+    Returns a list of length ``_BREADTH_LOOKBACK_DAYS``, or None when fewer than
+    ``_BREADTH_MIN_VALID_TICKERS`` tickers return usable data.
+    """
+    semaphore = asyncio.Semaphore(_BREADTH_SEMAPHORE_SIZE)
+    tasks = [
+        _fetch_single_ticker_closes(t, _BREADTH_FETCH_SESSIONS, polygon_api_key, client, semaphore)
+        for t in _SP500_TICKERS
+    ]
+    raw: list[tuple[str, list[float] | None] | BaseException] = list(
+        await asyncio.gather(*tasks, return_exceptions=True)
+    )
+
+    ticker_closes_map: dict[str, list[float]] = {}
+    for item in raw:
+        if isinstance(item, BaseException):
+            continue
+        ticker, closes = item  # type: ignore[misc]
+        if closes is not None and len(closes) >= 51:  # minimum for a single 50-DMA value
+            ticker_closes_map[ticker] = closes
+
+    if len(ticker_closes_map) < _BREADTH_MIN_VALID_TICKERS:
+        logger.warning(
+            "Breadth: insufficient ticker data for S4 computation",
+            extra={
+                "valid_tickers": len(ticker_closes_map),
+                "required": _BREADTH_MIN_VALID_TICKERS,
+            },
+        )
+        return None
+
+    series = _compute_breadth_pct_series(
+        ticker_closes_map,
+        history_days=_BREADTH_LOOKBACK_DAYS,
+        sma_window=50,
+    )
+    return series if len(series) >= 3 else None
+
+
 async def _fetch_polygon_closes(
     ticker: str,
     lookback_days: int,
@@ -503,15 +693,14 @@ async def evaluate_framework29(
     _client: httpx.AsyncClient = client if client is not None else httpx.AsyncClient()
 
     try:
-        # Parallel fetch: VIX (Yahoo), Brent (Yahoo), PCR (UW options vol), breadth (Polygon).
+        # Parallel fetch: VIX (Yahoo), Brent (Yahoo), PCR (UW options vol),
+        # breadth (Polygon — computed from S&P 500 components).
         vix_closes_raw, brent_closes_raw, pcr_raw, breadth_raw = (
             await asyncio.gather(
                 _fetch_yahoo_daily_closes(_YAHOO_VIX_URL, "3mo", _client),
                 _fetch_yahoo_daily_closes(_YAHOO_BRENT_URL, "1mo", _client),
                 _fetch_uw_pcr_from_options_volume(uw_api_key, _client),
-                _fetch_polygon_closes(
-                    _POLYGON_BREADTH_TICKER, _BREADTH_LOOKBACK_DAYS, polygon_api_key, _client
-                ),
+                _fetch_sp500_breadth_series(polygon_api_key, _client),
                 return_exceptions=True,
             )
         )
@@ -551,7 +740,7 @@ async def evaluate_framework29(
     s4_status, s4_vals = (
         _check_signal4_breadth(breadth_values)
         if breadth_values
-        else _unavailable("Breadth data unavailable (I:S5O)")
+        else _unavailable("Breadth data unavailable — Polygon component fetch returned no data")
     )
     s5_status, s5_vals = _check_signal5_geo_flag(geo_flag)
 

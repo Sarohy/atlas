@@ -10,6 +10,8 @@ from atlas.api.v1.router import router as v1_router
 from atlas.config import get_settings
 from atlas.core.logging import configure_logging, get_logger
 from atlas.core.scheduler import start_scheduler, stop_scheduler
+from atlas.db.session import AsyncSessionLocal
+from atlas.services.regime_modifier_service import load_geo_flag_from_db
 
 
 def _parse_allowed_origins(raw_allowed_origins: str) -> list[str]:
@@ -20,6 +22,13 @@ def _parse_allowed_origins(raw_allowed_origins: str) -> list[str]:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan — start and stop background services."""
+    # Restore the persisted geopolitical flag so Framework 29 S5 survives restarts.
+    try:
+        async with AsyncSessionLocal() as session:
+            await load_geo_flag_from_db(session)
+    except Exception:  # noqa: BLE001
+        pass  # DB may not be available in test environments
+
     await start_scheduler()
     yield
     await stop_scheduler()

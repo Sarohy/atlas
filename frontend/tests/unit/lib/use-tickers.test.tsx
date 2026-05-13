@@ -8,6 +8,7 @@ import {
   useCreateTicker,
   useUpdateTicker,
   useDeleteTicker,
+  useLiveBeta,
 } from '@/lib/hooks/use-tickers';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 
@@ -148,5 +149,22 @@ describe('useDeleteTicker', () => {
 
     const cached: TickerResponse[] = qc.getQueryData(['tickers', 'portfolio']) ?? [];
     expect(cached).toHaveLength(0);
+  });
+});
+
+describe('useLiveBeta', () => {
+  it('returns live beta map on success', async () => {
+    vi.mocked(tickersApi.fetchLiveBeta).mockResolvedValueOnce({ AAPL: 1.23, MU: 1.919 });
+    const { result } = renderHook(() => useLiveBeta(), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({ AAPL: 1.23, MU: 1.919 });
+  });
+
+  it('returns null values for tickers where AV has no beta', async () => {
+    vi.mocked(tickersApi.fetchLiveBeta).mockResolvedValueOnce({ AAPL: null, MU: 1.919 });
+    const { result } = renderHook(() => useLiveBeta(), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.AAPL).toBeNull();
+    expect(result.current.data?.MU).toBe(1.919);
   });
 });

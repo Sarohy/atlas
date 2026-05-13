@@ -8,6 +8,7 @@ import {
   updateTicker,
   deleteTicker,
   syncTickers,
+  fetchLiveBeta,
 } from '@/lib/api/tickers';
 import type { TickerResponse } from '@/lib/schemas/ticker';
 
@@ -67,5 +68,16 @@ export function useSyncTickers() {
     onSuccess: (updated: TickerResponse[]) => {
       qc.setQueryData<TickerResponse[]>(TICKERS_KEY, updated);
     },
+  });
+}
+
+/** Fetch live Beta values from Alpha Vantage for all portfolio tickers.
+ *  staleTime: 0 ensures a fresh fetch on every page load / component mount.
+ */
+export function useLiveBeta() {
+  return useQuery({
+    queryKey: ['tickers', 'beta', 'live'],
+    queryFn: fetchLiveBeta,
+    staleTime: 0,
   });
 }

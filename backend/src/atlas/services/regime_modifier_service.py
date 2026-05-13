@@ -8,8 +8,10 @@ from decimal import Decimal
 from typing import Any, Final
 
 import httpx
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from atlas.models.atlas_config import AtlasConfig
 from atlas.schemas.framework_score import FrameworkScoreResponse
 from atlas.schemas.regime_modifier import GeopoliticalState, RegimeModifierResponse
 from atlas.services.framework_score_service import FrameworkScoreService
@@ -264,7 +266,7 @@ def _calculate_modifier(
     - CRISIS HALT (1):  geo irrelevant → always −10
     - CAUTION (2):      ESCALATING → −7  (ONLY special case)
                         all others → −5
-    - None (default):   → −5 (safe default)
+    - None (default):   → +5 (CLEAR — market data unavailable)
 
     Pure function — no I/O.
     """
@@ -279,7 +281,7 @@ def _calculate_modifier(
         if geopolitical_state == "ESCALATING":
             return _RULE2_SCORE_DELTA_ESCALATING  # −7
         return _RULE2_SCORE_DELTA           # −5
-    return _RULE2_SCORE_DELTA               # safe default −5
+    return _RULE4_SCORE_DELTA               # CLEAR default when market data unavailable
 
 
 def _get_brent_label(brent: float) -> str:
@@ -342,9 +344,9 @@ def _get_cash_floor(rule: int | None) -> float:
         2: _CASH_FLOOR_RULE2,  # CAUTION: 20%
         3: _CASH_FLOOR_RULE3,  # SOFT CAUTION: 15%
         4: _CASH_FLOOR_RULE4,  # CLEAR: 8%
-        None: _CASH_FLOOR_RULE2,  # default: 20%
+        None: _CASH_FLOOR_RULE4,  # CLEAR default when market data unavailable
     }
-    return floors.get(rule, _CASH_FLOOR_RULE2)
+    return floors.get(rule, _CASH_FLOOR_RULE4)
 
 
 def _count_consecutive_brent_closes_below_95(closes: list[float]) -> int:
@@ -365,7 +367,7 @@ def _rule_name(rule: int | None) -> str:
         2: "CAUTION",
         3: "SOFT CAUTION",
         4: "CLEAR",
-        None: "CAUTION",  # default regime
+        None: "CLEAR",  # CLEAR default when market data unavailable
     }[rule]
 
 
@@ -489,6 +491,43 @@ def reset_geo_flag_current() -> None:
     """
     global _geo_flag_current
     _geo_flag_current = "NONE"
+
+
+# DB-backed key used to survive server restarts
+_GEO_FLAG_CONFIG_KEY: Final[str] = "regime_geo_state"
+
+
+async def persist_geo_flag_to_db(state: str, session: AsyncSession) -> None:
+    """Upsert the current geopolitical state to the atlas_config table.
+
+    Uses PostgreSQL INSERT … ON CONFLICT DO UPDATE so it works on both
+    first write and subsequent updates.
+    """
+    stmt = (
+        pg_insert(AtlasConfig)
+        .values(
+            key=_GEO_FLAG_CONFIG_KEY,
+            value=state,
+            description="Persisted regime modifier geopolitical state (survives restarts)",
+        )
+        .on_conflict_do_update(
+            index_elements=["key"],
+            set_={"value": state},
+        )
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def load_geo_flag_from_db(session: AsyncSession) -> None:
+    """Warm the in-memory store from the atlas_config table on startup.
+
+    Called once during the FastAPI lifespan so the geo flag survives
+    server restarts. No-ops when no row exists yet.
+    """
+    row = await session.get(AtlasConfig, _GEO_FLAG_CONFIG_KEY)
+    if row is not None:
+        set_geo_flag_current(row.value)
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +712,12 @@ class RegimeModifierService:
 
         # Persist the geo flag so Framework 4 can read it without needing
         # the frontend to re-send the value on the tranche-sizing request.
+        # Also write to DB so the flag survives server restarts.
         set_geo_flag_current(str(geopolitical_state))
+        try:
+            await persist_geo_flag_to_db(str(geopolitical_state), self._session)
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to persist geo flag to DB — in-memory value still set")
 
         return RegimeModifierResponse(
             ticker=ticker,

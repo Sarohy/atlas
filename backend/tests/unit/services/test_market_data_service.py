@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -505,7 +505,9 @@ class TestSyncTickers:
         client.get = mock_get
 
         svc = MarketDataService(api_key="key", session=session, client=client)
-        result = await svc.sync_tickers()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {}  # no yahoo beta → falls through to Polygon OLS
+            result = await svc.sync_tickers()
 
         assert len(result) == 1
         t = result[0]
@@ -705,7 +707,9 @@ class TestSyncTickersAlphaVantageBeta:
             session=session,
             client=client,
         )
-        result = await svc.sync_tickers()
+        with patch("atlas.services.market_data_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.info = {}  # no yahoo beta → falls through to Polygon OLS
+            result = await svc.sync_tickers()
 
         assert len(result) == 1
         assert result[0].beta is not None

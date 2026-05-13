@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,6 +19,11 @@ from atlas.services.regime_modifier_service import (
     _get_trigger_logic,
     _get_vix_label,
     _parse_yahoo_vix_payload,
+    get_geo_flag_current,
+    load_geo_flag_from_db,
+    persist_geo_flag_to_db,
+    reset_geo_flag_current,
+    set_geo_flag_current,
 )
 
 # ---------------------------------------------------------------------------
@@ -958,3 +964,107 @@ class TestParseYahooVixPayload:
         result = _parse_yahoo_vix_payload(payload)
         assert isinstance(result, float)
         assert result == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# Geo flag DB persistence helpers
+# ---------------------------------------------------------------------------
+
+
+class TestGeoFlagInMemoryStore:
+    """Verify the in-memory geo flag store getters/setters."""
+
+    def setup_method(self) -> None:
+        reset_geo_flag_current()
+
+    def teardown_method(self) -> None:
+        reset_geo_flag_current()
+
+    def test_default_is_none(self) -> None:
+        assert get_geo_flag_current() == "NONE"
+
+    def test_set_and_get(self) -> None:
+        set_geo_flag_current("RESOLVED")
+        assert get_geo_flag_current() == "RESOLVED"
+
+    def test_set_normalises_to_upper(self) -> None:
+        set_geo_flag_current("escalating")
+        assert get_geo_flag_current() == "ESCALATING"
+
+    def test_set_strips_whitespace(self) -> None:
+        set_geo_flag_current("  ACTIVE_RISK  ")
+        assert get_geo_flag_current() == "ACTIVE_RISK"
+
+    def test_reset_returns_to_none(self) -> None:
+        set_geo_flag_current("RESOLVED")
+        reset_geo_flag_current()
+        assert get_geo_flag_current() == "NONE"
+
+
+class TestPersistGeoFlagToDb:
+    """persist_geo_flag_to_db upserts the regime_geo_state key in atlas_config."""
+
+    async def test_executes_upsert_and_commits(self) -> None:
+        session = AsyncMock()
+        await persist_geo_flag_to_db("RESOLVED", session)
+        session.execute.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    async def test_persists_none_value(self) -> None:
+        session = AsyncMock()
+        await persist_geo_flag_to_db("NONE", session)
+        session.execute.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    async def test_upsert_statement_contains_correct_key(self) -> None:
+        """The executed statement should reference the regime_geo_state key."""
+        session = AsyncMock()
+        await persist_geo_flag_to_db("ESCALATING", session)
+        call_args = session.execute.call_args
+        stmt = call_args[0][0]
+        # The compiled statement should reference the key
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "regime_geo_state" in compiled
+        assert "ESCALATING" in compiled
+
+
+class TestLoadGeoFlagFromDb:
+    """load_geo_flag_from_db reads atlas_config and updates in-memory store."""
+
+    def setup_method(self) -> None:
+        reset_geo_flag_current()
+
+    def teardown_method(self) -> None:
+        reset_geo_flag_current()
+
+    async def test_loads_persisted_value_into_memory(self) -> None:
+        from atlas.models.atlas_config import AtlasConfig
+
+        row = MagicMock(spec=AtlasConfig)
+        row.value = "DE_ESCALATING"
+        session = AsyncMock()
+        session.get.return_value = row
+
+        await load_geo_flag_from_db(session)
+
+        assert get_geo_flag_current() == "DE_ESCALATING"
+
+    async def test_does_not_change_memory_when_no_db_row(self) -> None:
+        session = AsyncMock()
+        session.get.return_value = None
+
+        set_geo_flag_current("ACTIVE_RISK")
+        await load_geo_flag_from_db(session)
+
+        # Memory should be unchanged when there is no persisted row
+        assert get_geo_flag_current() == "ACTIVE_RISK"
+
+    async def test_queries_correct_key(self) -> None:
+        from atlas.models.atlas_config import AtlasConfig
+
+        session = AsyncMock()
+        session.get.return_value = None
+
+        await load_geo_flag_from_db(session)
+
+        session.get.assert_awaited_once_with(AtlasConfig, "regime_geo_state")

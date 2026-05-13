@@ -8,16 +8,19 @@ New signal spec (CLAUDE.md, updated 2026-04-29):
   1. VIX touches prior regime-high then declines ≥3 consecutive sessions
   2. Brent closes below $95 for 2 consecutive sessions
   3. Put/call ratio spikes above 1.3 then reverses downward
-  4. S&P 500 breadth (I:S5O) dips below 30% then recovers
+  4. S&P 500 breadth computed from Polygon components: dips below 30% then recovers
   5. Operator geo flag = RESOLVED
 """
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from atlas.schemas.framework29 import SignalStatus
 from atlas.services.framework29_service import (
+    _BREADTH_MIN_VALID_TICKERS,
     _BREADTH_WASHOUT_THRESHOLD,
     _BRENT_CONSECUTIVE_SESSIONS,
     _BRENT_HARD_THRESHOLD,
@@ -29,7 +32,9 @@ from atlas.services.framework29_service import (
     _check_signal3_pcr,
     _check_signal4_breadth,
     _check_signal5_geo_flag,
+    _compute_breadth_pct_series,
     _determine_gate_status,
+    _fetch_sp500_breadth_series,
     _find_regime_high,
 )
 
@@ -294,3 +299,153 @@ class TestDetermineGateStatus:
     def test_gate_message_mentions_confirmed_count(self) -> None:
         _, _, message = _determine_gate_status(confirmed=3, unavailable=1)
         assert "3" in message
+
+
+# ---------------------------------------------------------------------------
+# _compute_breadth_pct_series — pure function
+# ---------------------------------------------------------------------------
+
+
+class TestComputeBreadthPctSeries:
+    """Tests for the pure % above 50-DMA breadth computation."""
+
+    def _make_closes(self, sma_base: float, tail_value: float, history: int = 20) -> list[float]:
+        """Build closes where SMA is sma_base and recent closes are tail_value."""
+        return [sma_base] * 50 + [tail_value] * history
+
+    def test_all_above_50dma_returns_100_pct(self) -> None:
+        closes = self._make_closes(10.0, 12.0)
+        result = _compute_breadth_pct_series(
+            {"AAPL": closes, "MSFT": closes}, history_days=20, sma_window=50
+        )
+        assert len(result) == 20
+        assert all(abs(pct - 100.0) < 0.01 for pct in result)
+
+    def test_all_below_50dma_returns_0_pct(self) -> None:
+        closes = self._make_closes(10.0, 8.0)
+        result = _compute_breadth_pct_series(
+            {"AAPL": closes, "MSFT": closes}, history_days=20, sma_window=50
+        )
+        assert len(result) == 20
+        assert all(abs(pct) < 0.01 for pct in result)
+
+    def test_half_above_returns_50_pct(self) -> None:
+        above = self._make_closes(10.0, 12.0)
+        below = self._make_closes(10.0, 8.0)
+        result = _compute_breadth_pct_series(
+            {"AAPL": above, "MSFT": below}, history_days=20, sma_window=50
+        )
+        assert len(result) == 20
+        assert all(abs(pct - 50.0) < 0.01 for pct in result)
+
+    def test_returns_empty_when_no_valid_tickers(self) -> None:
+        # Only 30 bars — not enough for 50-DMA window
+        closes = [10.0] * 30
+        result = _compute_breadth_pct_series({"AAPL": closes}, history_days=20, sma_window=50)
+        assert result == []
+
+    def test_skips_ticker_with_insufficient_data(self) -> None:
+        good = self._make_closes(10.0, 12.0)
+        short = [10.0] * 30  # too short for 50-DMA
+        result = _compute_breadth_pct_series(
+            {"AAPL": good, "SHORT": short}, history_days=20, sma_window=50
+        )
+        assert len(result) == 20
+        # Only AAPL counted → 100%
+        assert all(abs(pct - 100.0) < 0.01 for pct in result)
+
+    def test_series_length_matches_history_days(self) -> None:
+        closes = [10.0] * 50 + [12.0] * 10
+        result = _compute_breadth_pct_series({"AAPL": closes}, history_days=10, sma_window=50)
+        assert len(result) == 10
+
+    def test_empty_ticker_map_returns_empty_list(self) -> None:
+        result = _compute_breadth_pct_series({}, history_days=20, sma_window=50)
+        assert result == []
+
+    def test_one_of_three_above_returns_33_pct(self) -> None:
+        above = self._make_closes(10.0, 12.0)
+        below = self._make_closes(10.0, 8.0)
+        result = _compute_breadth_pct_series(
+            {"A": above, "B": below, "C": below}, history_days=1, sma_window=50
+        )
+        assert len(result) == 1
+        assert abs(result[0] - 33.33) < 0.01
+
+    def test_values_rounded_to_2_decimal_places(self) -> None:
+        above = self._make_closes(10.0, 12.0)
+        below = self._make_closes(10.0, 8.0)
+        result = _compute_breadth_pct_series(
+            {"A": above, "B": below, "C": below}, history_days=1, sma_window=50
+        )
+        # Should be exactly 33.33, not 33.333333...
+        assert result[0] == round(result[0], 2)
+
+
+# ---------------------------------------------------------------------------
+# _fetch_sp500_breadth_series — async, uses mock httpx client
+# ---------------------------------------------------------------------------
+
+
+class TestFetchSp500BreadthSeries:
+    """Tests for the parallel Polygon fetch that computes S&P 500 breadth."""
+
+    def _polygon_ok_response(self, closes: list[float]) -> MagicMock:
+        bars = [{"c": c, "t": i * 86_400_000} for i, c in enumerate(closes)]
+        mock = MagicMock()
+        mock.status_code = 200
+        mock.json.return_value = {"status": "OK", "results": bars}
+        return mock
+
+    def _polygon_empty_response(self) -> MagicMock:
+        mock = MagicMock()
+        mock.status_code = 200
+        mock.json.return_value = {"status": "OK", "results": []}
+        return mock
+
+    def _polygon_error_response(self, code: int = 403) -> MagicMock:
+        mock = MagicMock()
+        mock.status_code = code
+        return mock
+
+    async def test_returns_series_when_data_available(self) -> None:
+        # 50 SMA bars + 30 above SMA → breadth ≈ 100%
+        closes = [10.0] * 50 + [12.0] * 30
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._polygon_ok_response(closes))
+
+        result = await _fetch_sp500_breadth_series("polygon-key", mock_client)
+
+        assert result is not None
+        assert len(result) >= 3
+        assert all(pct > 90.0 for pct in result)
+
+    async def test_returns_none_when_all_tickers_return_403(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._polygon_error_response(403))
+
+        result = await _fetch_sp500_breadth_series("polygon-key", mock_client)
+
+        assert result is None
+
+    async def test_returns_none_when_all_results_empty(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._polygon_empty_response())
+
+        result = await _fetch_sp500_breadth_series("polygon-key", mock_client)
+
+        assert result is None
+
+    async def test_returns_none_when_closes_too_short_for_sma(self) -> None:
+        # Only 30 bars — below the 51-bar minimum for 50-DMA
+        closes = [10.0] * 30
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=self._polygon_ok_response(closes))
+
+        result = await _fetch_sp500_breadth_series("polygon-key", mock_client)
+
+        assert result is None
+
+    async def test_min_valid_tickers_constant_is_positive(self) -> None:
+        assert _BREADTH_MIN_VALID_TICKERS > 0
+

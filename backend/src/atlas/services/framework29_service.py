@@ -1,20 +1,26 @@
 """Framework 29 — Capitulation / Re-Entry AND Gate service.
 
-Five market signals are evaluated; 3 of 5 confirmed fires the GREEN LIGHT.
+Four market signals are evaluated; 3 of 4 confirmed fires the GREEN LIGHT.
+CRISIS HALT is a hard stop that blocks all LEAPS regardless of entry type.
 
-Signal list (per CLAUDE.md spec, updated 2026-04-29):
+Signal list (current spec):
   1. VIX touches prior regime-high then declines for ≥3 consecutive sessions
-  2. Brent crude closes below $95 for the 2nd consecutive session
+  2. Regime modifier is CAUTION (confirms stress/capitulation dynamics)
   3. Put/call ratio spikes above 1.3 then reverses downward
   4. Breadth: % S&P 500 stocks above 50-DMA falls below 30% then recovers
-  5. Operator geopolitical flag set to RESOLVED
+
+CRISIS HALT hard stop: checked before signal evaluation.  When the regime
+modifier is CRISIS_HALT, the framework immediately returns gate_status
+``"CRISIS_HALT_BLOCKED"`` and ``crisis_halt_blocked=True``.
+
+Note on entry type: The F29 AND gate is only required for DISCRETIONARY
+entries.  WASHOUT and CATALYST_VALIDATED entries bypass the macro gate.
 
 Data sources:
   • Yahoo Finance — Signal 1 (VIX daily closes via ^VIX chart API)
-  • Yahoo Finance — Signal 2 (Brent daily closes via BZ=F chart API)
+  • In-memory regime label (regime_modifier_service) — Signal 2
   • Unusual Whales /api/market/total-options-volume — Signal 3 (put_volume/call_volume)
-  • Polygon.io I:S5O — Signal 4 (breadth index; requires paid plan — stays UNAVAILABLE on Starter)
-  • In-memory geo flag (regime_modifier_service) — Signal 5
+  • Polygon.io components aggs — Signal 4 (breadth; UNAVAILABLE on free plan)
 
 Caching:
   Results are cached in an in-memory dict for 15 minutes (900 s).
@@ -59,9 +65,9 @@ _VIX_LOOKBACK_DAYS: Final[int] = 30       # calendar days for Yahoo Finance rang
 _VIX_REGIME_WINDOW: Final[int] = 20       # look back this many sessions to find regime-high
 _VIX_DECLINE_SESSIONS: Final[int] = 3     # must decline for 3 consecutive sessions after peak touch
 
-# Signal 2 — Brent hard threshold.
-_BRENT_HARD_THRESHOLD: Final[float] = 95.0  # USD per barrel
-_BRENT_CONSECUTIVE_SESSIONS: Final[int] = 2 # must be below threshold for 2 consecutive sessions
+# Signal 2 — Regime modifier CAUTION check (replaces Brent crude signal).
+_REGIME_CAUTION_LABEL: Final[str] = "CAUTION"        # label that confirms S2
+_REGIME_CRISIS_HALT_LABEL: Final[str] = "CRISIS HALT" # hard stop — no LEAPS
 
 # Signal 3 — Put/call panic-then-reversal (computed from UW total-options-volume).
 _PCR_PANIC_THRESHOLD: Final[float] = 1.3   # spike above this qualifies as panic
@@ -74,7 +80,6 @@ _BREADTH_LOOKBACK_DAYS: Final[int] = 20            # sessions to scan for dip + 
 
 # Yahoo Finance chart API URLs.
 _YAHOO_VIX_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX"
-_YAHOO_BRENT_URL: Final[str] = "https://query2.finance.yahoo.com/v8/finance/chart/BZ%3DF"
 _YAHOO_HEADERS: Final[dict[str, str]] = {"User-Agent": "Mozilla/5.0"}
 
 # Polygon aggs base URL (used for individual ticker breadth computation).
@@ -257,26 +262,35 @@ def _check_signal1_vix(
     }
 
 
-def _check_signal2_brent(
-    closes: list[float],
+def _check_signal2_regime(
+    regime_label: str | None,
 ) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 2: Brent crude closes below $95 for 2nd consecutive session.
+    """Signal 2: Regime modifier is CAUTION — market stress confirms capitulation dynamics.
+
+    CONFIRMED when regime == CAUTION.  NOT_MET for SOFT_CAUTION / CLEAR.
+    UNAVAILABLE when regime_label is None (not yet computed).
+    CRISIS_HALT is handled as a hard stop upstream; if somehow reached here
+    it returns NOT_MET so it never accidentally confirms.
 
     Pure function — no I/O.
     """
-    if len(closes) < _BRENT_CONSECUTIVE_SESSIONS:
-        return SignalStatus.UNAVAILABLE, {"reason": "Insufficient Brent history"}
+    if regime_label is None:
+        return SignalStatus.UNAVAILABLE, {"reason": "Regime state unavailable"}
 
-    tail = closes[-_BRENT_CONSECUTIVE_SESSIONS:]
-    all_below = all(c < _BRENT_HARD_THRESHOLD for c in tail)
-    status = SignalStatus.CONFIRMED if all_below else SignalStatus.NOT_MET
+    normalized = regime_label.strip().upper()
+    if normalized == _REGIME_CRISIS_HALT_LABEL:
+        return SignalStatus.NOT_MET, {
+            "regime_label": regime_label,
+            "note": "CRISIS HALT handled as hard stop upstream",
+            "confirmed": False,
+        }
 
+    confirmed = normalized == _REGIME_CAUTION_LABEL
+    status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
     return status, {
-        "brent_latest_close": round(closes[-1], 2),
-        "threshold": _BRENT_HARD_THRESHOLD,
-        "consecutive_sessions_required": _BRENT_CONSECUTIVE_SESSIONS,
-        "consecutive_closes_below": [round(c, 2) for c in tail],
-        "confirmed": all_below,
+        "regime_label": regime_label,
+        "target_regime": _REGIME_CAUTION_LABEL,
+        "confirmed": confirmed,
     }
 
 
@@ -344,30 +358,10 @@ def _check_signal4_breadth(
     }
 
 
-def _check_signal5_geo_flag(
-    geo_flag: str,
-) -> tuple[SignalStatus, dict[str, object]]:
-    """Signal 5: Operator geopolitical flag set in Framework 2 (any non-NONE value).
-
-    Reads the in-memory geo flag written by the regime modifier endpoint
-    (Framework 2). Confirms whenever Framework 2 has recorded any active
-    geopolitical state i.e. geo_flag is not "NONE". Pure function -- no I/O.
-    """
-    normalized = geo_flag.strip().upper()
-    confirmed = normalized != "NONE" and normalized != ""
-    status = SignalStatus.CONFIRMED if confirmed else SignalStatus.NOT_MET
-
-    return status, {
-        "geo_flag_current": geo_flag,
-        "geo_flag_source": "Framework 2 (regime modifier)",
-        "confirmed": confirmed,
-    }
-
-
 def _determine_gate_status(
     confirmed: int,
     unavailable: int,
-    total: int = 5,
+    total: int = 4,
 ) -> tuple[bool, str, str]:
     """Compute gate state and message. Pure function.
 
@@ -595,7 +589,7 @@ async def _fetch_sp500_breadth_series(
     for item in raw:
         if isinstance(item, BaseException):
             continue
-        ticker, closes = item  # type: ignore[misc]
+        ticker, closes = item
         if closes is not None and len(closes) >= 51:  # minimum for a single 50-DMA value
             ticker_closes_map[ticker] = closes
 
@@ -679,11 +673,36 @@ async def evaluate_framework29(
     uw_api_key: str,
     client: httpx.AsyncClient | None = None,
 ) -> Framework29Result:
-    """Evaluate all 5 Framework 29 signals and return the gate status.
+    """Evaluate all 4 Framework 29 signals and return the gate status.
 
-    Results are cached for _CACHE_TTL_SECONDS.  Pass client=None to let the
-    function manage its own httpx.AsyncClient (tests may inject a mock).
+    CRISIS HALT (from regime_modifier_service) is checked first.  If active,
+    an immediate CRISIS_HALT_BLOCKED result is returned without any network
+    fetch.  Results are cached for _CACHE_TTL_SECONDS.  Pass client=None to
+    let the function manage its own httpx.AsyncClient (tests may inject a mock).
     """
+    from atlas.services.regime_modifier_service import get_current_regime_label
+    regime_label = get_current_regime_label()
+
+    # ── CRISIS HALT hard stop ──────────────────────────────────────────────
+    if regime_label == _REGIME_CRISIS_HALT_LABEL:
+        now = datetime.now(tz=UTC)
+        result = Framework29Result(
+            signals_confirmed=0,
+            signals_unavailable=4,
+            and_gate_passed=False,
+            gate_status="CRISIS_HALT_BLOCKED",
+            gate_message="CRISIS HALT active — LEAPS blocked regardless of entry type.",
+            signals=[],
+            data_gap_severity="HARD_STOP",
+            warning_messages=["CRISIS HALT regime — no LEAPS permitted."],
+            last_updated=now.isoformat(),
+            data_age_minutes=0,
+            cache_hit=False,
+            crisis_halt_blocked=True,
+        )
+        _cache_set(result)
+        return result
+
     cached, age_minutes = _cache_get()
     if cached is not None and age_minutes <= _CACHE_TTL_SECONDS / 60.0:
         return Framework29Result(
@@ -693,12 +712,12 @@ async def evaluate_framework29(
     _client: httpx.AsyncClient = client if client is not None else httpx.AsyncClient()
 
     try:
-        # Parallel fetch: VIX (Yahoo), Brent (Yahoo), PCR (UW options vol),
+        # Parallel fetch: VIX (Yahoo), PCR (UW options vol),
         # breadth (Polygon — computed from S&P 500 components).
-        vix_closes_raw, brent_closes_raw, pcr_raw, breadth_raw = (
+        # Signal 2 reads in-memory regime label — no network fetch needed.
+        vix_closes_raw, pcr_raw, breadth_raw = (
             await asyncio.gather(
                 _fetch_yahoo_daily_closes(_YAHOO_VIX_URL, "3mo", _client),
-                _fetch_yahoo_daily_closes(_YAHOO_BRENT_URL, "1mo", _client),
                 _fetch_uw_pcr_from_options_volume(uw_api_key, _client),
                 _fetch_sp500_breadth_series(polygon_api_key, _client),
                 return_exceptions=True,
@@ -713,13 +732,8 @@ async def evaluate_framework29(
         return None if isinstance(v, BaseException) else v
 
     vix_closes: list[float] | None = _unwrap(vix_closes_raw)  # type: ignore[assignment]
-    brent_closes: list[float] | None = _unwrap(brent_closes_raw)  # type: ignore[assignment]
     pcr_sessions: list[float] | None = _unwrap(pcr_raw)  # type: ignore[assignment]
     breadth_values: list[float] | None = _unwrap(breadth_raw)  # type: ignore[assignment]
-
-    # Signal 5: read the in-memory geo flag (no network I/O).
-    from atlas.services.regime_modifier_service import get_geo_flag_current
-    geo_flag = get_geo_flag_current()
 
     # Evaluate each signal.
     s1_status, s1_vals = (
@@ -727,11 +741,8 @@ async def evaluate_framework29(
         if vix_closes
         else _unavailable("VIX data unavailable")
     )
-    s2_status, s2_vals = (
-        _check_signal2_brent(brent_closes)
-        if brent_closes
-        else _unavailable("Brent data unavailable")
-    )
+    # Signal 2 reads regime_label already fetched above.
+    s2_status, s2_vals = _check_signal2_regime(regime_label)
     s3_status, s3_vals = (
         _check_signal3_pcr(pcr_sessions)
         if pcr_sessions
@@ -742,7 +753,6 @@ async def evaluate_framework29(
         if breadth_values
         else _unavailable("Breadth data unavailable — Polygon component fetch returned no data")
     )
-    s5_status, s5_vals = _check_signal5_geo_flag(geo_flag)
 
     signals_data: list[tuple[SignalStatus, str, dict[str, object], dict[str, object]]] = [
         (
@@ -756,12 +766,9 @@ async def evaluate_framework29(
         ),
         (
             s2_status,
-            "Brent below $95 for 2 consecutive sessions",
+            "Regime modifier is CAUTION (stress confirms capitulation)",
             s2_vals,
-            {
-                "threshold_usd": _BRENT_HARD_THRESHOLD,
-                "consecutive_sessions": _BRENT_CONSECUTIVE_SESSIONS,
-            },
+            {"target_regime": _REGIME_CAUTION_LABEL},
         ),
         (
             s3_status,
@@ -780,12 +787,6 @@ async def evaluate_framework29(
                 "washout_threshold_pct": _BREADTH_WASHOUT_THRESHOLD,
                 "lookback_days": _BREADTH_LOOKBACK_DAYS,
             },
-        ),
-        (
-            s5_status,
-            "Framework 2 geopolitical flag set (any non-NONE value)",
-            s5_vals,
-            {"confirmed_when": "geo_flag != NONE", "source": "Framework 2"},
         ),
     ]
 
@@ -832,6 +833,7 @@ async def evaluate_framework29(
         last_updated=now.isoformat(),
         data_age_minutes=0,
         cache_hit=False,
+        crisis_halt_blocked=False,
     )
 
     _cache_set(result)
@@ -852,6 +854,7 @@ def get_gate_status() -> Framework29GateStatus | None:
         signals_unavailable=cached.signals_unavailable,
         gate_status=cached.gate_status,
         data_gap_severity=cached.data_gap_severity,
+        crisis_halt_blocked=cached.crisis_halt_blocked,
     )
 
 

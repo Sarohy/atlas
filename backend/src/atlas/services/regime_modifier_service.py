@@ -465,6 +465,28 @@ def _compute_regime_output(
 
 _geo_flag_current: str = "NONE"
 
+# ---------------------------------------------------------------------------
+# In-memory current regime label store — updated on every compute_regime_modifier
+# call. Used by Framework 29 Signal 2 (regime CAUTION check).
+# ---------------------------------------------------------------------------
+
+_current_regime_rule: int | None = None
+
+
+def get_current_regime_label() -> str:
+    """Return the most-recently computed regime label.
+
+    Returns ``"CLEAR"`` by default when no compute has occurred (maps to
+    None → rule 4 in _rule_name).  Pure read — no side effects.
+    """
+    return _rule_name(_current_regime_rule)
+
+
+def reset_current_regime_rule() -> None:
+    """Reset to None (CLEAR default).  Call between tests to prevent leakage."""
+    global _current_regime_rule
+    _current_regime_rule = None
+
 
 def get_geo_flag_current() -> str:
     """Read the current geopolitical flag from the in-memory store.
@@ -668,6 +690,10 @@ class RegimeModifierService:
             )
         else:
             rule = None
+
+        # ── Persist computed rule for cross-service reads (e.g. F29 S2) ──
+        global _current_regime_rule
+        _current_regime_rule = rule
 
         # ── F17 geo flag gate: block CLEAR regime when ACTIVE geo risk ────
         # Framework 17 is the ONLY source for this gate.

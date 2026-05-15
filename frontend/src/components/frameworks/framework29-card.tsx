@@ -1,84 +1,223 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { useFramework29 } from '@/lib/hooks/use-framework29';
-import { confirmSignal4 } from '@/lib/api/framework29';
-import type { Framework29Result, SignalStatus } from '@/lib/schemas/framework29';
+import { useF29Evaluation } from '@/lib/hooks/use-f29-evaluation';
+import type {
+  F29CatalystValidatedEvaluation,
+  F29DiscretionaryEvaluation,
+  F29EntryType,
+  F29GateStatus,
+  F29RegimePrecondition,
+  F29WashoutEvaluation,
+} from '@/lib/schemas/framework29';
 
 // ---------------------------------------------------------------------------
 // Named constants
 // ---------------------------------------------------------------------------
 
-/** Signal status chip labels. */
-const STATUS_LABEL: Record<SignalStatus, string> = {
-  CONFIRMED: 'CONFIRMED',
-  NOT_MET: 'NOT MET',
+/** CSS class per gate status. UNAVAILABLE = amber, never red. */
+const GATE_STATUS_CLASS: Record<F29GateStatus, string> = {
+  PASS: 'is-f29-gate-pass',
+  BLOCKED: 'is-f29-gate-blocked',
+  UNAVAILABLE: 'is-f29-gate-unavailable',
+};
+
+/** Human-readable gate status label. */
+const GATE_STATUS_LABEL: Record<F29GateStatus, string> = {
+  PASS: 'LEAPS PERMITTED',
+  BLOCKED: 'LEAPS BLOCKED',
+  UNAVAILABLE: 'DATA UNAVAILABLE',
+};
+
+/** Human-readable entry type label. */
+const ENTRY_TYPE_LABEL: Record<F29EntryType, string> = {
+  WASHOUT: 'WASHOUT',
+  CATALYST_VALIDATED: 'CATALYST VALIDATED',
+  DISCRETIONARY: 'DISCRETIONARY',
+  BLOCKED_BY_REGIME: 'BLOCKED BY REGIME',
   UNAVAILABLE: 'UNAVAILABLE',
-  MANUAL_REQUIRED: 'MANUAL REQUIRED',
 };
 
-/** Signal status chip CSS classes. */
-const STATUS_CHIP_CLASS: Record<SignalStatus, string> = {
-  CONFIRMED: 'is-f29-confirmed',
-  NOT_MET: 'is-f29-not-met',
-  UNAVAILABLE: 'is-f29-unavailable',
-  MANUAL_REQUIRED: 'is-f29-manual',
-};
+/** ConditionMet display helpers. */
+function metLabel(met: boolean | 'UNAVAILABLE'): string {
+  if (met === 'UNAVAILABLE') return 'UNAVAILABLE';
+  return met ? 'MET' : 'NOT MET';
+}
 
-/** Gate chip class based on pass state. */
-const GATE_CHIP_CLASS = {
-  passed: 'is-f29-gate-passed',
-  failed: 'is-f29-gate-failed',
-} as const;
-
-/** Human-readable signal names (fallback if backend name is empty). */
-const SIGNAL_NAMES: Record<number, string> = {
-  1: 'VIX Declining',
-  2: 'Put/Call Ratio < 1.2',
-  3: 'SPY Above 200-Day SMA',
-  4: 'Sector ETF Fund Flow',
-  5: 'Brent Below 7-Day SMA',
-};
+function metClass(met: boolean | 'UNAVAILABLE'): string {
+  if (met === 'UNAVAILABLE') return 'is-f29-cond-unavailable';
+  return met ? 'is-f29-cond-met' : 'is-f29-cond-not-met';
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SignalCard({
-  signal,
-  onManualConfirm,
-}: {
-  signal: Framework29Result['signals'][number];
-  onManualConfirm: (signalNumber: number) => void;
-}) {
-  const statusClass = STATUS_CHIP_CLASS[signal.status] ?? '';
+function RegimePreconditionCard({ regime }: { regime: F29RegimePrecondition }) {
+  const chipClass = regime.passed
+    ? 'is-f29-cond-met'
+    : regime.regime_undefined_flag
+      ? 'is-f29-gate-unavailable'
+      : 'is-f29-gate-blocked';
 
   return (
-    <div
-      className={cn('atlas-f29-signal-card', statusClass)}
-      data-testid={`f29-signal-${signal.signal_number}`}
-    >
-      <div className="atlas-f29-signal-card-header">
-        <span className="atlas-f29-signal-number">S{signal.signal_number}</span>
-        <span className="atlas-f29-signal-name">
-          {signal.signal_name || SIGNAL_NAMES[signal.signal_number] || `Signal ${signal.signal_number}`}
+    <div className="atlas-f29-regime-card" data-testid="f29-regime-precondition">
+      <div className="atlas-f29-regime-header">
+        <span className="atlas-f29-regime-label">Regime</span>
+        <span className={cn('atlas-f29-regime-chip', chipClass)} data-testid="f29-regime-chip">
+          {regime.regime}
         </span>
-        <span className={cn('atlas-f29-signal-chip', statusClass)}>
-          {STATUS_LABEL[signal.status]}
+        {regime.regime_undefined_flag && (
+          <span
+            className="atlas-f29-regime-undefined-badge"
+            data-testid="f29-regime-undefined-badge"
+          >
+            REGIME_UNDEFINED
+          </span>
+        )}
+      </div>
+      {regime.reason && (
+        <p className="atlas-f29-regime-reason" data-testid="f29-regime-reason">
+          {regime.reason}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function WashoutDetail({
+  evaluation,
+  isActive,
+}: {
+  evaluation: F29WashoutEvaluation;
+  isActive: boolean;
+}) {
+  return (
+    <div
+      className={cn('atlas-f29-path-card', isActive && 'is-f29-path-active')}
+      data-testid="f29-washout-detail"
+    >
+      <div className="atlas-f29-path-card-header">
+        <span className="atlas-f29-path-label">Path A — WASHOUT</span>
+        <span
+          className={cn('atlas-f29-path-matched-chip', evaluation.matched ? 'is-f29-cond-met' : '')}
+          data-testid="f29-washout-matched"
+        >
+          {evaluation.matched ? 'MATCHED' : 'NOT MATCHED'}
         </span>
       </div>
-      {signal.data_missing && signal.missing_reason && (
-        <p className="atlas-f29-signal-missing">{signal.missing_reason}</p>
-      )}
-      {signal.status === 'MANUAL_REQUIRED' && (
-        <button
-          className="atlas-f29-confirm-btn"
-          type="button"
-          onClick={() => onManualConfirm(signal.signal_number)}
+      <ul className="atlas-f29-conditions-list">
+        {evaluation.conditions.map((cond) => (
+          <li key={cond.id} className="atlas-f29-condition-row">
+            <span className={cn('atlas-f29-cond-chip', metClass(cond.met))} data-testid={`f29-washout-cond-${cond.id}`}>
+              {metLabel(cond.met)}
+            </span>
+            <span className="atlas-f29-cond-reason">{cond.reason}</span>
+            {cond.value !== null && (
+              <span className="atlas-f29-cond-value">({cond.value})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CatalystDetail({
+  evaluation,
+  isActive,
+}: {
+  evaluation: F29CatalystValidatedEvaluation;
+  isActive: boolean;
+}) {
+  return (
+    <div
+      className={cn('atlas-f29-path-card', isActive && 'is-f29-path-active')}
+      data-testid="f29-catalyst-detail"
+    >
+      <div className="atlas-f29-path-card-header">
+        <span className="atlas-f29-path-label">Path B — CATALYST VALIDATED</span>
+        <span
+          className={cn('atlas-f29-path-matched-chip', evaluation.matched ? 'is-f29-cond-met' : '')}
+          data-testid="f29-catalyst-matched"
         >
-          Mark Confirmed
-        </button>
-      )}
+          {evaluation.matched ? 'MATCHED' : 'NOT MATCHED'}
+        </span>
+      </div>
+      <div className="atlas-f29-catalyst-preconditions">
+        <span className={cn('atlas-f29-cond-chip', metClass(evaluation.position_held))} data-testid="f29-catalyst-position-held">
+          Position held: {metLabel(evaluation.position_held)}
+        </span>
+        <span className={cn('atlas-f29-cond-chip', metClass(evaluation.score_tier_pass))} data-testid="f29-catalyst-score-pass">
+          Score ≥ T2: {metLabel(evaluation.score_tier_pass)}
+        </span>
+      </div>
+      <p className="atlas-f29-sub-conditions-count" data-testid="f29-catalyst-sub-count">
+        Sub-conditions met: {evaluation.sub_conditions_met_count} / {evaluation.sub_conditions.length}
+      </p>
+      <ul className="atlas-f29-conditions-list">
+        {evaluation.sub_conditions.map((sc) => (
+          <li key={sc.id} className="atlas-f29-condition-row">
+            <span className={cn('atlas-f29-cond-chip', metClass(sc.met))} data-testid={`f29-catalyst-sub-${sc.id}`}>
+              {metLabel(sc.met)}
+            </span>
+            <span className="atlas-f29-cond-reason">{sc.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DiscretionaryDetail({ evaluation }: { evaluation: F29DiscretionaryEvaluation }) {
+  return (
+    <div
+      className="atlas-f29-path-card is-f29-path-active"
+      data-testid="f29-discretionary-detail"
+    >
+      <div className="atlas-f29-path-card-header">
+        <span className="atlas-f29-path-label">Path C — DISCRETIONARY</span>
+        <span className="atlas-f29-disc-threshold" data-testid="f29-disc-threshold">
+          {evaluation.signals_met} / {evaluation.signals.length} signals
+          {evaluation.threshold_inferred && (
+            <span
+              className="atlas-f29-threshold-inferred-badge"
+              data-testid="f29-threshold-inferred-badge"
+            >
+              THRESHOLD_INFERRED
+            </span>
+          )}
+        </span>
+      </div>
+      <ul className="atlas-f29-conditions-list">
+        {evaluation.signals.map((sig) => (
+          <li key={sig.id} className="atlas-f29-condition-row">
+            <span className={cn('atlas-f29-cond-chip', metClass(sig.met))} data-testid={`f29-disc-signal-${sig.id}`}>
+              {metLabel(sig.met)}
+            </span>
+            <span className="atlas-f29-cond-reason">{sig.label}</span>
+            {sig.value !== null && (
+              <span className="atlas-f29-cond-value">({sig.value})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DataGapsSection({ gaps }: { gaps: string[] }) {
+  if (gaps.length === 0) return null;
+  return (
+    <div className="atlas-f29-data-gaps" data-testid="f29-data-gaps">
+      <h3 className="atlas-f29-data-gaps-title">Data Gaps</h3>
+      <ul className="atlas-f29-data-gaps-list">
+        {gaps.map((gap, idx) => (
+          <li key={idx} className="atlas-f29-data-gap-item">
+            {gap}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -87,73 +226,73 @@ function SignalCard({
 // Props
 // ---------------------------------------------------------------------------
 
-// Framework 29 is portfolio-level — no ticker prop needed.
-type Framework29CardProps = Record<string, never>;
+interface Framework29CardProps {
+  ticker: string;
+}
 
 // ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
 
 /**
- * Framework 29 — Capitulation / Re-Entry Signal card.
+ * Framework 29 — Three-Path Entry Classifier card.
  *
- * Portfolio-level. Sections:
- *   1. Header + gate chip
- *   2. Gate summary bar (N/5 confirmed)
- *   3. Five signal cards
- *   4. Warning messages (if any)
- *   5. Data age footer
+ * Displays the per-ticker LEAPS entry classification:
+ *   1. Regime precondition (CRISIS_HALT = hard stop)
+ *   2. Gate status header chip (PASS / BLOCKED / UNAVAILABLE)
+ *   3. Path breakdown (all three paths shown; matched one highlighted)
+ *   4. Data gaps (first-class section — amber, never red)
+ *
+ * Requires a non-empty ticker prop; renders a placeholder when ticker is empty.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function Framework29Card(_props: Framework29CardProps) {
-  const { data, isLoading, isError, error } = useFramework29();
+export function Framework29Card({ ticker }: Framework29CardProps) {
+  const { data, isLoading, isError, error } = useF29Evaluation(ticker);
   const errorMsg =
-    error instanceof Error ? error.message : 'Failed to load capitulation signal data.';
+    error instanceof Error ? error.message : 'Failed to load F29 classifier data.';
 
-  async function handleManualConfirm(signalNumber: number) {
-    if (signalNumber !== 4) return; // only Signal 4 supports manual confirmation
-    try {
-      await confirmSignal4(true, 'manual-ui');
-    } catch {
-      // Silently log — no toast infrastructure in this component.
-      // The hook will refetch on next interval.
-    }
-  }
+  const noTicker = !ticker || ticker.trim().length === 0;
 
   return (
     <section
       className="atlas-frameworks-panel atlas-fws-panel atlas-f29-panel"
       data-testid="framework29-card"
     >
-      {/* ── Section 1: Header + gate chip ── */}
+      {/* ── Header ── */}
       <header className="atlas-f29-header">
         <div className="atlas-f29-header-left">
           <h2 className="atlas-frameworks-panel-title">Framework 29</h2>
-          <span className="atlas-fws-subtitle">Capitulation / Re-Entry Signal</span>
+          <span className="atlas-fws-subtitle">LEAPS Entry Classifier</span>
+          {ticker && (
+            <span className="atlas-f29-ticker-badge" data-testid="f29-ticker-badge">
+              {ticker}
+            </span>
+          )}
         </div>
         {data !== undefined && (
           <span
-            className={cn(
-              'atlas-f29-gate-chip',
-              data.and_gate_passed
-                ? GATE_CHIP_CLASS.passed
-                : GATE_CHIP_CLASS.failed,
-            )}
+            className={cn('atlas-f29-gate-chip', GATE_STATUS_CLASS[data.gate_status])}
             data-testid="f29-gate-chip"
           >
-            {data.and_gate_passed ? 'AND GATE PASSED' : 'GATE NOT MET'}
+            {GATE_STATUS_LABEL[data.gate_status]}
           </span>
         )}
       </header>
 
       <div className="atlas-fws-panel-body">
-        {isLoading && (
-          <p className="atlas-fws-state-msg" data-testid="f29-loading">
-            Loading capitulation signals…
+        {/* ── State guards ── */}
+        {noTicker && (
+          <p className="atlas-fws-state-msg" data-testid="f29-no-ticker">
+            Select a ticker to evaluate LEAPS eligibility.
           </p>
         )}
 
-        {isError && (
+        {!noTicker && isLoading && (
+          <p className="atlas-fws-state-msg" data-testid="f29-loading">
+            Evaluating {ticker}…
+          </p>
+        )}
+
+        {!noTicker && isError && (
           <p
             className="atlas-fws-state-msg atlas-fws-state-msg--error"
             data-testid="f29-error"
@@ -162,71 +301,53 @@ export function Framework29Card(_props: Framework29CardProps) {
           </p>
         )}
 
-        {!isLoading && !isError && data !== undefined && (
+        {!noTicker && !isLoading && !isError && data !== undefined && (
           <>
-            {/* ── Section 2: Gate summary bar ── */}
-            <div className="atlas-f29-gate-bar" data-testid="f29-gate-bar">
-              <div className="atlas-f29-gate-bar-label">
-                <span className="atlas-f29-gate-count" data-testid="f29-gate-count">
-                  {data.signals_confirmed} / 5 signals confirmed
-                </span>
-                {data.signals_unavailable > 0 && (
-                  <span className="atlas-f29-unavailable-note">
-                    ({data.signals_unavailable} unavailable)
-                  </span>
+            {/* ── Entry type summary ── */}
+            <div className="atlas-f29-entry-type-row" data-testid="f29-entry-type-row">
+              <span className="atlas-f29-entry-type-label">Entry type:</span>
+              <span
+                className={cn('atlas-f29-entry-type-chip', GATE_STATUS_CLASS[data.gate_status])}
+                data-testid="f29-entry-type"
+              >
+                {ENTRY_TYPE_LABEL[data.entry_type]}
+              </span>
+            </div>
+
+            {/* ── Step 0: Regime precondition ── */}
+            <RegimePreconditionCard regime={data.regime_precondition} />
+
+            {/* ── Path evaluations (all shown; active one highlighted) ── */}
+            {/* If CRISIS_HALT or REGIME_UNDEFINED, path cards are grayed out */}
+            <div
+              className={cn(
+                'atlas-f29-paths',
+                !data.regime_precondition.passed && 'is-f29-paths-greyed',
+              )}
+              data-testid="f29-paths"
+            >
+              <WashoutDetail
+                evaluation={data.washout_evaluation}
+                isActive={data.entry_type === 'WASHOUT'}
+              />
+              <CatalystDetail
+                evaluation={data.catalyst_validated_evaluation}
+                isActive={data.entry_type === 'CATALYST_VALIDATED'}
+              />
+              {/* DISCRETIONARY path only rendered when it is the active path */}
+              {data.entry_type === 'DISCRETIONARY' &&
+                data.discretionary_evaluation !== null && (
+                  <DiscretionaryDetail evaluation={data.discretionary_evaluation} />
                 )}
-              </div>
-              <div className="atlas-f29-gate-track">
-                {[1, 2, 3, 4, 5].map((i) => {
-                  const signal = data.signals.find((s) => s.signal_number === i);
-                  const seg =
-                    signal?.status === 'CONFIRMED'
-                      ? 'is-f29-seg-confirmed'
-                      : signal?.status === 'UNAVAILABLE'
-                        ? 'is-f29-seg-unavailable'
-                        : 'is-f29-seg-empty';
-                  return (
-                    <div
-                      key={i}
-                      className={cn('atlas-f29-gate-seg', seg)}
-                    />
-                  );
-                })}
-              </div>
-              <p className="atlas-f29-gate-message" data-testid="f29-gate-message">
-                {data.gate_message}
-              </p>
             </div>
 
-            {/* ── Section 3: Signal cards ── */}
-            <div className="atlas-f29-signals-grid" data-testid="f29-signals">
-              {data.signals.map((signal) => (
-                <SignalCard
-                  key={signal.signal_number}
-                  signal={signal}
-                  onManualConfirm={handleManualConfirm}
-                />
-              ))}
-            </div>
-
-            {/* ── Section 4: Warning messages ── */}
-            {data.warning_messages.length > 0 && (
-              <ul className="atlas-f29-warnings" data-testid="f29-warnings">
-                {data.warning_messages.map((msg, idx) => (
-                  <li key={idx} className="atlas-f29-warning-item">
-                    {msg}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* ── Section 5: Data age footer ── */}
-            <p className="atlas-f29-footer" data-testid="f29-footer">
-              {data.cache_hit ? 'cached' : 'live'} · {data.data_age_minutes.toFixed(0)} min ago
-            </p>
+            {/* ── Data gaps (first-class, amber) ── */}
+            <DataGapsSection gaps={data.all_data_gaps} />
           </>
         )}
       </div>
     </section>
   );
 }
+
+

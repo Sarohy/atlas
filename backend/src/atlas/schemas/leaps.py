@@ -141,6 +141,13 @@ class LeapsEligibility(BaseModel):
     block_reasons: list[str]
     warning_messages: list[str]
 
+    # --- F29 entry type gate (bypass logic) ---
+    entry_type: str | None = None
+    """WASHOUT | CATALYST_VALIDATED | DISCRETIONARY.
+    WASHOUT and CATALYST_VALIDATED bypass the F29 AND gate.
+    DISCRETIONARY requires the F29 AND gate to pass.
+    """
+
     # --- Expiry and sizing guidance ---
     expiry_guidance: LeapsExpiryGuidance = Field(
         default_factory=_default_expiry_guidance,

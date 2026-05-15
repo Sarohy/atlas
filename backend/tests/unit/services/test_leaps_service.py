@@ -23,6 +23,7 @@ from atlas.services.leaps_service import (
     _compute_eligibility,
     _compute_iv_catalyst_wait,
     _detect_price_gap,
+    _determine_entry_type,
     _determine_tier,
     _evaluate_entry_condition1,
     _evaluate_entry_condition2,
@@ -716,4 +717,322 @@ class TestCheckLeapsEligibilityProvidedScore:
             assert expected_tier == "T3"  # 61 is T3 (50–69)
 
             # The mock was never awaited — confirms bypass path expectation.
-            mock_resolve.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _determine_entry_type — pure function
+# ---------------------------------------------------------------------------
+
+
+class TestDetermineEntryType:
+    """Tests for WASHOUT / CATALYST_VALIDATED / DISCRETIONARY classification."""
+
+    def test_washout_when_drop_gte_8pct_and_f4_gte_11(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.09,
+            f4_score=15.0,
+            position_held=False,
+            score=75,
+        )
+        assert result == "WASHOUT"
+
+    def test_washout_at_exact_boundaries(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.08,  # exactly 8%
+            f4_score=11.0,                 # exactly 11
+            position_held=False,
+            score=75,
+        )
+        assert result == "WASHOUT"
+
+    def test_not_washout_when_drop_below_threshold(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.07,  # 7%, below 8% threshold
+            f4_score=15.0,
+            position_held=False,
+            score=75,
+        )
+        assert result != "WASHOUT"
+
+    def test_not_washout_when_f4_below_11(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.10,
+            f4_score=10.9,  # just below 11
+            position_held=False,
+            score=75,
+        )
+        assert result != "WASHOUT"
+
+    def test_not_washout_when_drop_none(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=None,
+            f4_score=15.0,
+            position_held=False,
+            score=75,
+        )
+        assert result != "WASHOUT"
+
+    def test_not_washout_when_f4_none(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.10,
+            f4_score=None,
+            position_held=False,
+            score=75,
+        )
+        assert result != "WASHOUT"
+
+    def test_catalyst_validated_with_two_signals(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,  # no washout
+            f4_score=5.0,
+            position_held=True,
+            score=72,  # T2 (≥70)
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+            catalyst_revenue_inflection=False,
+        )
+        assert result == "CATALYST_VALIDATED"
+
+    def test_catalyst_validated_with_all_three_signals(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=True,
+            score=80,
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+            catalyst_revenue_inflection=True,
+        )
+        assert result == "CATALYST_VALIDATED"
+
+    def test_not_catalyst_validated_when_only_one_signal(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=True,
+            score=72,
+            catalyst_13f_concentration_buy=True,  # only 1 confirmed
+            catalyst_analyst_pt_raise=False,
+            catalyst_revenue_inflection=False,
+        )
+        assert result != "CATALYST_VALIDATED"
+
+    def test_not_catalyst_validated_without_position_held(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=False,  # not held
+            score=72,
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+        )
+        assert result != "CATALYST_VALIDATED"
+
+    def test_not_catalyst_validated_below_t2_score(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=True,
+            score=69,  # T3 (below T2 threshold of 70)
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+        )
+        assert result != "CATALYST_VALIDATED"
+
+    def test_catalyst_validated_at_exact_t2_boundary(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=True,
+            score=70,  # exactly T2 boundary
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+        )
+        assert result == "CATALYST_VALIDATED"
+
+    def test_discretionary_when_nothing_qualifies(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=False,
+            score=75,
+        )
+        assert result == "DISCRETIONARY"
+
+    def test_washout_takes_precedence_over_catalyst_validated(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=0.10,
+            f4_score=15.0,
+            position_held=True,
+            score=72,
+            catalyst_13f_concentration_buy=True,
+            catalyst_analyst_pt_raise=True,
+        )
+        assert result == "WASHOUT"
+
+    def test_discretionary_when_all_inputs_none(self) -> None:
+        result = _determine_entry_type(
+            single_session_drop_pct=None,
+            f4_score=None,
+            position_held=False,
+            score=None,
+        )
+        assert result == "DISCRETIONARY"
+
+    def test_catalyst_unknown_signals_count_as_false(self) -> None:
+        # None catalyst signals should not count toward the ≥2 threshold
+        result = _determine_entry_type(
+            single_session_drop_pct=0.01,
+            f4_score=5.0,
+            position_held=True,
+            score=72,
+            catalyst_13f_concentration_buy=None,  # unknown
+            catalyst_analyst_pt_raise=None,        # unknown
+            catalyst_revenue_inflection=None,      # unknown
+        )
+        assert result == "DISCRETIONARY"
+
+
+# ---------------------------------------------------------------------------
+# _compute_eligibility — entry-type bypass and CRISIS_HALT hard stop
+# ---------------------------------------------------------------------------
+
+
+def _make_clear_eligibility_kwargs(ticker: str = "NVDA", score: int = 82) -> dict:
+    """Minimal kwargs for a fully-eligible DISCRETIONARY scenario."""
+    return dict(
+        ticker=ticker,
+        score=score,
+        tier="T1",
+        flow_confirmed=True,
+        regime_state="CLEAR",
+        gate_f7_active=False,
+        gate_f29_passed=True,
+        gate_f30_permits_leaps=True,
+        gate_f11_blocks=False,
+        gate_f15_blocks=False,
+        iv_current=0.50,
+        iv_percentile=0.45,
+        entry_conditions=[
+            _evaluate_entry_condition1(True),
+            _evaluate_entry_condition2("CLEAR"),
+            _evaluate_entry_condition3(score),
+        ],
+        data_age_minutes=0,
+        gap_detected=False,
+    )
+
+
+class TestComputeEligibilityEntryTypeBypass:
+    """Gate 1 — WASHOUT and CATALYST_VALIDATED bypass the F29 AND gate.
+    Gate 2 — CRISIS_HALT blocks all entry types.
+    Gate 3 — CAUTION regime blocks DISCRETIONARY but permits WASHOUT/CATALYST_VALIDATED.
+    """
+
+    # ── F29 gate bypass ────────────────────────────────────────────────────
+
+    def test_washout_bypasses_f29_gate_not_passed(self) -> None:
+        """WASHOUT entry with F29 gate=False must still be eligible."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = False  # would block DISCRETIONARY
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT")
+        assert result.leaps_eligible is True
+        assert not any("F29" in r for r in result.block_reasons)
+
+    def test_washout_bypasses_f29_gate_unknown(self) -> None:
+        """WASHOUT with unknown F29 gate must not defer — gate is irrelevant."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = None
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT")
+        assert result.leaps_eligible is True
+        assert not any("F29" in r for r in result.warning_messages)
+
+    def test_catalyst_validated_bypasses_f29_gate_not_passed(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = False
+        result = _compute_eligibility(**kwargs, entry_type="CATALYST_VALIDATED")
+        assert result.leaps_eligible is True
+        assert not any("F29" in r for r in result.block_reasons)
+
+    def test_discretionary_still_blocked_by_f29_gate(self) -> None:
+        """DISCRETIONARY with gate=False must be blocked — gate not bypassed."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = False
+        result = _compute_eligibility(**kwargs, entry_type="DISCRETIONARY")
+        assert result.leaps_eligible is False
+        assert any("F29" in r for r in result.block_reasons)
+
+    def test_no_entry_type_still_blocked_by_f29_gate(self) -> None:
+        """entry_type=None (default) behaves like DISCRETIONARY — gate applies."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = False
+        result = _compute_eligibility(**kwargs)
+        assert result.leaps_eligible is False
+        assert any("F29" in r for r in result.block_reasons)
+
+    # ── CRISIS_HALT hard stop ──────────────────────────────────────────────
+
+    def test_crisis_halt_blocks_washout(self) -> None:
+        """CRISIS_HALT must block even a WASHOUT entry."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["gate_f29_passed"] = True
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT", crisis_halt_blocked=True)
+        assert result.leaps_eligible is False
+        assert any("CRISIS HALT" in r for r in result.block_reasons)
+
+    def test_crisis_halt_blocks_catalyst_validated(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        result = _compute_eligibility(
+            **kwargs, entry_type="CATALYST_VALIDATED", crisis_halt_blocked=True
+        )
+        assert result.leaps_eligible is False
+        assert any("CRISIS HALT" in r for r in result.block_reasons)
+
+    def test_crisis_halt_blocks_discretionary(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        result = _compute_eligibility(
+            **kwargs, entry_type="DISCRETIONARY", crisis_halt_blocked=True
+        )
+        assert result.leaps_eligible is False
+        assert any("CRISIS HALT" in r for r in result.block_reasons)
+
+    def test_no_crisis_halt_does_not_add_block_reason(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT", crisis_halt_blocked=False)
+        assert result.leaps_eligible is True
+        assert not any("CRISIS HALT" in r for r in result.block_reasons)
+
+    # ── CAUTION regime bypass for non-DISCRETIONARY ───────────────────────
+
+    def test_caution_regime_does_not_block_washout(self) -> None:
+        """CAUTION should permit LEAPS for a WASHOUT entry."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["regime_state"] = "CAUTION"
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT")
+        assert result.leaps_eligible is True
+        assert not any("Regime" in r for r in result.block_reasons)
+
+    def test_caution_regime_does_not_block_catalyst_validated(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["regime_state"] = "CAUTION"
+        result = _compute_eligibility(**kwargs, entry_type="CATALYST_VALIDATED")
+        assert result.leaps_eligible is True
+        assert not any("Regime" in r for r in result.block_reasons)
+
+    def test_caution_regime_blocks_discretionary(self) -> None:
+        """CAUTION must still block DISCRETIONARY entries."""
+        kwargs = _make_clear_eligibility_kwargs()
+        kwargs["regime_state"] = "CAUTION"
+        result = _compute_eligibility(**kwargs, entry_type="DISCRETIONARY")
+        assert result.leaps_eligible is False
+        assert any("Regime" in r or "regime" in r for r in result.block_reasons)
+
+    def test_entry_type_stored_on_result(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        result = _compute_eligibility(**kwargs, entry_type="WASHOUT")
+        assert result.entry_type == "WASHOUT"
+
+    def test_entry_type_none_stored_on_result(self) -> None:
+        kwargs = _make_clear_eligibility_kwargs()
+        result = _compute_eligibility(**kwargs)
+        assert result.entry_type is None

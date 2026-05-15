@@ -1,7 +1,9 @@
 import { apiFetch } from '@/lib/api/client';
 import {
+  f29EvaluationSchema,
   framework29GateStatusSchema,
   framework29ResultSchema,
+  type F29Evaluation,
   type Framework29GateStatus,
   type Framework29Result,
 } from '@/lib/schemas/framework29';
@@ -58,4 +60,18 @@ export function refreshFramework29(): Promise<Framework29Result> {
   return apiFetch('/api/v1/framework29/refresh', framework29ResultSchema, {
     method: 'POST',
   });
+}
+
+/**
+ * Three-path entry-type classifier for a specific ticker.
+ * Calls GET /api/v1/framework29/evaluate/{ticker}.
+ *
+ * Returns F29Evaluation with explicit data gaps for any unavailable sources.
+ */
+export function fetchF29Evaluation(ticker: string): Promise<F29Evaluation> {
+  return apiFetch(
+    `/api/v1/framework29/evaluate/${encodeURIComponent(ticker)}`,
+    f29EvaluationSchema,
+    { cache: 'no-store' },
+  );
 }

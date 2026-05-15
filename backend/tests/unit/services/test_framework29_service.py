@@ -4,12 +4,15 @@ Tests exercise pure (I/O-free) signal helpers only.
 Async fetcher functions and the full evaluation loop are covered by integration
 tests that inject mock httpx clients.
 
-New signal spec (CLAUDE.md, updated 2026-04-29):
+Updated signal spec (2026-05-14):
   1. VIX touches prior regime-high then declines ≥3 consecutive sessions
-  2. Brent closes below $95 for 2 consecutive sessions
+  2. Regime modifier is CAUTION — market stress confirms capitulation dynamics
   3. Put/call ratio spikes above 1.3 then reverses downward
   4. S&P 500 breadth computed from Polygon components: dips below 30% then recovers
-  5. Operator geo flag = RESOLVED
+  [S5 removed — CRISIS HALT is now a hard stop, not a confirming signal]
+
+Gate rule: 3 of 4 confirmed = GREEN LIGHT
+CRISIS HALT regime blocks F29 regardless of signal count.
 """
 
 from __future__ import annotations
@@ -22,16 +25,14 @@ from atlas.schemas.framework29 import SignalStatus
 from atlas.services.framework29_service import (
     _BREADTH_MIN_VALID_TICKERS,
     _BREADTH_WASHOUT_THRESHOLD,
-    _BRENT_CONSECUTIVE_SESSIONS,
-    _BRENT_HARD_THRESHOLD,
     _PCR_PANIC_THRESHOLD,
+    _REGIME_CAUTION_LABEL,
     _VIX_DECLINE_SESSIONS,
     _VIX_REGIME_WINDOW,
     _check_signal1_vix,
-    _check_signal2_brent,
+    _check_signal2_regime,
     _check_signal3_pcr,
     _check_signal4_breadth,
-    _check_signal5_geo_flag,
     _compute_breadth_pct_series,
     _determine_gate_status,
     _fetch_sp500_breadth_series,
@@ -108,42 +109,48 @@ class TestSignal1Vix:
 
 
 # ---------------------------------------------------------------------------
-# Signal 2 — Brent below $95 for 2 consecutive sessions
+# Signal 2 — Regime modifier is CAUTION (replaces Brent oil signal)
 # ---------------------------------------------------------------------------
 
 
-class TestSignal2Brent:
-    def test_confirmed_when_both_sessions_below(self) -> None:
-        closes = [100.0, 98.0, 94.0, 93.5]
-        status, vals = _check_signal2_brent(closes)
+class TestSignal2Regime:
+    def test_confirmed_when_caution(self) -> None:
+        status, vals = _check_signal2_regime("CAUTION")
         assert status == SignalStatus.CONFIRMED
         assert vals["confirmed"] is True
 
-    def test_not_met_when_only_one_session_below(self) -> None:
-        closes = [100.0, 96.0, 93.0]
-        # 96 is above threshold, 93 is below → only one session below
-        status, vals = _check_signal2_brent(closes)
+    def test_not_met_when_soft_caution(self) -> None:
+        status, vals = _check_signal2_regime("SOFT CAUTION")
         assert status == SignalStatus.NOT_MET
+        assert vals["confirmed"] is False
 
-    def test_not_met_when_above_threshold(self) -> None:
-        closes = [98.0, 97.5]
-        status, vals = _check_signal2_brent(closes)
+    def test_not_met_when_clear(self) -> None:
+        status, vals = _check_signal2_regime("CLEAR")
         assert status == SignalStatus.NOT_MET
+        assert vals["confirmed"] is False
 
-    def test_not_met_when_exactly_at_threshold(self) -> None:
-        # Threshold is strict less-than
-        closes = [_BRENT_HARD_THRESHOLD, _BRENT_HARD_THRESHOLD]
-        status, _ = _check_signal2_brent(closes)
-        assert status == SignalStatus.NOT_MET
-
-    def test_unavailable_when_only_one_close(self) -> None:
-        status, vals = _check_signal2_brent([93.0])
+    def test_unavailable_when_none(self) -> None:
+        status, vals = _check_signal2_regime(None)
         assert status == SignalStatus.UNAVAILABLE
         assert "reason" in vals
 
-    def test_constants_are_correct(self) -> None:
-        assert _BRENT_HARD_THRESHOLD == 95.0
-        assert _BRENT_CONSECUTIVE_SESSIONS == 2
+    def test_not_met_when_crisis_halt_safety_path(self) -> None:
+        # CRISIS_HALT should not reach S2 (hard stop fires first), but if it
+        # somehow does, S2 returns NOT_MET rather than CONFIRMED.
+        status, vals = _check_signal2_regime("CRISIS HALT")
+        assert status == SignalStatus.NOT_MET
+
+    def test_regime_label_present_in_output(self) -> None:
+        _, vals = _check_signal2_regime("CAUTION")
+        assert vals["regime_label"] == "CAUTION"
+
+    def test_constant_value(self) -> None:
+        assert _REGIME_CAUTION_LABEL == "CAUTION"
+
+    def test_case_normalised(self) -> None:
+        # lowercase input should still confirm
+        status, _ = _check_signal2_regime("caution")
+        assert status == SignalStatus.CONFIRMED
 
 
 # ---------------------------------------------------------------------------
@@ -229,45 +236,23 @@ class TestSignal4Breadth:
 
 
 # ---------------------------------------------------------------------------
-# Signal 5 — Geopolitical flag from Framework 2 (any non-NONE value)
+# Crisis halt constant — hard stop replaces old Signal 5 geo flag
 # ---------------------------------------------------------------------------
 
 
-class TestSignal5GeoFlag:
-    def test_confirmed_when_resolved(self) -> None:
-        status, vals = _check_signal5_geo_flag("RESOLVED")
-        assert status == SignalStatus.CONFIRMED
-        assert vals["confirmed"] is True
+class TestCrisisHaltHardStop:
+    """S5 geo flag removed — CRISIS HALT is now a hard stop checked in the gate
+    before any signal evaluation. These tests verify the regime signal behaviour
+    covers the hard stop path through _check_signal2_regime."""
 
-    def test_confirmed_when_active_risk(self) -> None:
-        status, vals = _check_signal5_geo_flag("ACTIVE_RISK")
-        assert status == SignalStatus.CONFIRMED
-
-    def test_confirmed_when_escalating(self) -> None:
-        status, vals = _check_signal5_geo_flag("ESCALATING")
-        assert status == SignalStatus.CONFIRMED
-
-    def test_confirmed_when_de_escalating(self) -> None:
-        status, vals = _check_signal5_geo_flag("DE_ESCALATING")
-        assert status == SignalStatus.CONFIRMED
-
-    def test_not_met_when_none(self) -> None:
-        status, vals = _check_signal5_geo_flag("NONE")
-        assert status == SignalStatus.NOT_MET
-        assert vals["confirmed"] is False
-
-    def test_not_met_empty_string(self) -> None:
-        status, vals = _check_signal5_geo_flag("")
+    def test_signal2_not_met_on_crisis_halt(self) -> None:
+        # When CRISIS HALT somehow reaches S2, it must not accidentally confirm.
+        status, vals = _check_signal2_regime("CRISIS HALT")
         assert status == SignalStatus.NOT_MET
 
-    def test_case_insensitive(self) -> None:
-        status, _ = _check_signal5_geo_flag("resolved")
-        assert status == SignalStatus.CONFIRMED
-
-    def test_geo_flag_value_preserved_in_output(self) -> None:
-        _, vals = _check_signal5_geo_flag("ACTIVE_RISK")
-        assert vals["geo_flag_current"] == "ACTIVE_RISK"
-        assert vals["geo_flag_source"] == "Framework 2 (regime modifier)"
+    def test_crisis_halt_label_constant_matches_regime_service(self) -> None:
+        from atlas.services.regime_modifier_service import _rule_name  # type: ignore[attr-defined]
+        assert _rule_name(1) == "CRISIS HALT"
 
 
 # ---------------------------------------------------------------------------

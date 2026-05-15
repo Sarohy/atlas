@@ -215,7 +215,7 @@ export function FrameworksPanelsSection() {
 
       <div className="atlas-frameworks-secondary-row">
         <Framework15Card />
-        <Framework29Card />
+        <Framework29Card ticker={activeTicker ?? ''} />
         <Framework30Card />
       </div>
 

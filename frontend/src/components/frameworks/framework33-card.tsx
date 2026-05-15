@@ -50,19 +50,21 @@ type Framework33CardProps = {
 /**
  * Framework 33 — LEAPS Entry Conditions V2.
  *
- * Surfaces the two F33 entry gates (A: Calm Accumulation, B: Washout) and
- * sizing guidance. Data is sourced from the LEAPS eligibility endpoint since
- * F33 conditions are evaluated inside the LEAPS pipeline.
+ * Surfaces the three F33 entry gates (A: Calm Accumulation, B: Washout,
+ * C: Bull Market Path) and sizing guidance. Data is sourced from the LEAPS
+ * eligibility endpoint since F33 conditions are evaluated inside the LEAPS
+ * pipeline.
  *
  * Sections:
  *   1. Header + entry-permitted chip
  *   2. Excluded ticker warning (when applicable)
  *   3. Condition A card (Calm Accumulation)
  *   4. Condition B card (Washout)
- *   5. Size guidance
- *   6. AND gate note
- *   7. Block reasons (if any)
- *   8. Data age footer
+ *   5. Condition C card (Bull Market Path)
+ *   6. Size guidance
+ *   7. AND gate note
+ *   8. Block reasons (if any)
+ *   9. Data age footer
  */
 export function Framework33Card({ ticker }: Framework33CardProps) {
   const hasTicker = ticker.trim().length > 0;
@@ -173,6 +175,9 @@ function F33Content({ data }: { data: LeapsEligibility }) {
   const condB = data.entry_conditions.find((c) =>
     c.condition_name.includes('Condition B'),
   );
+  const condC = data.entry_conditions.find((c) =>
+    c.condition_name.includes('Condition C'),
+  );
 
   return (
     <div className="atlas-f33-content" data-testid="f33-content">
@@ -248,6 +253,39 @@ function F33Content({ data }: { data: LeapsEligibility }) {
           </p>
           {condB?.detail && (
             <p className="atlas-f33-condition-detail">{condB.detail}</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Condition C ── */}
+      {!excluded && (
+        <div
+          className={cn(
+            'atlas-f33-condition',
+            condC ? COND_STATUS_CLASS[condC.status] : 'is-f33-cond-incomplete',
+          )}
+          data-testid="f33-condition-c"
+        >
+          <div className="atlas-f33-condition-header">
+            <div className="atlas-f33-condition-title-row">
+              <span className="atlas-f33-condition-label">Condition C</span>
+              <span className="atlas-f33-condition-name">Bull Market Path</span>
+            </div>
+            <span
+              className={cn(
+                'atlas-f33-condition-chip',
+                condC ? COND_STATUS_CLASS[condC.status] : 'is-f33-cond-incomplete',
+              )}
+              data-testid="f33-condition-c-chip"
+            >
+              {condC ? COND_STATUS_LABEL[condC.status] : 'INCOMPLETE'}
+            </span>
+          </div>
+          <p className="atlas-f33-condition-rule">
+            T1E ≥85 + dark pool bullish + options flow confirmed + no gap day
+          </p>
+          {condC?.detail && (
+            <p className="atlas-f33-condition-detail">{condC.detail}</p>
           )}
         </div>
       )}

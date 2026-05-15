@@ -144,6 +144,65 @@ def _cache_invalidate(ticker: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Entry type classification (pure)
+# ---------------------------------------------------------------------------
+
+# Thresholds for WASHOUT detection.
+_WASHOUT_DROP_THRESHOLD: Final[float] = 0.08   # single-session price drop ≥ 8%
+_WASHOUT_F4_SCORE_MIN: Final[float] = 11.0     # F4 dark pool score ≥ 11
+
+# Thresholds for CATALYST_VALIDATED detection.
+_CATALYST_T2_SCORE_MIN: Final[int] = 70        # T2 tier floor (score ≥ 70)
+_CATALYST_MIN_SIGNALS: Final[int] = 2          # minimum confirmed catalyst signals
+
+
+def _determine_entry_type(
+    single_session_drop_pct: float | None,
+    f4_score: float | None,
+    position_held: bool,
+    score: int | None,
+    catalyst_13f_concentration_buy: bool | None = None,
+    catalyst_analyst_pt_raise: bool | None = None,
+    catalyst_revenue_inflection: bool | None = None,
+) -> str:
+    """Classify the F29 entry type.  Pure function — no I/O.
+
+    Priority order:
+      1. WASHOUT: underlying fell ≥8% in a single session AND F4 dark pool ≥11.
+         Bypasses the F29 AND gate entirely.
+      2. CATALYST_VALIDATED: position already held + score ≥ T2 (≥70) + at
+         least 2 of: 13F concentration buy, analyst PT raise post-mgmt meeting,
+         revenue inflection confirmed in earnings.
+         Also bypasses the F29 AND gate.
+      3. DISCRETIONARY: everything else.  Requires F29 AND gate to pass.
+
+    Returns one of the string literals "WASHOUT", "CATALYST_VALIDATED", or
+    "DISCRETIONARY".
+    """
+    # 1 — WASHOUT check (highest priority)
+    if (
+        single_session_drop_pct is not None
+        and single_session_drop_pct >= _WASHOUT_DROP_THRESHOLD
+        and f4_score is not None
+        and f4_score >= _WASHOUT_F4_SCORE_MIN
+    ):
+        return "WASHOUT"
+
+    # 2 — CATALYST_VALIDATED check
+    if position_held and score is not None and score >= _CATALYST_T2_SCORE_MIN:
+        catalyst_signals = [
+            catalyst_13f_concentration_buy,
+            catalyst_analyst_pt_raise,
+            catalyst_revenue_inflection,
+        ]
+        confirmed_count = sum(1 for s in catalyst_signals if s is True)
+        if confirmed_count >= _CATALYST_MIN_SIGNALS:
+            return "CATALYST_VALIDATED"
+
+    return "DISCRETIONARY"
+
+
+# ---------------------------------------------------------------------------
 # Score resolution helper
 # ---------------------------------------------------------------------------
 
@@ -440,18 +499,36 @@ def _compute_eligibility(
     gap_detected: bool | None = None,
     iv_catalyst_wait_days_remaining: int | None = None,
     size_guidance_f33: object | None = None,
+    entry_type: str | None = None,
+    crisis_halt_blocked: bool = False,
 ) -> LeapsEligibility:
     """Compute LEAPS eligibility from all pre-fetched inputs. Pure function.
 
     Returns LeapsEligibility with leaps_eligible as True | False | None.
+
+    entry_type controls two bypass behaviours:
+      WASHOUT / CATALYST_VALIDATED — skip the F29 AND gate check and allow
+        CAUTION regime (only CRISIS_HALT is a hard stop for these entries).
+      DISCRETIONARY / None — full gate checks apply.
+
+    crisis_halt_blocked=True is a hard stop regardless of entry_type.
     """
     iv_blocked = _check_iv_block(iv_current)
     regime_clears = _check_regime_clears_leaps(regime_state)
     iv_alert = _compute_iv_alert(iv_current, iv_percentile)
 
+    # Whether this entry type bypasses the F29 gate and CAUTION regime check.
+    _bypass_macro_gate = entry_type in ("WASHOUT", "CATALYST_VALIDATED")
+
     block_reasons: list[str] = []
     warning_messages: list[str] = []
     has_unknown = False
+
+    # --- CRISIS HALT hard stop (overrides every entry type) ---
+    if crisis_halt_blocked:
+        block_reasons.append(
+            "CRISIS HALT active — no LEAPS permitted regardless of entry type."
+        )
 
     # --- Score availability check (Rule 6: never default to any score value) ---
     # When Framework 1 data is missing, eligibility cannot be determined.
@@ -478,13 +555,15 @@ def _compute_eligibility(
         has_unknown = True
         warning_messages.append("F7 gate status unknown — eligibility deferred.")
 
-    if gate_f29_passed is False:
-        block_reasons.append(
-            "F29 AND gate not passed — capitulation/re-entry conditions not met."
-        )
-    elif gate_f29_passed is None:
-        has_unknown = True
-        warning_messages.append("F29 gate status unknown — eligibility deferred.")
+    # F29 gate only required for DISCRETIONARY entries (WASHOUT/CATALYST_VALIDATED bypass).
+    if not _bypass_macro_gate:
+        if gate_f29_passed is False:
+            block_reasons.append(
+                "F29 AND gate not passed — capitulation/re-entry conditions not met."
+            )
+        elif gate_f29_passed is None:
+            has_unknown = True
+            warning_messages.append("F29 gate status unknown — eligibility deferred.")
 
     if gate_f30_permits_leaps is False:
         block_reasons.append("F30 HARD_HALT — LEAPS blocked.")
@@ -516,11 +595,15 @@ def _compute_eligibility(
         has_unknown = True
         warning_messages.append("IV data unavailable — eligibility deferred.")
 
+    # CAUTION regime blocks DISCRETIONARY only; WASHOUT/CATALYST_VALIDATED bypass it.
+    # (CRISIS_HALT is handled above as a separate hard stop.)
     if regime_clears is False:
-        block_reasons.append(f"Regime {regime_state} does not permit LEAPS.")
+        if not _bypass_macro_gate:
+            block_reasons.append(f"Regime {regime_state} does not permit LEAPS.")
     elif regime_clears is None:
-        has_unknown = True
-        warning_messages.append("Regime data unavailable — eligibility deferred.")
+        if not _bypass_macro_gate:
+            has_unknown = True
+            warning_messages.append("Regime data unavailable — eligibility deferred.")
 
     # T1 and T2 require dark pool flow confirmation.
     if tier in ("T1", "T2"):
@@ -608,6 +691,7 @@ def _compute_eligibility(
         conditions_required=conditions_required,
         block_reasons=block_reasons,
         warning_messages=warning_messages,
+        entry_type=entry_type,
         expiry_guidance=_default_expiry_guidance(),
         size_guidance=size_guidance,
         data_age_minutes=data_age_minutes,
@@ -941,19 +1025,31 @@ async def check_leaps_eligibility(
 
     # --- Gap-day detection from Polygon price snapshot ---
     gap_detected: bool | None = None
+    single_session_drop_pct: float | None = None
+    open_price_val: float | None = None
+    prev_close_val: float | None = None
     if not isinstance(gap_result_raw, BaseException):
-        open_price, prev_close = gap_result_raw
-        gap_detected = _detect_price_gap(open_price, prev_close)
+        open_price_val, prev_close_val = gap_result_raw
+        gap_detected = _detect_price_gap(open_price_val, prev_close_val)
+        if (
+            open_price_val is not None
+            and prev_close_val is not None
+            and prev_close_val > 0
+            and open_price_val < prev_close_val
+        ):
+            single_session_drop_pct = (prev_close_val - open_price_val) / prev_close_val
 
     # --- Dark pool flow from F9 (Tier 2 confirmation only) ---
     # F9 is used exclusively for the $500K dark pool flow check.
     # F9 f4_score is NOT the conviction score — do not use it here.
     flow_confirmed: bool | None = None
+    f4_score_val: float | None = None
 
     if not isinstance(f9_result, BaseException):
         dp_usd = f9_result.largest_print_usd
         if dp_usd is not None:
             flow_confirmed = float(dp_usd) >= _TIER_2_DARK_POOL_FLOW_USD
+        f4_score_val = getattr(f9_result, "f4_score", None)
 
     iv_current: float | None = None
     iv_percentile: float | None = None
@@ -962,8 +1058,10 @@ async def check_leaps_eligibility(
 
     gate_f29_passed: bool | None = None
     f29_vix_signal: bool | None = None
+    crisis_halt_blocked: bool = False
     if not isinstance(f29_result_raw, BaseException) and f29_result_raw is not None:
         gate_f29_passed = f29_result_raw.and_gate_passed  # type: ignore[attr-defined]
+        crisis_halt_blocked = bool(getattr(f29_result_raw, "crisis_halt_blocked", False))
         # Extract Signal 1 (VIX declining) status for entry condition 1.
         signals = getattr(f29_result_raw, "signals", [])
         if signals:
@@ -988,10 +1086,11 @@ async def check_leaps_eligibility(
     else:
         regime_state = None
 
-    # Build entry conditions using F33 (Condition A + Condition B).
+    # Build entry conditions using F33 (Condition A + Condition B + Condition C).
     from atlas.services.framework33_service import (
         evaluate_condition_a,
         evaluate_condition_b,
+        evaluate_condition_c,
     )
 
     # F33 inputs — all come from upstream data already fetched above.
@@ -1021,6 +1120,12 @@ async def check_leaps_eligibility(
         ),
         vix_declining_from_peak=f29_vix_signal,
     )
+    cond_c = evaluate_condition_c(
+        t1e_score=score,
+        dark_pool_bullish=flow_confirmed,
+        options_flow_bullish=None,  # not yet sourced separately
+        no_gap_day=(None if gap_detected is None else not gap_detected),
+    )
 
     def _entry_condition_from_f33(
         label: str, confirmed: bool | None, detail: str
@@ -1045,6 +1150,11 @@ async def check_leaps_eligibility(
             "F33 Condition B — Washout",
             cond_b.confirmed,
             cond_b.detail,
+        ),
+        _entry_condition_from_f33(
+            "F33 Condition C — Bull Market Path",
+            cond_c.confirmed,
+            cond_c.detail,
         ),
     ]
 
@@ -1073,6 +1183,17 @@ async def check_leaps_eligibility(
     else:
         gate_f15_blocks = False
 
+    # --- Entry type classification (F29 bypass logic) ---
+    # position_held: requires a DB check; stubbed False until Section 17 DB query
+    # is added. WASHOUT path is fully functional; CATALYST_VALIDATED requires a
+    # future DB lookup to confirm the position exists.
+    entry_type = _determine_entry_type(
+        single_session_drop_pct=single_session_drop_pct,
+        f4_score=f4_score_val,
+        position_held=False,  # TODO(#leaps-position-held): query DB for open position
+        score=score,
+    )
+
     result = _compute_eligibility(
         ticker=normalised,
         score=score,
@@ -1091,6 +1212,8 @@ async def check_leaps_eligibility(
         gap_detected=gap_detected,
         iv_catalyst_wait_days_remaining=iv_catalyst_wait_days_remaining,
         size_guidance_f33=_get_f33_size_guidance(gate_f30_permits_leaps),
+        entry_type=entry_type,
+        crisis_halt_blocked=crisis_halt_blocked,
     )
 
     _cache_set(normalised, result)

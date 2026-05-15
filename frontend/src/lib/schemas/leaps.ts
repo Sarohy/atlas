@@ -79,6 +79,8 @@ export const leapsEligibilitySchema = z.object({
   block_reasons: z.array(z.string()),
   warning_messages: z.array(z.string()),
 
+  entry_type: z.string().nullable().optional(),
+
   expiry_guidance: leapsExpiryGuidanceSchema,
   size_guidance: sizeGuidanceSchema,
 

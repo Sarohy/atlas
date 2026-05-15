@@ -5307,6 +5307,15 @@
   background: rgba(245, 158, 11, 0.12);
 }
 
+.atlas-f29-signal-values {
+  margin: 4px 0 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.58rem;
+  color: #8da3b0;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+
 .atlas-f29-signal-missing {
   margin: 0;
   font-family: 'Courier New', Courier, monospace;
@@ -5342,6 +5351,23 @@
   outline-offset: 2px;
 }
 
+/* ── CRISIS HALT hard-stop banner ── */
+
+.atlas-f29-crisis-halt-banner {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ff4444;
+  background: rgba(255, 68, 68, 0.08);
+  border: 1px solid rgba(255, 68, 68, 0.4);
+  border-left: 3px solid #ff4444;
+  border-radius: 3px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+}
+
 /* ── Warning messages ── */
 
 .atlas-f29-warnings {
@@ -5374,6 +5400,354 @@
   font-size: 0.5rem;
   color: #4b6070;
   letter-spacing: 0.04em;
+}
+
+/* ── Three-path classifier (new) ── */
+
+/* Gate chip state classes for the new classifier */
+.atlas-f29-gate-chip.is-f29-gate-pass {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.atlas-f29-gate-chip.is-f29-gate-blocked {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.atlas-f29-gate-chip.is-f29-gate-unavailable {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* Ticker badge in header */
+.atlas-f29-ticker-badge {
+  display: inline-block;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 3px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+/* Entry type row below header */
+.atlas-f29-entry-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.atlas-f29-entry-type-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.atlas-f29-entry-type-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* Regime precondition card */
+.atlas-f29-regime-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.atlas-f29-regime-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.atlas-f29-regime-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #4b6070;
+  text-transform: uppercase;
+  min-width: 44px;
+}
+
+.atlas-f29-regime-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.atlas-f29-regime-chip.is-f29-cond-met {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.atlas-f29-regime-chip.is-f29-gate-blocked {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.atlas-f29-regime-chip.is-f29-gate-unavailable {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.atlas-f29-regime-undefined-badge {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 2px;
+  padding: 1px 4px;
+}
+
+.atlas-f29-regime-reason {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Path cards container */
+.atlas-f29-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.atlas-f29-paths.is-f29-paths-greyed {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Individual path card (Path A / B / C) */
+.atlas-f29-path-card {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.atlas-f29-path-card.is-f29-path-active {
+  border-color: rgba(34, 211, 238, 0.35);
+  border-top: 2px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.04);
+}
+
+.atlas-f29-path-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.atlas-f29-path-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: #e8edf5;
+  text-transform: uppercase;
+}
+
+.atlas-f29-path-matched-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  color: #4b6070;
+  background: #1e2d40;
+}
+
+.atlas-f29-path-matched-chip.is-f29-cond-met {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+/* Conditions list */
+.atlas-f29-conditions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f29-condition-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f29-cond-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f29-cond-chip.is-f29-cond-met {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.atlas-f29-cond-chip.is-f29-cond-not-met {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.atlas-f29-cond-chip.is-f29-cond-unavailable {
+  color: #4b6070;
+  background: #1e2d40;
+}
+
+.atlas-f29-cond-reason {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.atlas-f29-cond-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  white-space: nowrap;
+}
+
+/* Catalyst preconditions row */
+.atlas-f29-catalyst-preconditions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.atlas-f29-sub-conditions-count {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+/* Discretionary threshold row */
+.atlas-f29-disc-threshold {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.atlas-f29-threshold-inferred-badge {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.46rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 2px;
+  padding: 1px 4px;
+}
+
+/* Data gaps section */
+.atlas-f29-data-gaps {
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  margin-top: 2px;
+}
+
+.atlas-f29-data-gaps-title {
+  margin: 0 0 5px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.atlas-f29-data-gaps-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f29-data-gap-item {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  padding-left: 10px;
+  position: relative;
+}
+
+.atlas-f29-data-gap-item::before {
+  content: '·';
+  position: absolute;
+  left: 2px;
+  color: #f59e0b;
 }
 
 /* ==========================================================================
@@ -5719,6 +6093,314 @@
   .atlas-f30-stats-row {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ==========================================================================
+   Framework 33 — LEAPS Entry Conditions  (.atlas-f33-*)
+   ========================================================================== */
+
+.atlas-f33-panel {
+  flex: 1;
+  min-width: 300px;
+}
+
+/* ── Header ── */
+
+.atlas-f33-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #111827;
+}
+
+.atlas-f33-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Entry chip ── */
+
+.atlas-f33-entry-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f33-entry-chip.is-f33-permitted {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.atlas-f33-entry-chip.is-f33-blocked {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.atlas-f33-entry-chip.is-f33-unknown {
+  color: #4b6070;
+  background: #1e2d40;
+  border-color: #1e2d40;
+}
+
+/* ── Excluded ticker banner ── */
+
+.atlas-f33-excluded-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: rgba(248, 81, 73, 0.07);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  margin-bottom: 8px;
+}
+
+.atlas-f33-excluded-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f85149;
+  flex-shrink: 0;
+}
+
+.atlas-f33-excluded-detail {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* ── Condition cards ── */
+
+.atlas-f33-condition {
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  border-radius: 4px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+
+.atlas-f33-condition.is-f33-cond-confirmed { border-left: 3px solid #22c55e; }
+.atlas-f33-condition.is-f33-cond-not-met   { border-left: 3px solid #f85149; }
+.atlas-f33-condition.is-f33-cond-incomplete { border-left: 3px solid #334155; }
+.atlas-f33-condition.is-f33-cond-na        { border-left: 3px solid #1e2d40; }
+
+.atlas-f33-condition-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-f33-condition-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 1;
+}
+
+.atlas-f33-condition-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #4b6070;
+  min-width: 72px;
+}
+
+.atlas-f33-condition-name {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.atlas-f33-condition-chip {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atlas-f33-condition-chip.is-f33-cond-confirmed {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.atlas-f33-condition-chip.is-f33-cond-not-met {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.atlas-f33-condition-chip.is-f33-cond-incomplete {
+  color: #4b6070;
+  background: #1e2d40;
+}
+
+.atlas-f33-condition-chip.is-f33-cond-na {
+  color: #2d3f52;
+  background: #111e2e;
+}
+
+.atlas-f33-condition-rule {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #4b6070;
+  line-height: 1.4;
+}
+
+.atlas-f33-condition-detail {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* ── Size guidance ── */
+
+.atlas-f33-size-guidance {
+  padding: 9px 10px;
+  border-radius: 4px;
+  background: #0b1623;
+  border: 1px solid #1e2d40;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.atlas-f33-size-title {
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.atlas-f33-size-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.atlas-f33-size-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.atlas-f33-size-label {
+  font-size: 0.48rem;
+  font-weight: 600;
+  color: #4b6070;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.atlas-f33-size-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #7fa8c0;
+}
+
+.atlas-f33-size-value.is-f33-size-carveout { color: #f59e0b; }
+
+.atlas-f33-size-carveout-badge {
+  font-size: 0.48rem;
+  color: #f59e0b;
+  font-weight: 400;
+}
+
+/* ── AND gate note ── */
+
+.atlas-f33-and-gate {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  margin-bottom: 8px;
+}
+
+.atlas-f33-and-gate-icon {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  color: #f59e0b;
+  margin-top: 1px;
+}
+
+.atlas-f33-and-gate-text {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.52rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+/* ── Block reasons ── */
+
+.atlas-f33-block-reasons {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.atlas-f33-block-reason {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.55rem;
+  color: #fca5a5;
+  padding: 3px 6px;
+  background: rgba(239, 68, 68, 0.06);
+  border-left: 2px solid #f85149;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.4;
+}
+
+/* ── Footer ── */
+
+.atlas-f33-footer {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid #111827;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.5rem;
+  color: #4b6070;
+  letter-spacing: 0.04em;
+}
+
+/* ── Content wrapper ── */
+
+.atlas-f33-content {
+  display: flex;
+  flex-direction: column;
 }
 
 /* ==========================================================================

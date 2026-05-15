@@ -1,6 +1,6 @@
 """Framework 33 — LEAPS Entry Conditions V2.
 
-Two purely functional entry gates for LEAPS positions:
+Three purely functional entry gates for LEAPS positions:
 
   Condition A — Calm Accumulation:
       Ticker is ≥ 20% below its all-time high AND VIX is in the calm
@@ -10,6 +10,11 @@ Two purely functional entry gates for LEAPS positions:
       Sector is ≥ 25% below its peak AND confirmed capitulation volume
       has printed AND VIX is elevated but DECLINING from its recent
       peak (panic has peaked; the washout is over).
+
+  Condition C — Bull Market Path:
+      T1E composite score ≥ 85 AND dark pool flow is bullish AND options
+      flow confirms bullish positioning AND no large overnight gap today.
+      Enables LEAPS entry in a rising market without requiring a crash.
 
 Position sizing:
   - Standard: 0.3-1.0% of total portfolio per name.
@@ -59,6 +64,10 @@ _SIZE_CARVEOUT_MAX_PCT: Final[float] = 0.5  # Max per name under F30 drawdown ga
 
 # AND gate threshold — entries above this amount require the AND gate
 _AND_GATE_THRESHOLD_USD: Final[float] = 10_000.0
+
+# Condition C — Bull Market Path thresholds
+# Minimum T1E (Framework 1 Earnings / composite) score to qualify
+_COND_C_T1E_MIN_SCORE: Final[int] = 85  # score out of 100
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +142,32 @@ class ConditionBResult:
 
 
 @dataclass(frozen=True)
+class ConditionCResult:
+    """Result of the Bull Market Path entry gate evaluation."""
+
+    confirmed: bool | None
+    """True = qualifies; False = does not qualify; None = data unavailable."""
+
+    t1e_qualifies: bool
+    """True when t1e_score >= _COND_C_T1E_MIN_SCORE."""
+
+    dark_pool_bullish: bool | None
+    """Whether dark pool flow is directionally bullish (caller-evaluated)."""
+
+    options_flow_bullish: bool | None
+    """Whether options flow is bullish (caller-evaluated from F4 score)."""
+
+    no_gap_day: bool | None
+    """True when there is no large overnight gap in the ticker today."""
+
+    data_missing: bool
+    """True when one or more required inputs were None."""
+
+    detail: str
+    """Human-readable status summary."""
+
+
+@dataclass(frozen=True)
 class F33EntryResult:
     """Composite F33 entry evaluation result."""
 
@@ -140,7 +175,7 @@ class F33EntryResult:
     """True = entry permitted; False = blocked; None = data unavailable."""
 
     qualifying_condition: str | None
-    """'A', 'B', or None when not qualifying. A takes precedence."""
+    """'A', 'B', 'C', or None when not qualifying. A takes precedence."""
 
     excluded: bool
     """True when ticker is on the static exclusion list."""
@@ -162,6 +197,9 @@ class F33EntryResult:
 
     condition_b: ConditionBResult
     """Detailed Condition B sub-evaluation."""
+
+    condition_c: ConditionCResult
+    """Detailed Condition C (Bull Market Path) sub-evaluation."""
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +357,79 @@ def evaluate_condition_b(
     )
 
 
+def evaluate_condition_c(
+    t1e_score: int | None,
+    dark_pool_bullish: bool | None,
+    options_flow_bullish: bool | None,
+    no_gap_day: bool | None,
+) -> ConditionCResult:
+    """Evaluate Condition C — Bull Market Path.
+
+    All four criteria must be True for the condition to be confirmed.
+    If any input is ``None`` the result is ``confirmed=None`` (data unavailable).
+
+    This condition enables LEAPS entry in a rising market without requiring a
+    crash or drawdown.  It requires high-conviction momentum signals:
+      • T1E composite score ≥ 85 — strong fundamental + technical setup
+      • Dark pool flow bullish — institutional accumulation confirmed
+      • Options flow bullish — smart-money call activity confirmed (F4)
+      • No gap day — ticker opened without a large overnight gap (gaps
+        distort entry prices and make option pricing unreliable)
+
+    Pure function — no I/O.
+    """
+    if any(
+        v is None
+        for v in (t1e_score, dark_pool_bullish, options_flow_bullish, no_gap_day)
+    ):
+        return ConditionCResult(
+            confirmed=None,
+            t1e_qualifies=False,
+            dark_pool_bullish=dark_pool_bullish,
+            options_flow_bullish=options_flow_bullish,
+            no_gap_day=no_gap_day,
+            data_missing=True,
+            detail="Data unavailable — one or more inputs missing",
+        )
+
+    t1e_qualifies = t1e_score >= _COND_C_T1E_MIN_SCORE  # type: ignore[operator]
+    confirmed = bool(
+        t1e_qualifies
+        and dark_pool_bullish
+        and options_flow_bullish
+        and no_gap_day
+    )
+
+    if confirmed:
+        detail = (
+            f"Bull Market Path: T1E={t1e_score} (≥{_COND_C_T1E_MIN_SCORE}), "
+            "dark pool bullish, options flow bullish, no gap day"
+        )
+    else:
+        reasons: list[str] = []
+        if not t1e_qualifies:
+            reasons.append(
+                f"T1E score {t1e_score} < {_COND_C_T1E_MIN_SCORE}"
+            )
+        if not dark_pool_bullish:
+            reasons.append("dark pool flow not bullish")
+        if not options_flow_bullish:
+            reasons.append("options flow not bullish")
+        if not no_gap_day:
+            reasons.append("gap day detected — entry deferred")
+        detail = "Not met: " + "; ".join(reasons)
+
+    return ConditionCResult(
+        confirmed=confirmed,
+        t1e_qualifies=t1e_qualifies,
+        dark_pool_bullish=dark_pool_bullish,
+        options_flow_bullish=options_flow_bullish,
+        no_gap_day=no_gap_day,
+        data_missing=False,
+        detail=detail,
+    )
+
+
 def compute_per_name_size_pct(
     f30_drawdown_gate_active: bool | None,
 ) -> SizeGuidance:
@@ -368,6 +479,10 @@ def compute_f33_entry(
     f30_drawdown_gate_active: bool | None,
     intended_entry_usd: float | None = None,
     and_gate_passed: bool | None = None,
+    t1e_score: int | None = None,
+    dark_pool_bullish: bool | None = None,
+    options_flow_bullish: bool | None = None,
+    no_gap_day: bool | None = None,
 ) -> F33EntryResult:
     """Compute the composite F33 entry decision for a LEAPS position.
 
@@ -375,11 +490,12 @@ def compute_f33_entry(
     1. Static exclusion — block immediately.
     2. Condition A (Calm Accumulation) evaluation.
     3. Condition B (Washout) evaluation.
-    4. Data-missing guard — if neither condition could be evaluated, return
+    4. Condition C (Bull Market Path) evaluation.
+    5. Data-missing guard — if no condition could be evaluated, return
        qualifies=None.
-    5. Qualify when A or B is confirmed (A takes precedence when both are).
-    6. AND gate check — entries above $10 K require ``and_gate_passed=True``.
-    7. Attach size guidance.
+    6. Qualify when A, B, or C is confirmed (A > B > C precedence).
+    7. AND gate check — entries above $10 K require ``and_gate_passed=True``.
+    8. Attach size guidance.
 
     Parameters
     ----------
@@ -405,18 +521,27 @@ def compute_f33_entry(
     and_gate_passed:
         Whether the AND gate (CLEAR regime + F29 3-of-5) was passed.
         Only evaluated when ``intended_entry_usd > _AND_GATE_THRESHOLD_USD``.
+    t1e_score:
+        Composite T1E score (0-100).  Required for Condition C.
+    dark_pool_bullish:
+        Whether dark pool flow is directionally bullish (from F4/Unusual Whales).
+    options_flow_bullish:
+        Whether options flow confirms bullish positioning (from F4 signal tier).
+    no_gap_day:
+        True when the ticker opened without a large overnight gap today.
     """
     size_guidance = compute_per_name_size_pct(f30_drawdown_gate_active)
+    cond_a = evaluate_condition_a(drawdown_from_high_pct, vix_current)
+    cond_b = evaluate_condition_b(
+        sector_drawdown_pct,
+        capitulation_volume_confirmed,
+        vix_elevated,
+        vix_declining_from_peak,
+    )
+    cond_c = evaluate_condition_c(t1e_score, dark_pool_bullish, options_flow_bullish, no_gap_day)
 
     # -- Static exclusion ----------------------------------------------------
     if is_excluded_ticker(ticker):
-        cond_a = evaluate_condition_a(drawdown_from_high_pct, vix_current)
-        cond_b = evaluate_condition_b(
-            sector_drawdown_pct,
-            capitulation_volume_confirmed,
-            vix_elevated,
-            vix_declining_from_peak,
-        )
         return F33EntryResult(
             qualifies=False,
             qualifying_condition=None,
@@ -430,36 +555,33 @@ def compute_f33_entry(
             size_guidance=size_guidance,
             condition_a=cond_a,
             condition_b=cond_b,
+            condition_c=cond_c,
         )
 
-    cond_a = evaluate_condition_a(drawdown_from_high_pct, vix_current)
-    cond_b = evaluate_condition_b(
-        sector_drawdown_pct,
-        capitulation_volume_confirmed,
-        vix_elevated,
-        vix_declining_from_peak,
-    )
-
     # -- Data-missing guard --------------------------------------------------
-    if cond_a.confirmed is None and cond_b.confirmed is None:
+    if cond_a.confirmed is None and cond_b.confirmed is None and cond_c.confirmed is None:
         return F33EntryResult(
             qualifies=None,
             qualifying_condition=None,
             excluded=False,
             data_missing=True,
             and_gate_required=False,
-            block_reason="Insufficient data to evaluate Condition A or B",
+            block_reason="Insufficient data to evaluate Condition A, B, or C",
             size_guidance=size_guidance,
             condition_a=cond_a,
             condition_b=cond_b,
+            condition_c=cond_c,
         )
 
-    # -- Condition routing (A takes precedence) ------------------------------
+    # -- Condition routing (A > B > C precedence) ----------------------------
     if cond_a.confirmed is True:
         qualifying_condition: str | None = "A"
         qualifies_raw = True
     elif cond_b.confirmed is True:
         qualifying_condition = "B"
+        qualifies_raw = True
+    elif cond_c.confirmed is True:
+        qualifying_condition = "C"
         qualifies_raw = True
     else:
         qualifying_condition = None
@@ -472,10 +594,11 @@ def compute_f33_entry(
             excluded=False,
             data_missing=False,
             and_gate_required=False,
-            block_reason="Neither Condition A nor Condition B is met",
+            block_reason="Neither Condition A, B, nor C is met",
             size_guidance=size_guidance,
             condition_a=cond_a,
             condition_b=cond_b,
+            condition_c=cond_c,
         )
 
     # -- AND gate enforcement ------------------------------------------------
@@ -498,6 +621,7 @@ def compute_f33_entry(
             size_guidance=size_guidance,
             condition_a=cond_a,
             condition_b=cond_b,
+            condition_c=cond_c,
         )
 
     return F33EntryResult(
@@ -510,4 +634,5 @@ def compute_f33_entry(
         size_guidance=size_guidance,
         condition_a=cond_a,
         condition_b=cond_b,
+        condition_c=cond_c,
     )

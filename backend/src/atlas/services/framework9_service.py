@@ -88,6 +88,9 @@ _EXCEPTIONAL_CONVICTION_DARK_POOL_BLOCK_USD: Final[float] = 1_000_000.0
 _EXCEPTIONAL_CONVICTION_DARK_POOL_MIN_BLOCKS: Final[int] = 2  # "multiple" = >=2
 # Criterion 5: bullish call/put ratio threshold indicating skew.
 _EXCEPTIONAL_CONVICTION_CP_RATIO_MIN: Final[float] = 2.0
+# Criterion 5 (F4 v2): bullish options_flow_score threshold. Maps to the +75
+# anchor across all tiers, i.e. tier-appropriate strongly bullish net flow.
+_EXCEPTIONAL_CONVICTION_OPTIONS_SCORE_MIN: Final[int] = 75
 # Reward when EC is active: +10% premium on base score.
 _EXCEPTIONAL_CONVICTION_PREMIUM_PCT: Final[float] = 0.10
 
@@ -774,54 +777,60 @@ async def evaluate_framework9(
                 breakdown={},
             )
 
-        # ----- F4 succeeded — derive F9 fields from F4's response. -----
+        # ----- F4 succeeded — derive F9 fields from F4's v2 response. -----
         base_score: float = float(f4.f4_score)
-        cp_ratio: float | None = f4.call_put_ratio.ratio
-        largest_premium: float = float(f4.whale_block.largest_premium or 0.0)
-        largest_dp: float | None = f4.dark_pool.largest_print
-        dp_count: int = f4.dark_pool.print_count or 0
+        # F4 v2 no longer exposes a call/put ratio — flow direction now comes
+        # directly off the signed net flows. Keep the variable as None for
+        # downstream display compatibility (it is rendered as "N/A").
+        cp_ratio: float | None = None
+        largest_premium: float = float(f4.largest_options_buy_usd or 0.0)
+        largest_dp: float | None = f4.largest_dark_pool_buy_usd
+        dp_count: int = f4.dark_pool_prints_count or 0
 
-        # Flow direction is implied by F4's call/put ratio (it has no explicit
-        # bull/bear field). Thresholds match F4's own _score_cp_ratio bands.
-        if cp_ratio is None:
-            uw_direction: str = "NEUTRAL"
-        elif cp_ratio > 1.5:
-            uw_direction = "BULLISH"
-        elif cp_ratio < 0.7:
-            uw_direction = "BEARISH"
+        # Flow direction now comes straight from F4 v2.
+        uw_direction: str = f4.flow_direction
+
+        # Map F4 v2's f4_score onto F9's tier enum (the legacy GOLD/BLUE
+        # signal hierarchy is gone — we now derive tier from the composite
+        # score so downstream UI / framework 12 / section 16 keep working).
+        if base_score >= _GRADE_STRONG_BUY_MIN:
+            tier: SignalTier = SignalTier.TIER_1_WHALE
+        elif base_score >= _GRADE_BUY_MIN:
+            tier = SignalTier.TIER_2_INSTITUTIONAL
+        elif base_score >= _GRADE_NEUTRAL_MIN:
+            tier = SignalTier.TIER_3_UNUSUAL
+        elif base_score >= _GRADE_WEAK_MIN:
+            tier = SignalTier.TIER_4_WEAK
         else:
-            uw_direction = "NEUTRAL"
+            tier = SignalTier.TIER_5_NONE
 
-        # Map F4's signal hierarchy (GOLD/BLUE/GREEN/YELLOW/GREY/WHITE) onto
-        # F9's tier enum so downstream UI keeps working unchanged.
-        f4_tier_str = (
-            f4.signal_tier.value if hasattr(f4.signal_tier, "value") else str(f4.signal_tier)
-        )
-        f4_to_f9_tier: dict[str, SignalTier] = {
-            "GOLD": SignalTier.TIER_1_WHALE,
-            "BLUE": SignalTier.TIER_1_WHALE,
-            "GREEN": SignalTier.TIER_2_INSTITUTIONAL,
-            "YELLOW": SignalTier.TIER_3_UNUSUAL,
-            "GREY": SignalTier.TIER_4_WEAK,
-            "WHITE": SignalTier.TIER_5_NONE,
-        }
-        tier: SignalTier = f4_to_f9_tier.get(f4_tier_str, SignalTier.TIER_5_NONE)
+        # Tier cap: TIER_1_WHALE requires confirmed options-flow data (the
+        # legacy whale-block signal). When options data is missing, cap at
+        # TIER_2_INSTITUTIONAL even if the composite score is high.
+        if tier == SignalTier.TIER_1_WHALE and f4.options_flow_score is None:
+            tier = SignalTier.TIER_2_INSTITUTIONAL
+        f4_tier_str = tier.value
 
-        # Derive data quality from F4's response completeness.
-        # Each missing indicator adds a gap and raises severity.
-        whale_missing = f4.whale_block.largest_premium is None
-        dp_missing = f4.dark_pool.total_dark_pool_premium is None
-        cp_missing = f4.call_put_ratio.ratio is None
+        # Derive data quality from F4 v2's data_source label.
+        # OPTIONS_ONLY → options data present, dark-pool missing.
+        # DARK_POOL_ONLY → dark-pool present, options missing.
+        # DATA_GAP → both missing.
+        data_source = f4.data_source
+        whale_missing = f4.options_flow_score is None  # "whale" ≈ options buy flow
+        dp_missing = f4.dark_pool_score is None
+        # cp_ratio is no longer produced by F4 v2 (no put/call premium exposed
+        # in the new schema); we keep `cp_missing` as a no-op for downstream
+        # gap reporting consistency but never branch on it.
 
         if whale_missing:
             gaps.append(
                 DataGapDetail(
-                    field="largest_print_usd",
+                    field="options_flow",
                     source="Unusual Whales",
-                    reason="Whale block data unavailable from F4",
+                    reason="Options-trade data unavailable from F4",
                     impact=(
-                        "Tier 1 whale signal cannot be evaluated; "
-                        "score derived from secondary indicators."
+                        "Bullish/bearish options net flow cannot be evaluated; "
+                        "score derived from dark-pool only."
                     ),
                     default_used="0",
                 )
@@ -830,41 +839,37 @@ async def evaluate_framework9(
             gaps.append(
                 DataGapDetail(
                     field="dark_pool",
-                    source="Polygon.io",
-                    reason="Dark pool data unavailable from F4",
-                    impact="Dark pool confirmation not available.",
-                    default_used="None",
-                )
-            )
-        if cp_missing:
-            gaps.append(
-                DataGapDetail(
-                    field="put_call_ratio",
-                    source="Polygon.io / Alpha Vantage",
-                    reason="Put/call ratio unavailable",
-                    impact="Call/put ratio direction cannot be assessed.",
+                    source="Unusual Whales",
+                    reason="Dark-pool data unavailable from F4",
+                    impact="Dark-pool confirmation not available.",
                     default_used="None",
                 )
             )
 
-        if whale_missing and dp_missing:
-            severity = "MAJOR"
-            f1_badge = "F4 MAJOR DATA GAP"
-            f1_msg = "Whale block and dark pool data both unavailable — F4 score degraded."
-            f1_tip = "Neither Unusual Whales nor Polygon reported data for this ticker."
-        elif whale_missing:
-            # Whale data is the primary F9 signal — missing it alone constitutes a major gap.
+        if data_source == "DATA_GAP":
             severity = "MAJOR"
             f1_badge = "F4 MAJOR DATA GAP"
             f1_msg = (
-                "Whale block data unavailable — Tier 1 signal blocked. "
-                "Score limited to secondary indicators."
+                "Options-trade and dark-pool data both unavailable — "
+                "F4 score defaulted to neutral baseline."
             )
-            f1_tip = "Unusual Whales data not available from F4 for this ticker."
+            f1_tip = f4.data_gap_reason or "Neither UW source reported data for this ticker."
+        elif whale_missing:
+            # Options data is the primary F9 directional signal — missing it
+            # alone constitutes a major gap.
+            severity = "MAJOR"
+            f1_badge = "F4 MAJOR DATA GAP"
+            f1_msg = (
+                "Options-trade data unavailable — directional signal blocked. "
+                "Score limited to dark-pool only."
+            )
+            f1_tip = (
+                f4.data_gap_reason or "Options-trade endpoint did not return data for this ticker."
+            )
         elif gaps:
             severity = "PARTIAL"
             f1_badge = "F4 PARTIAL DATA"
-            f1_msg = "Some F4 indicators unavailable — score derived from available data."
+            f1_msg = "Some F4 sub-scores unavailable — score derived from available data."
             f1_tip = "; ".join(g.reason for g in gaps)
 
         # Covered call verification: when BEARISH flow is present but dark pool is
@@ -902,21 +907,16 @@ async def evaluate_framework9(
         # Step 4 — Exceptional Conviction evaluation (when inside earnings window).
         ec_detail: ExceptionalConvictionDetail | None = None
         if gate_active:
-            # Criterion 1: dark pool multiple blocks > $1M in last 5 trading days.
-            # Proxy: largest_dp > $1M AND dp_count >= 2 (F4 aggregates same-session).
-            dp_blocks_gt_1m = (
-                dp_count
-                if (
-                    largest_dp is not None
-                    and largest_dp > _EXCEPTIONAL_CONVICTION_DARK_POOL_BLOCK_USD
-                    and dp_count >= _EXCEPTIONAL_CONVICTION_DARK_POOL_MIN_BLOCKS
-                )
-                else 0
-            )
-            # Criterion 5: bullish call skew (cp_ratio > 2.0) and BULLISH direction.
+            # Criterion 1: dark pool BUY blocks > $1M in last 5 trading days.
+            # F4 v2 exposes this count directly.
+            dp_blocks_gt_1m = f4.dark_pool_large_buy_count
+            # Criterion 5: bullish options-flow skew — F4 v2 has no cp_ratio,
+            # so we proxy strong bullish skew with an options_flow_score at or
+            # above the +75 anchor (i.e. tier-appropriate strongly bullish net
+            # flow) combined with a BULLISH overall direction.
             bullish_skew = (
-                cp_ratio is not None
-                and cp_ratio > _EXCEPTIONAL_CONVICTION_CP_RATIO_MIN
+                f4.options_flow_score is not None
+                and f4.options_flow_score >= _EXCEPTIONAL_CONVICTION_OPTIONS_SCORE_MIN
                 and uw_direction == "BULLISH"
             )
             ec_detail = evaluate_exceptional_conviction(
@@ -979,7 +979,7 @@ async def evaluate_framework9(
             flow_direction=flow_dir,
             largest_print_usd=largest_dp,
             dark_pool_spread_position=None,  # not exposed by F4 (no bid/ask from UW API)
-            dark_pool_direction=f4.dark_pool.direction,
+            dark_pool_direction=uw_direction,
             put_call_ratio=(round(cp_ratio, 2) if cp_ratio is not None else None),
             put_call_modifier=0,
             dark_pool_modifier=0,

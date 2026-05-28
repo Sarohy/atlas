@@ -1,335 +1,492 @@
-"""F4 Options Flow service.
+"""F4 Options Flow service (v2 — 3-tier market-cap anchor scoring).
 
-Data source: Unusual Whales API (https://api.unusualwhales.com)
-Authentication: Bearer token in Authorization header.
+Data sources:
+  1. Unusual Whales — GET /api/darkpool/{ticker}                (dark-pool prints)
+  2. Unusual Whales — GET /api/stock/{ticker}/flow-recent       (options trades)
+  3. Polygon.io     — GET /v3/reference/tickers/{ticker}         (market cap)
 
-Three API calls per ticker:
-  1. GET /api/stock/{ticker}/options-volume         → call/put premiums, volumes, OI
-  2. GET /api/option-trades/flow-alerts             → whale blocks, sweeps, collar detection
-  3. GET /api/darkpool/{ticker}                     → dark pool prints
+Pipeline (per ticker):
+  1. Excluded-ticker check (10 OTC/ADR symbols → DATA_GAP, no API calls).
+  2. Three concurrent fetches: market cap, dark-pool prints, flow-recent trades.
+  3. Tier = LARGE / MID / SMALL from market cap (>$50B / $5B-$50B / <$5B).
+  4. Filter prints to the last 5 trading sessions (rolling window).
+  5. Classify each dark-pool print as BUY / SELL / SETTLEMENT (NBBO anchored).
+     Strip SETTLEMENT. dark_pool_net_flow = sum(BUY $) - sum(SELL $).
+  6. Classify each option trade as NEW_BULL / PUT_SELL / NEW_BEAR /
+     PROFIT_TAKING / SPREAD_CROSS. Strip PROFIT_TAKING + SPREAD_CROSS.
+     options_net_flow = sum(NEW_BULL + PUT_SELL $) - sum(NEW_BEAR $).
+  7. Map each net flow → 0-100 score via the tier's anchor table
+     (linear interpolation, clamped 0-100).
+  8. Combine: 50/50 average when both available; single source otherwise.
+     Neither available → f4_score = 50, DATA_GAP flag.
+  9. Derive flow_direction from the sign of the combined net flow.
+ 10. Compute f4_grade (STRONG BUY / BUY / NEUTRAL / WEAK / AVOID).
 
-F4 sub-indicators and weights (Factor_Mapping_Guide Table 10):
-  1. Whale Block Size      (35%) — largest single-print premium
-  2. Call/Put Ratio        (20%) — call_premium / put_premium
-  3. Volume vs OI          (20%) — call_volume / call_open_interest
-  4. Dark Pool Print       (15%) — total dark pool premium today
-  5. Sweep Type            (10%) — golden sweep / single sweep / block / normal
-
-Collar flag: capped at 68 if multi-leg put+call structure detected.
-
-Signal Hierarchy (Factor_Mapping_Guide Table 11):
-  GOLD   — Golden Sweep >$5M multi-exchange
-  BLUE   — Whale Block  >$1M
-  GREEN  — Repeated Hits >$500K same strike
-  YELLOW — Unusual Volume >3× OI
-  GREY   — Dark Pool >$100K
-  WHITE  — Normal elevated call activity
-
-LITE worked example (F4 = 82):
-  Whale Block: 85 (1-5M block) × 0.35 = 29.75
-  Call/Put:   100 (>3:1 call)  × 0.20 = 20.00
-  Vol/OI:      85 (3-5×)       × 0.20 = 17.00
-  Dark Pool:   50 (normal)     × 0.15 =  7.50
-  Sweep:       80 (single)     × 0.10 =  8.00
-  F4 = 82.25 → 82
+Pure helpers (prefix `_`) contain no I/O. Network I/O lives only in the
+`_fetch_*` coroutines and the public `compute_options_flow()`.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
-from typing import Any, Final
+from datetime import UTC, datetime
+from typing import Any, Final, Literal
 
 import httpx
 
-from atlas.schemas.options_flow import (
-    CallPutRatioIndicator,
-    DarkPoolIndicator,
-    OptionsFlowResponse,
-    SignalTier,
-    SweepTypeIndicator,
-    VolumeOiIndicator,
-    WhaleBlockIndicator,
-)
+from atlas.schemas.options_flow import OptionsFlowResponse
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Weights
+# Endpoint + network configuration
 # ---------------------------------------------------------------------------
-
-_W_WHALE: Final[float] = 0.35
-_W_CP_RATIO: Final[float] = 0.20
-_W_VOL_OI: Final[float] = 0.20
-_W_DARK_POOL: Final[float] = 0.15
-_W_SWEEP: Final[float] = 0.10
-
-# ---------------------------------------------------------------------------
-# Score thresholds
-# ---------------------------------------------------------------------------
-
-_COLLAR_CAP: Final[int] = 68
-_GRADE_STRONG_BUY: Final[int] = 80
-_GRADE_BUY: Final[int] = 60
-_GRADE_NEUTRAL: Final[int] = 40
-_GRADE_WEAK: Final[int] = 20
-
-# Whale / golden sweep premium thresholds (USD)
-_GOLDEN_SWEEP_THRESHOLD: Final[float] = 5_000_000
-_WHALE_BLUE_THRESHOLD: Final[float] = 1_000_000
-_WHALE_GREEN_THRESHOLD: Final[float] = 500_000
-_WHALE_GREY_THRESHOLD: Final[float] = 100_000
 
 _TIMEOUT: Final[float] = 10.0
-_BASE_URL: Final[str] = "https://api.unusualwhales.com"
+_UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
+_POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
 
-# ---------------------------------------------------------------------------
-# Scoring functions (each returns 0-100)
-# ---------------------------------------------------------------------------
+# UW pagination cap. 5 sessions x ~200 prints/day ~= 1000 prints for very
+# liquid names; a single 500-print batch covers most cases and accepts a
+# small chance of truncation for the busiest tickers.
+_UW_FETCH_LIMIT: Final[int] = 500
 
+# Rolling window length: F4 v2 always evaluates the last 5 trading sessions.
+_F4_LOOKBACK_SESSIONS: Final[int] = 5
 
-def _score_whale_block(largest_premium: float | None) -> int:
-    """Whale Block Size score (0-100).
+# Exceptional Conviction support: dark-pool BUY prints >$1M counted for F9.
+_F4_LARGE_DP_BUY_USD: Final[float] = 1_000_000.0
 
-    Guide: >$5M → 100 | $1-5M → 85 | $500K-1M → 70 | $100K-500K → 50 | <$100K → 30
-    """
-    if largest_premium is None:
-        return 30
-    if largest_premium > _GOLDEN_SWEEP_THRESHOLD:
-        return 100
-    if largest_premium >= _WHALE_BLUE_THRESHOLD:
-        return 85
-    if largest_premium >= _WHALE_GREEN_THRESHOLD:
-        return 70
-    if largest_premium >= _WHALE_GREY_THRESHOLD:
-        return 50
-    return 30
+# Grade thresholds (kept identical to legacy F4 + F9 grading).
+_GRADE_STRONG_BUY_MIN: Final[int] = 80
+_GRADE_BUY_MIN: Final[int] = 60
+_GRADE_NEUTRAL_MIN: Final[int] = 40
+_GRADE_WEAK_MIN: Final[int] = 20
 
-
-def _score_cp_ratio(ratio: float | None) -> int:
-    """Call/Put Ratio score (0-100).
-
-    Guide: >3:1 → 100 | 2-3:1 → 85 | 1.5-2:1 → 70 | ~1:1 → 50 | Put heavy (<1) → 20
-    """
-    if ratio is None:
-        return 50  # neutral
-    if ratio > 3.0:
-        return 100
-    if ratio >= 2.0:
-        return 85
-    if ratio >= 1.5:
-        return 70
-    if ratio >= 0.8:
-        return 50
-    return 20
-
-
-def _score_vol_oi(vol_oi_ratio: float | None) -> int:
-    """Volume vs OI score (0-100).
-
-    Guide: >5× → 100 | 3-5× → 85 | 2-3× → 70 | 1-2× → 55 | <1× → 30
-    """
-    if vol_oi_ratio is None:
-        return 30
-    if vol_oi_ratio > 5.0:
-        return 100
-    if vol_oi_ratio >= 3.0:
-        return 85
-    if vol_oi_ratio >= 2.0:
-        return 70
-    if vol_oi_ratio >= 1.0:
-        return 55
-    return 30
-
-
-def _score_dark_pool(largest_print: float | None) -> int:
-    """Dark Pool Print score (0-100).
-
-    Guide: Print at key support level → 100 | Large block off-exchange → 80
-           Normal DP activity → 50 | None → 30
-    Thresholds: >$5M → 100 | $1-5M → 80 | $100K-1M → 50 | <$100K or none → 30
-    """
-    if largest_print is None or largest_print == 0:
-        return 30
-    if largest_print > _GOLDEN_SWEEP_THRESHOLD:
-        return 100
-    if largest_print >= _WHALE_BLUE_THRESHOLD:
-        return 80
-    if largest_print >= _WHALE_GREY_THRESHOLD:
-        return 50
-    return 30
-
-
-def _score_sweep(
-    has_golden_sweep: bool,
-    has_single_sweep: bool,
-    has_repeated_hits: bool,
-) -> int:
-    """Sweep Type score (0-100).
-
-    Guide: Golden Sweep (multi-exchange) → 100 | Single sweep → 80
-           Repeated hits → 75 | Block → 65 | Normal → 40
-    """
-    if has_golden_sweep:
-        return 100
-    if has_single_sweep:
-        return 80
-    if has_repeated_hits:
-        return 75
-    return 40
-
-
-def _derive_signal_tier(
-    largest_premium: float | None,
-    vol_oi_ratio: float | None,
-    largest_dark_pool: float | None,
-    has_golden_sweep: bool,
-    has_repeated_hits: bool,
-) -> str:
-    """Return the highest applicable signal tier per the F4 signal hierarchy."""
-    if has_golden_sweep and (largest_premium or 0) > _GOLDEN_SWEEP_THRESHOLD:
-        return SignalTier.GOLD
-    if (largest_premium or 0) >= _WHALE_BLUE_THRESHOLD:
-        return SignalTier.BLUE
-    if has_repeated_hits and (largest_premium or 0) >= _WHALE_GREEN_THRESHOLD:
-        return SignalTier.GREEN
-    if (vol_oi_ratio or 0) > 3.0:
-        return SignalTier.YELLOW
-    if (largest_dark_pool or 0) >= _WHALE_GREY_THRESHOLD:
-        return SignalTier.GREY
-    return SignalTier.WHITE
+# Flow-direction labels.
+_FLOW_BULLISH: Final[str] = "BULLISH"
+_FLOW_BEARISH: Final[str] = "BEARISH"
+_FLOW_NEUTRAL: Final[str] = "NEUTRAL"
 
 
 def _grade_from_score(score: int) -> str:
-    if score >= _GRADE_STRONG_BUY:
+    """Map an F4 score (0-100) to a grade label."""
+    if score >= _GRADE_STRONG_BUY_MIN:
         return "STRONG BUY"
-    if score >= _GRADE_BUY:
+    if score >= _GRADE_BUY_MIN:
         return "BUY"
-    if score >= _GRADE_NEUTRAL:
+    if score >= _GRADE_NEUTRAL_MIN:
         return "NEUTRAL"
-    if score >= _GRADE_WEAK:
+    if score >= _GRADE_WEAK_MIN:
         return "WEAK"
     return "AVOID"
 
 
-# ---------------------------------------------------------------------------
-# Assembly
-# ---------------------------------------------------------------------------
-
-
-def _derive_dark_pool_direction(
-    call_premium: float | None,
-    put_premium: float | None,
+def _derive_flow_direction(
+    dp_net_flow: float | None,
+    opt_net_flow: float | None,
 ) -> str:
-    """Infer dark pool direction from call/put premium ratio.
+    """Derive BULLISH / BEARISH / NEUTRAL from signed net flows.
 
-    Thresholds:
-      ratio > 1.5  → 'BULLISH'
-      ratio < 0.67 → 'BEARISH'
-      otherwise    → 'NEUTRAL'
-
-    Returns 'NEUTRAL' when either premium is None or put_premium is zero.
-    Pure function — no I/O.
+    Combines the two net flows (treating missing as 0). Positive → BULLISH,
+    negative → BEARISH, zero → NEUTRAL.
     """
-    if call_premium is None or put_premium is None or put_premium == 0.0:
-        return "NEUTRAL"
-    ratio = call_premium / put_premium
-    if ratio >= 1.5:
-        return "BULLISH"
-    if ratio < 0.67:
-        return "BEARISH"
-    return "NEUTRAL"
+    combined = (dp_net_flow or 0.0) + (opt_net_flow or 0.0)
+    if combined > 0:
+        return _FLOW_BULLISH
+    if combined < 0:
+        return _FLOW_BEARISH
+    return _FLOW_NEUTRAL
 
 
-def _build_response(
+def _filter_to_recent_sessions(
+    prints: list[dict[str, Any]],
+    timestamp_key: str = "executed_at",
+    n: int = _F4_LOOKBACK_SESSIONS,
+) -> list[dict[str, Any]]:
+    """Keep only prints whose date belongs to the N most recent unique sessions.
+
+    Parses ISO-8601 timestamps under `timestamp_key`. Prints missing or with
+    unparseable timestamps are dropped. Pure function.
+    """
+    dated: list[tuple[str, dict[str, Any]]] = []
+    for rec in prints:
+        ts = rec.get(timestamp_key)
+        if not isinstance(ts, str):
+            continue
+        try:
+            # Handle trailing 'Z' for compatibility with Python < 3.11.
+            iso = ts.replace("Z", "+00:00")
+            day = datetime.fromisoformat(iso).astimezone(UTC).date().isoformat()
+        except ValueError:
+            continue
+        dated.append((day, rec))
+
+    if not dated:
+        return []
+
+    distinct_days = sorted({d for d, _ in dated}, reverse=True)[:n]
+    window = set(distinct_days)
+    return [rec for d, rec in dated if d in window]
+
+
+# ---------------------------------------------------------------------------
+# Network I/O — Polygon market cap
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_market_cap(client: httpx.AsyncClient, ticker: str, api_key: str) -> float | None:
+    """Fetch market cap (USD) for *ticker* from Polygon.
+
+    Returns None on any error; the caller defaults the tier to SMALL when
+    the market cap is unknown (per locked Q1 default).
+    """
+    if not api_key:
+        return None
+    try:
+        resp = await client.get(
+            f"{_POLYGON_BASE_URL}/v3/reference/tickers/{ticker}",
+            params={"apiKey": api_key},
+        )
+        resp.raise_for_status()
+        payload: Any = resp.json()
+        if not isinstance(payload, dict):
+            return None
+        results = payload.get("results")
+        if not isinstance(results, dict):
+            return None
+        mcap = results.get("market_cap")
+        return float(mcap) if isinstance(mcap, (int, float)) else None
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Network I/O — UW dark pool prints
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_dark_pool_prints(
+    client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
+) -> list[dict[str, Any]] | None:
+    """Fetch raw dark-pool prints for *ticker* from Unusual Whales.
+
+    Returns a list of dict records (each with `price`, `nbbo_bid`,
+    `nbbo_ask`, `sale_cond_codes`, `executed_at`, `size`, `premium`).
+    Returns None when the API call fails — caller treats None as
+    "dark-pool data unavailable" (DARK_POOL_ONLY / DATA_GAP partial).
+    """
+    try:
+        resp = await client.get(
+            f"{_UW_BASE_URL}/api/darkpool/{ticker}",
+            params={"limit": _UW_FETCH_LIMIT},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        payload: Any = resp.json()
+        raw: list[Any] = (
+            payload
+            if isinstance(payload, list)
+            else payload.get("data", payload.get("darkpool", []))
+        )
+        return [rec for rec in raw if isinstance(rec, dict) and not rec.get("canceled")]
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Network I/O — UW option trades
+# ---------------------------------------------------------------------------
+
+
+# Tags emitted by UW flow-recent that signal trade direction.
+_UW_TAG_ASK_SIDE: Final[str] = "ask_side"
+_UW_TAG_BID_SIDE: Final[str] = "bid_side"
+
+
+def _side_from_tags(tags: Any) -> str:
+    """Derive a BID/ASK/NONE side label from the UW flow-recent `tags` list.
+
+    The flow-recent endpoint does not expose a bare `side` field; instead each
+    record carries a `tags` array (e.g. ["ask_side", "bullish"]).  We map:
+      "ask_side" in tags -> "ASK"  (bought at the ask — opening buyer)
+      "bid_side" in tags -> "BID"  (sold at the bid — opening seller)
+      otherwise          -> "NONE" (spread-cross / ambiguous)
+    """
+    if not isinstance(tags, list):
+        return _UW_SIDE_NONE
+    tag_set = {t.lower() for t in tags if isinstance(t, str)}
+    if _UW_TAG_ASK_SIDE in tag_set:
+        return _UW_SIDE_ASK
+    if _UW_TAG_BID_SIDE in tag_set:
+        return _UW_SIDE_BID
+    return _UW_SIDE_NONE
+
+
+async def _fetch_option_trades(
+    client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
+) -> list[dict[str, Any]] | None:
+    """Fetch recent option trades for *ticker* from Unusual Whales.
+
+    Uses the /api/stock/{ticker}/flow-recent endpoint (the only real per-ticker
+    trade-level options endpoint in the UW API — /option-trades does not exist).
+
+    Returns a normalised list of dicts with a synthetic `side` key derived from
+    the record's `tags` field so that `_classify_options_print` can run without
+    changes.  Cancelled records are stripped.  Returns None on API error.
+    """
+    try:
+        resp = await client.get(
+            f"{_UW_BASE_URL}/api/stock/{ticker}/flow-recent",
+            params={"limit": _UW_FETCH_LIMIT},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        payload: Any = resp.json()
+        raw: list[Any] = payload if isinstance(payload, list) else payload.get("data", [])
+        out: list[dict[str, Any]] = []
+        for rec in raw:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("canceled"):
+                continue
+            # Normalise: inject a `side` key so downstream code is unchanged.
+            normalised = dict(rec)
+            normalised["side"] = _side_from_tags(rec.get("tags"))
+            out.append(normalised)
+        return out
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Aggregation helpers — score dark-pool + options prints
+# ---------------------------------------------------------------------------
+
+
+def _safe_float(value: Any) -> float | None:
+    """Best-effort coerce *value* to float. Returns None when not numeric."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _print_premium_usd(rec: dict[str, Any]) -> float:
+    """Return the premium of a dark-pool print in USD.
+
+    Prefers an explicit `premium` field; falls back to size * price.
+    Returns 0 when neither path yields a usable number.
+    """
+    raw_prem = _safe_float(rec.get("premium"))
+    if raw_prem is not None and raw_prem > 0:
+        return raw_prem
+    size = _safe_float(rec.get("size")) or 0.0
+    price = _safe_float(rec.get("price")) or 0.0
+    return size * price
+
+
+def _aggregate_dark_pool(
+    prints: list[dict[str, Any]],
+) -> tuple[float, int, int, float | None]:
+    """Aggregate classified dark-pool prints over the window.
+
+    Returns (net_flow_usd, total_prints_count, large_buy_count, largest_buy_usd).
+    """
+    net_flow = 0.0
+    total = 0
+    large_buys = 0
+    largest_buy: float = 0.0
+
+    for rec in prints:
+        price = _safe_float(rec.get("price"))
+        if price is None:
+            continue
+        bid = _safe_float(rec.get("nbbo_bid"))
+        ask = _safe_float(rec.get("nbbo_ask"))
+        codes_raw = rec.get("sale_cond_codes") or ()
+        codes: tuple[str, ...] = (
+            tuple(c for c in codes_raw if isinstance(c, str))
+            if isinstance(codes_raw, (list, tuple))
+            else ()
+        )
+
+        cls = _classify_dark_pool_print(price, bid, ask, codes)
+        if cls == "SETTLEMENT":
+            continue
+
+        prem = _print_premium_usd(rec)
+        if prem <= 0:
+            continue
+
+        total += 1
+        if cls == "BUY":
+            net_flow += prem
+            if prem > largest_buy:
+                largest_buy = prem
+            if prem >= _F4_LARGE_DP_BUY_USD:
+                large_buys += 1
+        else:  # SELL
+            net_flow -= prem
+
+    return (
+        net_flow,
+        total,
+        large_buys,
+        largest_buy if largest_buy > 0 else None,
+    )
+
+
+def _aggregate_options(
+    trades: list[dict[str, Any]],
+) -> tuple[float, float | None]:
+    """Aggregate classified option trades over the window.
+
+    Returns (net_flow_usd, largest_bullish_premium_usd).
+    Net flow = sum(NEW_BULL + PUT_SELL) - sum(NEW_BEAR). PROFIT_TAKING and
+    SPREAD_CROSS are stripped.
+    """
+    net_flow = 0.0
+    largest_bull: float = 0.0
+    today = datetime.now(UTC).date()
+
+    for rec in trades:
+        side = rec.get("side") if isinstance(rec.get("side"), str) else None
+        opt_type = rec.get("option_type") or rec.get("type") or ""
+        if not isinstance(opt_type, str):
+            continue
+
+        delta = _safe_float(rec.get("delta"))
+        dte: int | None = None
+        expiry = rec.get("expiry") or rec.get("expiration") or rec.get("expiry_date")
+        if isinstance(expiry, str):
+            try:
+                exp_date = datetime.fromisoformat(expiry.replace("Z", "+00:00")).date()
+                dte = (exp_date - today).days
+            except ValueError:
+                dte = None
+
+        cls = _classify_options_print(side=side, option_type=opt_type, dte=dte, delta=delta)
+        if cls in ("PROFIT_TAKING", "SPREAD_CROSS"):
+            continue
+
+        prem = _safe_float(rec.get("premium")) or 0.0
+        if prem <= 0:
+            continue
+
+        if cls in ("NEW_BULL", "PUT_SELL"):
+            net_flow += prem
+            if prem > largest_bull:
+                largest_bull = prem
+        elif cls == "NEW_BEAR":
+            net_flow -= prem
+
+    return net_flow, (largest_bull if largest_bull > 0 else None)
+
+
+# ---------------------------------------------------------------------------
+# Response builders
+# ---------------------------------------------------------------------------
+
+
+def _build_excluded_response(ticker: str) -> OptionsFlowResponse:
+    """Return the canonical DATA_GAP response for excluded OTC/ADR tickers."""
+    return OptionsFlowResponse(
+        ticker=ticker,
+        f4_score=_F4_NEUTRAL_SCORE,
+        f4_grade=_grade_from_score(_F4_NEUTRAL_SCORE),
+        dark_pool_score=None,
+        options_flow_score=None,
+        dark_pool_net_flow_usd=None,
+        options_net_flow_usd=None,
+        market_cap_usd=None,
+        market_cap_tier=_pick_tier(None),
+        flow_direction=_FLOW_NEUTRAL,
+        data_source=_F4_SOURCE_DATA_GAP,
+        data_gap_reason="Ticker on F4 OTC/ADR exclusion list — no upstream API calls.",
+        lookback_sessions=_F4_LOOKBACK_SESSIONS,
+        dark_pool_prints_count=0,
+        dark_pool_large_buy_count=0,
+        largest_dark_pool_buy_usd=None,
+        largest_options_buy_usd=None,
+    )
+
+
+def _build_response_v2(
+    *,
     ticker: str,
-    largest_premium: float | None,
-    call_premium: float | None,
-    put_premium: float | None,
-    call_volume: float | None,
-    call_oi: float | None,
-    largest_dark_pool: float | None,
-    total_dark_pool: float | None,
-    dark_pool_count: int,
-    has_golden_sweep: bool,
-    has_single_sweep: bool,
-    has_repeated_hits: bool,
-    sweep_premium: float | None,
-    collar_flag: bool,
+    market_cap: float | None,
+    dp_prints: list[dict[str, Any]] | None,
+    opt_trades: list[dict[str, Any]] | None,
 ) -> OptionsFlowResponse:
-    # Call/put ratio
-    ratio: float | None = None
-    if call_premium and put_premium and put_premium > 0:
-        ratio = call_premium / put_premium
+    """Build the F4 v2 response from raw fetched data.
 
-    # Vol/OI ratio
-    vol_oi_ratio: float | None = None
-    if call_volume is not None and call_oi and call_oi > 0:
-        vol_oi_ratio = call_volume / call_oi
+    None for dp_prints / opt_trades signals "data source unavailable" and
+    propagates into the data_source label + sub-score nullification.
+    """
+    tier = _pick_tier(market_cap)
 
-    # Individual scores
-    whale_score = _score_whale_block(largest_premium)
-    cp_score = _score_cp_ratio(ratio)
-    vol_oi_score = _score_vol_oi(vol_oi_ratio)
-    dp_score = _score_dark_pool(largest_dark_pool)
-    sweep_score = _score_sweep(has_golden_sweep, has_single_sweep, has_repeated_hits)
+    # Dark-pool branch ----------------------------------------------------
+    dp_score: int | None
+    dp_net_flow: float | None
+    dp_count = 0
+    dp_large_buys = 0
+    largest_dp_buy: float | None = None
+    if dp_prints is None:
+        dp_score = None
+        dp_net_flow = None
+    else:
+        windowed_dp = _filter_to_recent_sessions(dp_prints)
+        dp_net_flow, dp_count, dp_large_buys, largest_dp_buy = _aggregate_dark_pool(windowed_dp)
+        dp_score = _map_net_flow_to_score(dp_net_flow, tier)
 
-    # Weighted F4
-    f4_raw = (
-        whale_score * _W_WHALE
-        + cp_score * _W_CP_RATIO
-        + vol_oi_score * _W_VOL_OI
-        + dp_score * _W_DARK_POOL
-        + sweep_score * _W_SWEEP
-    )
-    f4_score = round(f4_raw)
+    # Options branch ------------------------------------------------------
+    opt_score: int | None
+    opt_net_flow: float | None
+    largest_opt_buy: float | None = None
+    if opt_trades is None:
+        opt_score = None
+        opt_net_flow = None
+    else:
+        windowed_opts = _filter_to_recent_sessions(opt_trades)
+        opt_net_flow, largest_opt_buy = _aggregate_options(windowed_opts)
+        opt_score = _map_net_flow_to_score(opt_net_flow, tier)
 
-    # Collar cap
-    if collar_flag:
-        f4_score = min(f4_score, _COLLAR_CAP)
+    f4_raw, source = _combine_f4_scores(dp_score, opt_score)
+    direction = _derive_flow_direction(dp_net_flow, opt_net_flow)
 
-    signal_tier = _derive_signal_tier(
-        largest_premium, vol_oi_ratio, largest_dark_pool, has_golden_sweep, has_repeated_hits
-    )
+    gap_reason: str | None = None
+    if source == _F4_SOURCE_DATA_GAP:
+        gap_reason = "Both dark-pool and options data unavailable."
+    elif source == _F4_SOURCE_DP_ONLY:
+        gap_reason = "Options trades unavailable — score based on dark-pool only."
+    elif source == _F4_SOURCE_OPT_ONLY:
+        gap_reason = "Dark-pool data unavailable — score based on options only."
 
     return OptionsFlowResponse(
-        ticker=ticker.upper(),
-        whale_block=WhaleBlockIndicator(
-            largest_premium=largest_premium,
-            score=whale_score,
-            weight=_W_WHALE,
-        ),
-        call_put_ratio=CallPutRatioIndicator(
-            call_premium=call_premium,
-            put_premium=put_premium,
-            ratio=ratio,
-            score=cp_score,
-            weight=_W_CP_RATIO,
-        ),
-        volume_oi=VolumeOiIndicator(
-            call_volume=call_volume,
-            call_open_interest=call_oi,
-            vol_oi_ratio=vol_oi_ratio,
-            score=vol_oi_score,
-            weight=_W_VOL_OI,
-        ),
-        dark_pool=DarkPoolIndicator(
-            total_dark_pool_premium=total_dark_pool,
-            largest_print=largest_dark_pool,
-            print_count=dark_pool_count,
-            direction=_derive_dark_pool_direction(call_premium, put_premium),
-            score=dp_score,
-            weight=_W_DARK_POOL,
-        ),
-        sweep_type=SweepTypeIndicator(
-            has_golden_sweep=has_golden_sweep,
-            has_single_sweep=has_single_sweep,
-            has_repeated_hits=has_repeated_hits,
-            sweep_premium=sweep_premium,
-            score=sweep_score,
-            weight=_W_SWEEP,
-        ),
-        signal_tier=signal_tier,
-        collar_flag=collar_flag,
-        f4_score=f4_score,
-        f4_grade=_grade_from_score(f4_score),
+        ticker=ticker,
+        f4_score=f4_raw,
+        f4_grade=_grade_from_score(f4_raw),
+        dark_pool_score=dp_score,
+        options_flow_score=opt_score,
+        dark_pool_net_flow_usd=dp_net_flow,
+        options_net_flow_usd=opt_net_flow,
+        market_cap_usd=market_cap,
+        market_cap_tier=tier,
+        flow_direction=direction,
+        data_source=source,
+        data_gap_reason=gap_reason,
+        lookback_sessions=_F4_LOOKBACK_SESSIONS,
+        dark_pool_prints_count=dp_count,
+        dark_pool_large_buy_count=dp_large_buys,
+        largest_dark_pool_buy_usd=largest_dp_buy,
+        largest_options_buy_usd=largest_opt_buy,
     )
 
 
@@ -339,249 +496,278 @@ def _build_response(
 
 
 class OptionsFlowService:
-    """Fetches F4 data from Unusual Whales API and computes the F4 score."""
+    """Compute the F4 Options Flow score from Unusual Whales + Polygon."""
 
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
-        self._headers = {
+    def __init__(self, api_key: str, polygon_api_key: str | None = None) -> None:
+        self._uw_api_key = api_key
+        # Lazy import to avoid touching settings during module import (tests
+        # construct the service with explicit keys).
+        if polygon_api_key is None:
+            try:
+                from atlas.config import get_settings
+
+                polygon_api_key = get_settings().polygon_api_key
+            except Exception:
+                polygon_api_key = ""
+        self._polygon_api_key = polygon_api_key or ""
+        self._uw_headers = {
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
         }
 
     @classmethod
     def from_env(cls) -> OptionsFlowService:
-        return cls(api_key=os.environ.get("UNUSUAL_WHALES_API_KEY", ""))
-
-    async def compute_options_flow(self, ticker: str) -> OptionsFlowResponse:
-        """Fetch data from Unusual Whales and return an OptionsFlowResponse."""
-        ticker = ticker.upper()
-        async with httpx.AsyncClient(
-            base_url=_BASE_URL,
-            headers=self._headers,
-            timeout=_TIMEOUT,
-        ) as client:
-            vol_data = await self._fetch_options_volume(client, ticker)
-            flow_data = await self._fetch_flow_alerts(client, ticker)
-            dp_data = await self._fetch_dark_pool(client, ticker)
-
-        return _build_response(
-            ticker=ticker,
-            largest_premium=flow_data.get("largest_premium"),
-            call_premium=vol_data.get("call_premium"),
-            put_premium=vol_data.get("put_premium"),
-            call_volume=vol_data.get("call_volume"),
-            call_oi=vol_data.get("call_open_interest"),
-            largest_dark_pool=dp_data.get("largest_print"),
-            total_dark_pool=dp_data.get("total_premium"),
-            dark_pool_count=dp_data.get("count", 0),
-            has_golden_sweep=flow_data.get("has_golden_sweep", False),
-            has_single_sweep=flow_data.get("has_single_sweep", False),
-            has_repeated_hits=flow_data.get("has_repeated_hits", False),
-            sweep_premium=flow_data.get("sweep_premium"),
-            collar_flag=flow_data.get("collar_flag", False),
+        return cls(
+            api_key=os.environ.get("UNUSUAL_WHALES_API_KEY", ""),
+            polygon_api_key=os.environ.get("POLYGON_API_KEY", ""),
         )
 
-    # ------------------------------------------------------------------
-    # Unusual Whales — options volume summary
-    # ------------------------------------------------------------------
+    async def compute_options_flow(self, ticker: str) -> OptionsFlowResponse:
+        """Fetch UW + Polygon data and return the F4 v2 response."""
+        ticker = ticker.upper()
 
-    async def _fetch_options_volume(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
-        """Fetch today's call/put premiums, volumes, and OI.
+        # Step 1: excluded-ticker short-circuit.
+        if _is_excluded_ticker(ticker):
+            return _build_excluded_response(ticker)
 
-        Endpoint: GET /api/stock/{ticker}/options-volume?limit=1
-        Returns most recent trading day's aggregate data.
-        """
-        try:
-            resp = await client.get(
-                f"/api/stock/{ticker}/options-volume",
-                params={"limit": 1},
-            )
-            resp.raise_for_status()
-            payload: Any = resp.json()
-
-            # Response is a list; take the first (most recent) record
-            records: list[Any] = payload if isinstance(payload, list) else payload.get("data", [])
-            if not records:
-                return {}
-
-            rec: dict[str, Any] = records[0] if isinstance(records[0], dict) else {}
-
-            def _float(key: str) -> float | None:
-                v = rec.get(key)
-                try:
-                    return float(v) if v is not None else None
-                except (TypeError, ValueError):
-                    return None
-
-            return {
-                "call_premium": _float("call_premium"),
-                "put_premium": _float("put_premium"),
-                "call_volume": _float("call_volume"),
-                "put_volume": _float("put_volume"),
-                "call_open_interest": _float("call_open_interest"),
-                "put_open_interest": _float("put_open_interest"),
-            }
-        except Exception:
-            return {}
-
-    # ------------------------------------------------------------------
-    # Unusual Whales — flow alerts (whale blocks + sweeps + collar)
-    # ------------------------------------------------------------------
-
-    async def _fetch_flow_alerts(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
-        """Detect whale blocks, sweeps, repeated hits, and collar structures.
-
-        Endpoint: GET /api/option-trades/flow-alerts
-        Params: ticker_symbol, min_premium=100000, limit=200
-        """
-        try:
-            resp = await client.get(
-                "/api/option-trades/flow-alerts",
-                params={
-                    "ticker_symbol": ticker,
-                    "min_premium": 100_000,
-                    "limit": 200,
-                },
-            )
-            resp.raise_for_status()
-            payload: Any = resp.json()
-            alerts: list[Any] = (
-                payload if isinstance(payload, list)
-                else payload.get("data", payload.get("alerts", []))
+        # Step 2: three concurrent fetches.
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            market_cap, dp_prints, opt_trades = await asyncio.gather(
+                _fetch_market_cap(client, ticker, self._polygon_api_key),
+                _fetch_dark_pool_prints(client, ticker, self._uw_headers),
+                _fetch_option_trades(client, ticker, self._uw_headers),
             )
 
-            largest_premium: float = 0.0
-            sweep_premium: float | None = None
-            has_golden_sweep = False
-            has_single_sweep = False
-            has_repeated_hits = False
-            large_call_premium: float = 0.0
-            large_put_premium: float = 0.0
+        # Step 3: aggregate + score + build response.
+        return _build_response_v2(
+            ticker=ticker,
+            market_cap=market_cap,
+            dp_prints=dp_prints,
+            opt_trades=opt_trades,
+        )
 
-            for alert in alerts:
-                if not isinstance(alert, dict):
-                    continue
 
-                raw_prem = alert.get("total_premium") or alert.get("premium") or 0
-                try:
-                    prem = float(raw_prem)
-                except (TypeError, ValueError):
-                    prem = 0.0
+# ===========================================================================
+# F4 v2 — new spec (3-tier market-cap-based net-flow anchor scoring).
+#
+# The functions below are the new pure scoring primitives. Phase 2 will wire
+# them into compute_options_flow() and delete the legacy v7.3.4 helpers above.
+# They live here (rather than a new module) per the in-place repurpose plan.
+# ===========================================================================
 
-                contract_type: str = (
-                    alert.get("type") or alert.get("option_type") or ""
-                ).lower()
+# Net-flow direction classifications --------------------------------------
+DPClassification = Literal["BUY", "SELL", "SETTLEMENT"]
+OptionsClassification = Literal["NEW_BULL", "PUT_SELL", "NEW_BEAR", "PROFIT_TAKING", "SPREAD_CROSS"]
+MarketCapTier = Literal["LARGE", "MID", "SMALL"]
 
-                # Track largest print
-                if prem > largest_premium:
-                    largest_premium = prem
+# OTC / ADR exclusion list (per locked Q3). These tickers return F4 = 50
+# with a DATA_GAP flag and skip all upstream API calls.
+_F4_EXCLUDED_TICKERS: Final[frozenset[str]] = frozenset(
+    {
+        "LSRCF",
+        "LPKFF",
+        "SLOIF",
+        "AIXXF",
+        "BESIY",
+        "SIVE",
+        "TOELY",
+        "AJINF",
+        "SHECY",
+        "ATEYY",
+    }
+)
 
-                # Sweep detection
-                is_sweep = bool(alert.get("has_sweep") or alert.get("is_sweep"))
-                is_multileg = bool(alert.get("has_multileg") or alert.get("is_multi_leg"))
-                alert_rule: str = (alert.get("alert_rule") or "").lower()
+# Market-cap tier thresholds (USD). LARGE > $50B; MID $5B-$50B; SMALL < $5B.
+_F4_LARGE_CAP_FLOOR: Final[float] = 50_000_000_000.0
+_F4_MID_CAP_FLOOR: Final[float] = 5_000_000_000.0
 
-                if is_sweep and prem > _GOLDEN_SWEEP_THRESHOLD:
-                    has_golden_sweep = True
-                    sweep_premium = prem
-                elif is_sweep:
-                    has_single_sweep = True
-                    if sweep_premium is None or prem > (sweep_premium or 0):
-                        sweep_premium = prem
+# Net-flow anchor tables — (net_flow_usd_anchor, score_anchor) ordered
+# monotonically increasing in net_flow. Linear interpolation between adjacent
+# anchors; flat extrapolation outside the endpoints (clamped to [0, 100]).
+# Inside the ±neutral band both anchors map to score 50 → flat neutral plateau.
+_F4_DP_ANCHORS_LARGE: Final[tuple[tuple[float, int], ...]] = (
+    (-100_000_000.0, 0),
+    (-25_000_000.0, 25),
+    (-5_000_000.0, 50),
+    (5_000_000.0, 50),
+    (25_000_000.0, 75),
+    (100_000_000.0, 100),
+)
+_F4_DP_ANCHORS_MID: Final[tuple[tuple[float, int], ...]] = (
+    (-20_000_000.0, 0),
+    (-5_000_000.0, 25),
+    (-1_000_000.0, 50),
+    (1_000_000.0, 50),
+    (5_000_000.0, 75),
+    (20_000_000.0, 100),
+)
+_F4_DP_ANCHORS_SMALL: Final[tuple[tuple[float, int], ...]] = (
+    (-3_000_000.0, 0),
+    (-750_000.0, 25),
+    (-150_000.0, 50),
+    (150_000.0, 50),
+    (750_000.0, 75),
+    (3_000_000.0, 100),
+)
 
-                if "repeatedhits" in alert_rule or "repeated" in alert_rule:
-                    has_repeated_hits = True
+# Dark pool BUY/SELL classification (NBBO-anchored).
+# price >= ask * 0.999 -> BUY ; price <= bid * 1.001 -> SELL ; else by midpoint.
+_F4_AT_OR_ABOVE_ASK_FACTOR: Final[float] = 0.999
+_F4_AT_OR_BELOW_BID_FACTOR: Final[float] = 1.001
 
-                # Collar detection: large multi-leg with both calls and puts
-                if is_multileg:
-                    if contract_type == "call":
-                        large_call_premium += prem
-                    elif contract_type == "put":
-                        large_put_premium += prem
+# Sale-condition codes that mark a print as a settlement / non-directional
+# print (stripped from the net-flow calculation entirely).
+_F4_SETTLEMENT_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "average_price",
+        "prior_reference",
+        "qualified_contingent",
+    }
+)
 
-            # Collar flag: multi-leg with significant both-sided premium
-            collar_flag = (
-                large_call_premium > _WHALE_GREY_THRESHOLD
-                and large_put_premium > _WHALE_GREY_THRESHOLD
-                and abs(large_call_premium - large_put_premium)
-                < max(large_call_premium, large_put_premium) * 0.5
-            )
+# Options PROFIT_TAKING detection (per locked Q2): call sold on BID AND
+# (DTE ≤ 14 OR |delta| ≥ 0.8). Long-dated OTM calls sold on BID are also
+# stripped (caller responsibility — see Q2 default).
+_F4_NEAR_DATED_DTE: Final[int] = 14
+_F4_DEEP_ITM_DELTA: Final[float] = 0.8
 
-            return {
-                "largest_premium": largest_premium if largest_premium > 0 else None,
-                "has_golden_sweep": has_golden_sweep,
-                "has_single_sweep": has_single_sweep,
-                "has_repeated_hits": has_repeated_hits,
-                "sweep_premium": sweep_premium,
-                "collar_flag": collar_flag,
-            }
-        except Exception:
-            return {
-                "has_golden_sweep": False,
-                "has_single_sweep": False,
-                "has_repeated_hits": False,
-                "collar_flag": False,
-            }
+# UW 'side' field literals (set by Unusual Whales option-trades endpoint).
+_UW_SIDE_ASK: Final[str] = "ASK"
+_UW_SIDE_BID: Final[str] = "BID"
+_UW_SIDE_NONE: Final[str] = "NONE"
 
-    # ------------------------------------------------------------------
-    # Unusual Whales — dark pool prints
-    # ------------------------------------------------------------------
+# Output constants ---------------------------------------------------------
+_F4_NEUTRAL_SCORE: Final[int] = 50
+_F4_DISPLAY_DIVISOR: Final[int] = 100
+_F4_DISPLAY_MAX: Final[int] = 15
 
-    async def _fetch_dark_pool(
-        self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, Any]:
-        """Fetch today's dark pool / off-exchange print activity.
+# Data-source labels for F4 response.
+_F4_SOURCE_BOTH: Final[str] = "BOTH"
+_F4_SOURCE_DP_ONLY: Final[str] = "DARK_POOL_ONLY"
+_F4_SOURCE_OPT_ONLY: Final[str] = "OPTIONS_ONLY"
+_F4_SOURCE_DATA_GAP: Final[str] = "DATA_GAP"
 
-        Endpoint: GET /api/darkpool/{ticker}
-        """
-        try:
-            resp = await client.get(
-                f"/api/darkpool/{ticker}",
-                params={"limit": 500},
-            )
-            resp.raise_for_status()
-            payload: Any = resp.json()
-            prints: list[Any] = (
-                payload if isinstance(payload, list)
-                else payload.get("data", payload.get("darkpool", []))
-            )
 
-            total_premium: float = 0.0
-            largest_print: float = 0.0
-            count = 0
+def _is_excluded_ticker(ticker: str) -> bool:
+    """Return True when the ticker is on the hard-coded OTC/ADR exclusion list.
 
-            for print_rec in prints:
-                if not isinstance(print_rec, dict):
-                    continue
-                if print_rec.get("canceled"):
-                    continue
+    Excluded tickers return F4 = 50 with a DATA_GAP flag without hitting any
+    upstream API. Comparison is case-insensitive.
+    """
+    return ticker.upper() in _F4_EXCLUDED_TICKERS
 
-                raw_prem = print_rec.get("premium") or print_rec.get("size", 0)
-                try:
-                    prem = float(raw_prem)
-                except (TypeError, ValueError):
-                    prem = 0.0
 
-                # If only size (shares) is returned, estimate premium = size × price
-                if prem < 1000 and print_rec.get("price"):
-                    try:
-                        prem = prem * float(print_rec["price"])
-                    except (TypeError, ValueError):
-                        pass
+def _pick_tier(market_cap_usd: float | None) -> MarketCapTier:
+    """Map market cap → LARGE | MID | SMALL.
 
-                total_premium += prem
-                count += 1
-                if prem > largest_print:
-                    largest_print = prem
+    LARGE: > $50B ; MID: $5B-$50B (inclusive at $5B) ; SMALL: < $5B or unknown.
+    Unknown market cap (None) defaults to SMALL (most conservative anchors).
+    """
+    if market_cap_usd is None:
+        return "SMALL"
+    if market_cap_usd > _F4_LARGE_CAP_FLOOR:
+        return "LARGE"
+    if market_cap_usd >= _F4_MID_CAP_FLOOR:
+        return "MID"
+    return "SMALL"
 
-            return {
-                "total_premium": total_premium if total_premium > 0 else None,
-                "largest_print": largest_print if largest_print > 0 else None,
-                "count": count,
-            }
-        except Exception:
-            return {"count": 0}
+
+def _anchors_for_tier(tier: MarketCapTier) -> tuple[tuple[float, int], ...]:
+    """Return the anchor table for a tier."""
+    if tier == "LARGE":
+        return _F4_DP_ANCHORS_LARGE
+    if tier == "MID":
+        return _F4_DP_ANCHORS_MID
+    return _F4_DP_ANCHORS_SMALL
+
+
+def _map_net_flow_to_score(net_flow_usd: float, tier: MarketCapTier) -> int:
+    """Map a signed net-flow USD value to a 0-100 score for the given tier.
+
+    Linear interpolation between adjacent anchors; clamps to [0, 100] outside
+    the endpoints. Inside the neutral band both anchors are 50 → flat plateau.
+    """
+    anchors = _anchors_for_tier(tier)
+    # Clamp below the lowest anchor.
+    if net_flow_usd <= anchors[0][0]:
+        return anchors[0][1]
+    # Clamp above the highest anchor.
+    if net_flow_usd >= anchors[-1][0]:
+        return anchors[-1][1]
+    # Linear interpolation between the two surrounding anchors.
+    for i in range(len(anchors) - 1):
+        x0, y0 = anchors[i]
+        x1, y1 = anchors[i + 1]
+        if x0 <= net_flow_usd <= x1:
+            if x1 == x0:  # Identical x — should not occur; defensive.
+                return y0
+            ratio = (net_flow_usd - x0) / (x1 - x0)
+            interpolated = y0 + ratio * (y1 - y0)
+            return max(0, min(100, round(interpolated)))
+    return _F4_NEUTRAL_SCORE  # Unreachable; defensive fallback.
+
+
+def _classify_dark_pool_print(
+    price: float,
+    bid: float | None,
+    ask: float | None,
+    sale_cond_codes: tuple[str, ...] = (),
+) -> DPClassification:
+    """Classify a single dark pool print as BUY / SELL / SETTLEMENT.
+
+    Settlement codes win first; then NBBO-anchored BUY/SELL bands; then
+    midpoint-relative fallback. Missing bid/ask falls back to BUY.
+    """
+    # 1. Settlement code overrides everything.
+    if any(code in _F4_SETTLEMENT_CODES for code in sale_cond_codes):
+        return "SETTLEMENT"
+    # 4/5. No NBBO data — conservative fallback.
+    if bid is None or ask is None:
+        return "BUY"
+    # 2. At/above ask → BUY.
+    if price >= ask * _F4_AT_OR_ABOVE_ASK_FACTOR:
+        return "BUY"
+    # 3. At/below bid → SELL.
+    if price <= bid * _F4_AT_OR_BELOW_BID_FACTOR:
+        return "SELL"
+    # 4/5. Midpoint split.
+    midpoint = (bid + ask) / 2.0
+    return "BUY" if price >= midpoint else "SELL"
+
+
+def _classify_options_print(
+    side: str | None,
+    option_type: str,
+    dte: int | None,
+    delta: float | None,
+) -> OptionsClassification:
+    """Classify an options print using UW 'side' + option_type + DTE + delta."""
+    if side is None or side.upper() == _UW_SIDE_NONE:
+        return "SPREAD_CROSS"
+    side_up = side.upper()
+    opt = option_type.lower()
+    if opt == "call" and side_up == _UW_SIDE_ASK:
+        return "NEW_BULL"
+    if opt == "put" and side_up == _UW_SIDE_BID:
+        return "PUT_SELL"
+    if opt == "put" and side_up == _UW_SIDE_ASK:
+        return "NEW_BEAR"
+    if opt == "call" and side_up == _UW_SIDE_BID:
+        # Call sold on BID — always PROFIT_TAKING per locked Q2 (near-dated,
+        # deep-ITM, OR long-dated OTM all collapse to PROFIT_TAKING / strip).
+        return "PROFIT_TAKING"
+    return "SPREAD_CROSS"
+
+
+def _combine_f4_scores(
+    dp_score: int | None,
+    opt_score: int | None,
+) -> tuple[int, str]:
+    """Combine dark-pool + options scores into a single F4_raw + source label."""
+    if dp_score is not None and opt_score is not None:
+        return (round((dp_score + opt_score) / 2), _F4_SOURCE_BOTH)
+    if dp_score is not None:
+        return (dp_score, _F4_SOURCE_DP_ONLY)
+    if opt_score is not None:
+        return (opt_score, _F4_SOURCE_OPT_ONLY)
+    return (_F4_NEUTRAL_SCORE, _F4_SOURCE_DATA_GAP)

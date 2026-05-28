@@ -2,20 +2,17 @@
 
 import { cn } from '@/lib/utils';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
-import type {
-  CallPutRatioIndicator,
-  DarkPoolIndicator,
-  OptionsFlowResponse,
-  SweepTypeIndicator,
-  VolumeOiIndicator,
-  WhaleBlockIndicator,
-} from '@/lib/schemas/options-flow';
+import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
 
 // ---------------------------------------------------------------------------
 // Named constants
 // ---------------------------------------------------------------------------
 
 const SCORE_BAR_SEGMENTS = 10;
+
+// F4 final-display range. F1 weights F4 at 15% of the 0-100 composite,
+// so the panel surfaces a 0-15 "contribution" alongside the raw 0-100 score.
+const F4_DISPLAY_MAX = 15;
 
 const GRADE_TONE: Record<string, string> = {
   'STRONG BUY': 'is-green',
@@ -25,15 +22,23 @@ const GRADE_TONE: Record<string, string> = {
   AVOID: 'is-red',
 };
 
-/** Signal tier badge colours per the signal hierarchy. */
+const DIRECTION_TONE: Record<string, string> = {
+  BULLISH: 'is-green',
+  BEARISH: 'is-red',
+  NEUTRAL: 'is-muted',
+};
+
 const TIER_TONE: Record<string, string> = {
-  GOLD: 'is-gold',
-  BLUE: 'is-cyan',
-  GREEN: 'is-green',
-  YELLOW: 'is-yellow',
-  GREY: 'is-muted',
-  WHITE: 'is-muted',
-  NONE: 'is-muted',
+  LARGE: 'is-cyan',
+  MID: 'is-yellow',
+  SMALL: 'is-muted',
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  BOTH: 'Dark pool + options',
+  DARK_POOL_ONLY: 'Dark pool only',
+  OPTIONS_ONLY: 'Options only',
+  DATA_GAP: 'Data gap',
 };
 
 // ---------------------------------------------------------------------------
@@ -46,16 +51,16 @@ type F4OptionsPanelProps = {
 };
 
 /**
- * F4 Options Flow panel — receives the active ticker from the shared
- * selector and shows whale block size, call/put ratio, volume vs OI,
- * dark pool prints, and sweep type plus the weighted F4 composite score.
+ * F4 Options Flow panel (v2) — shows F4's signed-net-flow scoring:
  *
- * Five sub-indicators per Factor_Mapping_Guide:
- *   Whale Block Size (35%) | Call/Put Ratio (20%) | Volume vs OI (20%)
- *   Dark Pool Print (15%) | Sweep Type (10%)
+ *   • Dark-pool net flow ($) and its 0-100 sub-score
+ *   • Options net flow ($) and its 0-100 sub-score
+ *   • Market-cap tier (LARGE / MID / SMALL)
+ *   • Source label (BOTH / DARK_POOL_ONLY / OPTIONS_ONLY / DATA_GAP)
+ *   • 5-session rolling lookback label
+ *   • Final F4 score (0-100) + contribution to F1 (0-15)
  *
- * Data source: Unusual Whales API.
- * Collar flag caps score at 68 when a protective put + covered call is detected.
+ * Data source: Unusual Whales (dark pool, option trades) + Polygon (market cap).
  */
 export function F4OptionsPanel({ ticker }: F4OptionsPanelProps) {
   const { data, isFetching, isError, error } = useOptionsFlow(ticker);
@@ -114,7 +119,10 @@ function EmptyState({ ticker }: { ticker: string }) {
 
 function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
   const gradeTone = GRADE_TONE[data.f4_grade] ?? 'is-yellow';
-  const tierTone = TIER_TONE[data.signal_tier] ?? 'is-muted';
+  const directionTone = DIRECTION_TONE[data.flow_direction] ?? 'is-muted';
+  const tierTone = TIER_TONE[data.market_cap_tier] ?? 'is-muted';
+  const sourceLabel = SOURCE_LABEL[data.data_source] ?? data.data_source;
+  const contribution = Math.round((data.f4_score / 100) * F4_DISPLAY_MAX);
 
   return (
     <div className="atlas-f4-content" data-testid="f4-content">
@@ -133,39 +141,70 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           >
             {data.f4_grade}
           </span>
-          <span className="atlas-f4-label-sub">Options Flow</span>
+          <span className="atlas-f4-label-sub" data-testid="f4-contribution">
+            {contribution}/{F4_DISPLAY_MAX} to F1
+          </span>
         </div>
       </div>
 
-      {/* Signal tier + collar flag row */}
+      {/* Direction + tier + source row */}
       <div className="atlas-f4-signal-row">
         <span
-          className={cn('atlas-frameworks-pill atlas-f4-tier-pill', tierTone)}
-          data-testid="f4-signal-tier"
+          className={cn('atlas-frameworks-pill atlas-f4-tier-pill', directionTone)}
+          data-testid="f4-flow-direction"
         >
-          {data.signal_tier}
+          {data.flow_direction}
         </span>
-        {data.collar_flag && (
-          <span
-            className="atlas-frameworks-pill atlas-f4-collar-pill is-orange"
-            data-testid="f4-collar-flag"
-          >
-            COLLAR — Capped at 68
-          </span>
-        )}
+        <span
+          className={cn('atlas-frameworks-pill atlas-f4-tier-pill', tierTone)}
+          data-testid="f4-market-cap-tier"
+        >
+          {data.market_cap_tier} CAP
+        </span>
+        <span
+          className="atlas-frameworks-pill atlas-f4-tier-pill is-muted"
+          data-testid="f4-data-source"
+        >
+          {sourceLabel}
+        </span>
+        <span
+          className="atlas-frameworks-pill atlas-f4-tier-pill is-muted"
+          data-testid="f4-lookback"
+        >
+          {data.lookback_sessions}-session rolling
+        </span>
       </div>
+
+      {data.data_gap_reason && (
+        <p className="atlas-f4-state-msg atlas-f4-state-msg--warn" data-testid="f4-data-gap-reason">
+          {data.data_gap_reason}
+        </p>
+      )}
 
       {/* Score bar */}
       <ScoreBar score={data.f4_score} gradeTone={gradeTone} />
 
-      {/* Five weighted indicator cards */}
+      {/* Two sub-score cards */}
       <div className="atlas-f4-indicators">
-        <WhaleBlockCard whale={data.whale_block} />
-        <CallPutRatioCard cp={data.call_put_ratio} />
-        <VolumeOiCard volOi={data.volume_oi} />
-        <DarkPoolCard dp={data.dark_pool} />
-        <SweepTypeCard sweep={data.sweep_type} />
+        <DarkPoolFlowCard
+          score={data.dark_pool_score}
+          netFlow={data.dark_pool_net_flow_usd}
+          printsCount={data.dark_pool_prints_count}
+          largeBuyCount={data.dark_pool_large_buy_count}
+          largestBuy={data.largest_dark_pool_buy_usd}
+        />
+        <OptionsFlowCard
+          score={data.options_flow_score}
+          netFlow={data.options_net_flow_usd}
+          largestBuy={data.largest_options_buy_usd}
+        />
       </div>
+
+      {data.market_cap_usd !== null && (
+        <p className="atlas-f4-state-msg" data-testid="f4-market-cap">
+          Market cap: {formatBigUsd(data.market_cap_usd)}
+        </p>
+      )}
     </div>
   );
 }
@@ -195,26 +234,23 @@ function ScoreBar({ score, gradeTone }: { score: number; gradeTone: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Indicator card shell
+// Sub-score cards
 // ---------------------------------------------------------------------------
 
-type IndicatorCardProps = {
+type SubCardShellProps = {
   label: string;
-  score: number;
-  weight: number;
+  testIdSlug: string;
+  score: number | null;
   children: React.ReactNode;
 };
 
-function IndicatorCard({ label, score, children }: IndicatorCardProps) {
+function SubCardShell({ label, testIdSlug, score, children }: SubCardShellProps) {
   return (
-    <article
-      className="atlas-f4-indicator"
-      data-testid={`f4-indicator-${label.toLowerCase().replace(/[\s/]+/g, '-')}`}
-    >
+    <article className="atlas-f4-indicator" data-testid={`f4-indicator-${testIdSlug}`}>
       <header className="atlas-f4-indicator-header">
         <span className="atlas-f4-indicator-label">{label}</span>
         <span className="atlas-f4-indicator-score">
-          {score}
+          {score !== null ? score : '—'}
           <span className="atlas-f4-indicator-max">/100</span>
         </span>
       </header>
@@ -223,142 +259,73 @@ function IndicatorCard({ label, score, children }: IndicatorCardProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Individual indicator cards
-// ---------------------------------------------------------------------------
+type DarkPoolFlowCardProps = {
+  score: number | null;
+  netFlow: number | null;
+  printsCount: number;
+  largeBuyCount: number;
+  largestBuy: number | null;
+};
 
-function WhaleBlockCard({ whale }: { whale: WhaleBlockIndicator }) {
+function DarkPoolFlowCard({
+  score,
+  netFlow,
+  printsCount,
+  largeBuyCount,
+  largestBuy,
+}: DarkPoolFlowCardProps) {
   return (
-    <IndicatorCard label="Whale Block Size" score={whale.score} weight={whale.weight}>
+    <SubCardShell label="Dark Pool Net Flow" testIdSlug="dark-pool" score={score}>
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
-          <dt>Largest Print</dt>
-          <dd className={whaleTone(whale.largest_premium)}>
-            {whale.largest_premium !== null ? formatMillions(whale.largest_premium) : '—'}
+          <dt>Net Flow</dt>
+          <dd className={netFlowTone(netFlow)} data-testid="f4-dark-pool-net-flow">
+            {netFlow !== null ? formatSignedMillions(netFlow) : '—'}
           </dd>
         </div>
         <div className="atlas-f4-dl-row">
-          <dt>Signal</dt>
-          <dd>{whaleTierLabel(whale.largest_premium)}</dd>
+          <dt>Prints</dt>
+          <dd>{printsCount > 0 ? printsCount : '—'}</dd>
         </div>
+        <div className="atlas-f4-dl-row">
+          <dt>Buys &gt; $1M</dt>
+          <dd>{largeBuyCount > 0 ? largeBuyCount : '—'}</dd>
+        </div>
+        {largestBuy !== null && (
+          <div className="atlas-f4-dl-row">
+            <dt>Largest Buy</dt>
+            <dd className="is-green">{formatMillions(largestBuy)}</dd>
+          </div>
+        )}
       </dl>
-    </IndicatorCard>
+    </SubCardShell>
   );
 }
 
-function CallPutRatioCard({ cp }: { cp: CallPutRatioIndicator }) {
+type OptionsFlowCardProps = {
+  score: number | null;
+  netFlow: number | null;
+  largestBuy: number | null;
+};
+
+function OptionsFlowCard({ score, netFlow, largestBuy }: OptionsFlowCardProps) {
   return (
-    <IndicatorCard label="Call / Put Ratio" score={cp.score} weight={cp.weight}>
+    <SubCardShell label="Options Net Flow" testIdSlug="options" score={score}>
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
-          <dt>C/P Ratio</dt>
-          <dd className={cpTone(cp.ratio)}>
-            {cp.ratio !== null ? `${cp.ratio.toFixed(2)}:1` : '—'}
+          <dt>Net Flow</dt>
+          <dd className={netFlowTone(netFlow)} data-testid="f4-options-net-flow">
+            {netFlow !== null ? formatSignedMillions(netFlow) : '—'}
           </dd>
         </div>
-        {cp.call_premium !== null && (
+        {largestBuy !== null && (
           <div className="atlas-f4-dl-row">
-            <dt>Call Prem</dt>
-            <dd className="is-green">{formatMillions(cp.call_premium)}</dd>
-          </div>
-        )}
-        {cp.put_premium !== null && (
-          <div className="atlas-f4-dl-row">
-            <dt>Put Prem</dt>
-            <dd className="is-red">{formatMillions(cp.put_premium)}</dd>
+            <dt>Largest Buy</dt>
+            <dd className="is-green">{formatMillions(largestBuy)}</dd>
           </div>
         )}
       </dl>
-    </IndicatorCard>
-  );
-}
-
-function VolumeOiCard({ volOi }: { volOi: VolumeOiIndicator }) {
-  return (
-    <IndicatorCard label="Volume vs OI" score={volOi.score} weight={volOi.weight}>
-      <dl className="atlas-f4-dl">
-        <div className="atlas-f4-dl-row">
-          <dt>Vol / OI</dt>
-          <dd className={volOiTone(volOi.vol_oi_ratio)}>
-            {volOi.vol_oi_ratio !== null ? `${volOi.vol_oi_ratio.toFixed(2)}×` : '—'}
-          </dd>
-        </div>
-        {volOi.call_volume !== null && (
-          <div className="atlas-f4-dl-row">
-            <dt>Call Vol</dt>
-            <dd>{formatCount(volOi.call_volume)}</dd>
-          </div>
-        )}
-        {volOi.call_open_interest !== null && (
-          <div className="atlas-f4-dl-row">
-            <dt>Call OI</dt>
-            <dd>{formatCount(volOi.call_open_interest)}</dd>
-          </div>
-        )}
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function DarkPoolCard({ dp }: { dp: DarkPoolIndicator }) {
-  return (
-    <IndicatorCard label="Dark Pool Print" score={dp.score} weight={dp.weight}>
-      <dl className="atlas-f4-dl">
-        <div className="atlas-f4-dl-row">
-          <dt>Largest Print</dt>
-          <dd className={dpTone(dp.largest_print)}>
-            {dp.largest_print !== null ? formatMillions(dp.largest_print) : '—'}
-          </dd>
-        </div>
-        {dp.total_dark_pool_premium !== null && (
-          <div className="atlas-f4-dl-row">
-            <dt>Total DP Vol</dt>
-            <dd>{formatMillions(dp.total_dark_pool_premium)}</dd>
-          </div>
-        )}
-        <div className="atlas-f4-dl-row">
-          <dt>Print Count</dt>
-          <dd>{dp.print_count > 0 ? dp.print_count : '—'}</dd>
-        </div>
-      </dl>
-    </IndicatorCard>
-  );
-}
-
-function SweepTypeCard({ sweep }: { sweep: SweepTypeIndicator }) {
-  const sweepLabel = sweep.has_golden_sweep
-    ? 'Golden Sweep'
-    : sweep.has_single_sweep
-      ? 'Single Sweep'
-      : sweep.has_repeated_hits
-        ? 'Repeated Hits'
-        : 'No Sweep';
-
-  const sweepTone = sweep.has_golden_sweep
-    ? 'is-gold'
-    : sweep.has_single_sweep
-      ? 'is-cyan'
-      : sweep.has_repeated_hits
-        ? 'is-green'
-        : '';
-
-  return (
-    <IndicatorCard label="Sweep Type" score={sweep.score} weight={sweep.weight}>
-      <dl className="atlas-f4-dl">
-        <div className="atlas-f4-dl-row">
-          <dt>Type</dt>
-          <dd className={sweepTone} data-testid="f4-sweep-label">
-            {sweepLabel}
-          </dd>
-        </div>
-        {sweep.sweep_premium !== null && (
-          <div className="atlas-f4-dl-row">
-            <dt>Sweep Size</dt>
-            <dd>{formatMillions(sweep.sweep_premium)}</dd>
-          </div>
-        )}
-      </dl>
-    </IndicatorCard>
+    </SubCardShell>
   );
 }
 
@@ -367,61 +334,25 @@ function SweepTypeCard({ sweep }: { sweep: SweepTypeIndicator }) {
 // ---------------------------------------------------------------------------
 
 function formatMillions(value: number): string {
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
   return `$${value.toFixed(0)}`;
 }
 
-function formatCount(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return value.toFixed(0);
+function formatSignedMillions(value: number): string {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}${formatMillions(Math.abs(value))}`.replace('$$', '$');
 }
 
-// ---------------------------------------------------------------------------
-// Tone helpers
-// ---------------------------------------------------------------------------
-
-function whaleTone(premium: number | null): string {
-  if (premium === null) return '';
-  if (premium > 5_000_000) return 'is-green';
-  if (premium >= 1_000_000) return 'is-cyan';
-  if (premium >= 500_000) return 'is-yellow';
-  if (premium >= 100_000) return 'is-orange';
-  return 'is-red';
+function formatBigUsd(value: number): string {
+  if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  return `$${value.toFixed(0)}`;
 }
 
-function whaleTierLabel(premium: number | null): string {
-  if (premium === null) return '—';
-  if (premium > 5_000_000) return 'Golden Sweep';
-  if (premium >= 1_000_000) return 'Whale Block';
-  if (premium >= 500_000) return 'Large Print';
-  if (premium >= 100_000) return 'Notable';
-  return 'Small';
-}
-
-function cpTone(ratio: number | null): string {
-  if (ratio === null) return '';
-  if (ratio > 3) return 'is-green';
-  if (ratio >= 2) return 'is-cyan';
-  if (ratio >= 1.5) return 'is-yellow';
-  if (ratio >= 0.8) return 'is-orange';
-  return 'is-red';
-}
-
-function volOiTone(ratio: number | null): string {
-  if (ratio === null) return '';
-  if (ratio > 5) return 'is-green';
-  if (ratio >= 3) return 'is-cyan';
-  if (ratio >= 2) return 'is-yellow';
-  if (ratio >= 1) return 'is-orange';
-  return 'is-red';
-}
-
-function dpTone(premium: number | null): string {
-  if (premium === null) return '';
-  if (premium > 5_000_000) return 'is-green';
-  if (premium >= 1_000_000) return 'is-cyan';
-  if (premium >= 100_000) return 'is-yellow';
-  return '';
+function netFlowTone(value: number | null): string {
+  if (value === null || value === 0) return 'is-muted';
+  return value > 0 ? 'is-green' : 'is-red';
 }

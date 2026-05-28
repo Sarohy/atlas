@@ -1,21 +1,18 @@
-"""F3 Analyst Conviction service — v7.3.4 scoring algorithm.
+"""F3 Analyst Conviction service — v7.3.5 scoring algorithm.
 
 Data sources:
-  - Benzinga   → consensus ratings, analyst count, consensus PT, PT revision,
-                 net upgrades/downgrades in last 30 days
+  - Benzinga   → consensus ratings, analyst count, consensus PT, PT revision (30d),
+                 net upgrades/downgrades (90d for recency-weighted momentum)
   - Alpha Vantage → fallback consensus (OVERVIEW endpoint)
   - FMP        → second fallback consensus
   - Polygon.io → current stock price
 
-F3 v7.3.4 scoring (base-score + modifier approach):
-  Priority 1: Consensus label  → base score (Strong Buy 90 / Buy 78 / Hold 55 / Sell 30)
-  Priority 2: Analyst count    → modifier (+8/+5/+3/0/-5)
-  Priority 3: PT revision dir  → modifier (+5/+3/0/-5/-10)
-  Priority 4: Net upgrades 30d → modifier (+5/+3/0/-5/-10)
-  Priority 5: Price vs target  → adjustment (applied last)
-
-High consensus override: Buy/SB + >=9 analysts + 0 sells + raised/maintained PT → min 78
-Hard cap: pvt > +20% → f3_final = min(f3_before, 45)
+F3 v7.3.5 scoring (4-bucket PT approach + recency-weighted upgrade modifier):
+  Bucket 1: PT > price                              → base 80
+  Bucket 2: PT ≤ price + positive revision (30d)   → base 55
+  Bucket 3: PT ≤ price + ≥20 analysts + avg ≥ 4.0 → base 65
+  Bucket 4: Neither                                 → base 40
+  Plus: recency-weighted upgrade/downgrade modifier (0-30d 1.0x, 31-60d 0.5x, 61-90d 0.25x)
 """
 
 from __future__ import annotations
@@ -28,7 +25,7 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 import httpx
-import yfinance as yf
+import yfinance as yf  # type: ignore[import-untyped]
 
 from atlas.schemas.analyst import (
     AnalystCoverageIndicator,
@@ -54,14 +51,15 @@ _BASE_BUY: Final[int] = 78
 _BASE_HOLD: Final[int] = 55
 _BASE_SELL: Final[int] = 30
 
-# Hard cap applied when price is >20% above consensus target
-_HARD_CAP_ABOVE_20: Final[int] = 45
+# v7.3.5 — 4-bucket base scores (Change 1)
+_F3_BUCKET_PT_ABOVE: Final[int] = 80  # Bucket 1: PT > price
+_F3_BUCKET_POS_REVISION: Final[int] = 55  # Bucket 2: PT ≤ price + positive revision (30d)
+_F3_BUCKET_STRONG_COV: Final[int] = 65  # Bucket 3: PT ≤ price + strong coverage/consensus
+_F3_BUCKET_NEITHER: Final[int] = 40  # Bucket 4: none of the above
 
-# Flat penalty when price is 10-20% above target — always applied, no reduction
-_ABOVE_10_FULL_PENALTY: Final[int] = -15
-
-# High consensus override minimum score
-_HIGH_CONSENSUS_MIN: Final[int] = 78
+# Bucket 3 thresholds
+_F3_BUCKET3_MIN_ANALYSTS: Final[int] = 20  # ≥20 analysts required
+_F3_BUCKET3_MIN_CONSENSUS_AVG: Final[float] = 4.0  # weighted avg consensus ≥ 4.0 required
 
 # Grade thresholds (unchanged from v7.3.3)
 _GRADE_STRONG_BUY: Final[int] = 80
@@ -78,15 +76,21 @@ _POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
 _FMP_BASE_URL: Final[str] = "https://financialmodelingprep.com"
 _TIMEOUT: Final[float] = 10.0
 
-# PT revision / upgrade look-back window in days
-_REVISION_DAYS: Final[int] = 30
+# PT revision / upgrade look-back windows in days
+_REVISION_DAYS: Final[int] = 30  # PT raises/lowers — bucket 2 signal
+_REVISION_DAYS_EXTENDED: Final[int] = 90  # upgrade/downgrade fetch window (Change 2)
+
+# Recency weights for upgrade/downgrade momentum (Change 2)
+_UD_WEIGHT_RECENT: Final[float] = 1.0  # 0-30 days
+_UD_WEIGHT_MID: Final[float] = 0.5  # 31-60 days
+_UD_WEIGHT_OLD: Final[float] = 0.25  # 61-90 days
 
 # Price vs target band labels
 _BAND_BELOW_20: Final[str] = "20%+ below target (+10)"
 _BAND_BELOW_10: Final[str] = "10-20% below target (+5)"
 _BAND_NEUTRAL: Final[str] = "At target — neutral (0)"
 _BAND_ABOVE_10: Final[str] = "10-20% above target (-15)"
-_BAND_ABOVE_20: Final[str] = "20%+ above target (capped at 45)"
+_BAND_ABOVE_20: Final[str] = "20%+ above target"
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +115,10 @@ class FactorScore:
     """Per-component values for audit trail and UI display."""
 
     override_applied: bool
-    """True when the high consensus override lifted the score to 78."""
+    """Always False in v7.3.5 (override mechanism removed)."""
 
     override_reason: str | None
-    """Human-readable reason string when override_applied is True."""
+    """Always None in v7.3.5."""
 
 
 # ---------------------------------------------------------------------------
@@ -303,138 +307,123 @@ def _upside_color(pvt: float) -> str:
     return "RED"
 
 
+def _weighted_consensus_avg(
+    strong_buy: int, buy: int, hold: int, sell: int, strong_sell: int
+) -> float:
+    """Weighted average consensus (SB=5, B=4, H=3, S=2, SS=1). 0.0 when no analysts."""
+    total = strong_buy + buy + hold + sell + strong_sell
+    if total == 0:
+        return 0.0
+    return (strong_buy * 5 + buy * 4 + hold * 3 + sell * 2 + strong_sell * 1) / total
+
+
+def _recency_weight(days_ago: int) -> float:
+    """Recency weight for upgrade/downgrade events (Change 2).
+
+    0-30d → 1.0 | 31-60d → 0.5 | 61-90d → 0.25 | >90d → 0.0
+    """
+    if days_ago <= 30:
+        return _UD_WEIGHT_RECENT
+    if days_ago <= 60:
+        return _UD_WEIGHT_MID
+    if days_ago <= 90:
+        return _UD_WEIGHT_OLD
+    return 0.0
+
+
+def _weighted_upgrade_modifier(weighted_net: float) -> int:
+    """Map recency-weighted net upgrades to score modifier.
+
+    > 2.0 → +5 | >= 1.0 → +3 | > -1.0 → 0 | >= -2.0 → -5 | < -2.0 → -10
+    """
+    if weighted_net > 2.0:
+        return 5
+    if weighted_net >= 1.0:
+        return 3
+    if weighted_net > -1.0:
+        return 0
+    if weighted_net >= -2.0:
+        return -5
+    return -10
+
+
 # ---------------------------------------------------------------------------
-# score_f3 — public pure function (Priority 1-5 + overrides)
+# score_f3 — public pure function (v7.3.5 — 4-bucket + recency modifier)
 # ---------------------------------------------------------------------------
 
 
 def score_f3(
-    consensus_rating: str,
-    analyst_count: int,
+    formula_pt: float | None,
+    current_price: float | None,
     pt_revision_direction: str,
-    net_upgrades_30d: int,
-    current_price: float,
-    analyst_target: float,
-    sell_count: int,
+    num_analysts: int,
+    consensus_weighted_avg: float,
+    weighted_net_upgrades: float,
 ) -> FactorScore:
-    """Compute the v7.3.4 F3 Analyst Conviction score.
+    """Compute the v7.3.5 F3 Analyst Conviction score.
 
     Parameters
     ----------
-    consensus_rating:
-        Consensus label: "Strong Buy", "Buy", "Hold", or "Sell".
-    analyst_count:
-        Total number of analysts covering the stock.
-    pt_revision_direction:
-        PT direction label: "MULTIPLE_RAISES", "SINGLE_RAISE", "NO_CHANGE",
-        "SINGLE_CUT", or "MULTIPLE_CUTS".
-    net_upgrades_30d:
-        Net rating upgrades minus downgrades in the last 30 days.
-        Positive = net upgrades, negative = net downgrades.
+    formula_pt:
+        Analyst price target driving the bucket determination (highest or
+        consensus PT).  None when no price target is available.
     current_price:
-        Most recent closing price (USD).
-    analyst_target:
-        Consensus 12-month price target (USD).
-    sell_count:
-        Number of analysts with a Sell or Strong Sell rating.
+        Most recent closing price (USD).  None when unavailable.
+    pt_revision_direction:
+        PT revision direction label over the last 30 days: "MULTIPLE_RAISES",
+        "SINGLE_RAISE", "NO_CHANGE", "SINGLE_CUT", or "MULTIPLE_CUTS".
+    num_analysts:
+        Total number of analysts covering the stock.
+    consensus_weighted_avg:
+        Weighted-average consensus score (SB=5, B=4, H=3, S=2, SS=1).
+    weighted_net_upgrades:
+        Recency-weighted net rating upgrades over 90 days (0-30d 1.0x,
+        31-60d 0.5x, 61-90d 0.25x).
 
     Returns
     -------
     FactorScore
-        raw_score clamped to [0, 100], weight=0.15, full breakdown dict,
-        override_applied flag, override_reason string.
+        raw_score clamped to [0, 100], weight=0.15, full breakdown dict.
+        override_applied is always False (override mechanism removed in v7.3.5).
     """
-    # Priority 1 — base score from consensus label
-    base = _base_score_from_consensus(consensus_rating)
-
-    # Priority 2 — analyst count modifier
-    count_mod = _analyst_count_modifier(analyst_count)
-
-    # Priority 3 — PT revision direction modifier
-    pt_mod = _pt_revision_modifier(pt_revision_direction)
-
-    # Priority 4 — net upgrades/downgrades modifier
-    ud_mod = _upgrade_downgrade_modifier(net_upgrades_30d)
-
-    f3_before = base + count_mod + pt_mod + ud_mod
-
-    # Priority 5 — price vs target adjustment
-    pvt = _price_vs_target(current_price, analyst_target)
-    band_label = _price_vs_target_band(pvt)
-
-    if pvt < -0.20:
-        # 20%+ below target → +10
-        adjustment = 10
-        f3_after = f3_before + adjustment
-    elif pvt < -0.10:
-        # 10-20% below target → +5
-        adjustment = 5
-        f3_after = f3_before + adjustment
-    elif pvt <= 0.10:
-        # Neutral zone → 0
-        adjustment = 0
-        f3_after = f3_before
-    elif pvt <= 0.20:
-        # 10-20% above target → flat -15 always (spec v7.3.4)
-        adjustment = _ABOVE_10_FULL_PENALTY
-        f3_after = f3_before + adjustment
-    else:
-        # 20%+ above target → hard cap at 45
-        f3_after = min(f3_before, _HARD_CAP_ABOVE_20)
-        adjustment = f3_after - f3_before  # 0 or negative
-
-    # Clamp to [0, 100] before override check
-    f3_clamped = max(0, min(100, f3_after))
-
-    # High consensus override — minimum 78 when ALL conditions met.
-    # Exception: when price is >20% above target (the hard-cap band) the
-    # hard cap takes priority and the override does NOT fire.  The spec's
-    # "REGARDLESS of price vs target" covers the neutral zone and the
-    # 10-20% above band, NOT the extreme >20% hard-cap case.
-    in_hard_cap_band = pvt > 0.20
-
-    is_buy_or_sb = consensus_rating.strip().upper() in ("BUY", "STRONG BUY")
-    sufficient_coverage = analyst_count >= 9
-    no_sells = sell_count == 0
-    pt_maintained_or_raised = pt_revision_direction.strip().upper() in (
-        "MULTIPLE_RAISES",
-        "SINGLE_RAISE",
-        "NO_CHANGE",
-    )
-
-    override_applied = False
-    override_reason: str | None = None
-
-    if (
-        not in_hard_cap_band
-        and is_buy_or_sb
-        and sufficient_coverage
-        and no_sells
-        and pt_maintained_or_raised
-        and f3_clamped < _HIGH_CONSENSUS_MIN
+    # Bucket selection (Change 1) — evaluated in strict priority order.
+    # Bucket 1: PT above current price → clear upside.
+    if formula_pt is not None and current_price is not None and formula_pt > current_price:
+        bucket = _F3_BUCKET_PT_ABOVE
+        bucket_reason = "pt_above_price"
+    # Bucket 2: positive revision direction in last 30 days (checked before bucket 3).
+    elif pt_revision_direction.strip().upper() in ("MULTIPLE_RAISES", "SINGLE_RAISE"):
+        bucket = _F3_BUCKET_POS_REVISION
+        bucket_reason = "positive_revision_direction"
+    # Bucket 3: strong analyst coverage + high consensus.
+    elif (
+        num_analysts >= _F3_BUCKET3_MIN_ANALYSTS
+        and consensus_weighted_avg >= _F3_BUCKET3_MIN_CONSENSUS_AVG
     ):
-        f3_clamped = _HIGH_CONSENSUS_MIN
-        override_applied = True
-        override_reason = "High consensus minimum rule applied"
+        bucket = _F3_BUCKET_STRONG_COV
+        bucket_reason = "strong_coverage_and_consensus"
+    # Bucket 4: neither of the above.
+    else:
+        bucket = _F3_BUCKET_NEITHER
+        bucket_reason = "neither"
 
-    breakdown: dict[str, Any] = {
-        "base_score": base,
-        "analyst_count_modifier": count_mod,
-        "pt_revision_modifier": pt_mod,
-        "upgrade_downgrade_modifier": ud_mod,
-        "f3_before_price_adjustment": f3_before,
-        "price_vs_target": pvt,
-        "price_vs_target_band_label": band_label,
-        "price_vs_target_adjustment": adjustment,
-    }
+    # Recency-weighted upgrade/downgrade modifier (Change 2).
+    ud_mod = _weighted_upgrade_modifier(weighted_net_upgrades)
+
+    f3_raw = max(0, min(100, bucket + ud_mod))
 
     return FactorScore(
-        raw_score=float(f3_clamped),
+        raw_score=float(f3_raw),
         weight=_W_F3,
-        weighted_contribution=f3_clamped * _W_F3,
-        breakdown=breakdown,
-        override_applied=override_applied,
-        override_reason=override_reason,
+        weighted_contribution=f3_raw * _W_F3,
+        breakdown={
+            "bucket_score": bucket,
+            "bucket_reason": bucket_reason,
+            "weighted_net_upgrades_90d": weighted_net_upgrades,
+            "upgrade_modifier": ud_mod,
+        },
+        override_applied=False,
+        override_reason=None,
     )
 
 
@@ -454,16 +443,16 @@ def _build_analyst_response(
     consensus_pt: float | None,
     current_price: float | None,
     has_coverage: bool,
-    ratings_data: dict[str, int] | None,
+    ratings_data: dict[str, int | float] | None,
     *,
     highest_pt: float | None = None,
 ) -> AnalystResponse:
-    """Assemble an AnalystResponse from raw fetched values using v7.3.4 scoring.
+    """Assemble an AnalystResponse from raw fetched values using v7.3.5 scoring.
 
     ``highest_pt`` (Yahoo Finance ``targetHighPrice``) is the primary driver of the
-    price-vs-target formula (Priority 5).  ``consensus_pt`` (mean target) is retained
+    bucket-1 PT-above-price check.  ``consensus_pt`` (mean target) is retained
     for display only.  When ``highest_pt`` is None the formula falls back to
-    ``consensus_pt`` to preserve the original behaviour.
+    ``consensus_pt``.
     """
     total_analysts = strong_buy + buy + hold + sell + strong_sell
     effective_count = (
@@ -483,89 +472,51 @@ def _build_analyst_response(
     if current_price and formula_pt and current_price > 0 and formula_pt > 0:
         upside_pct = (formula_pt - current_price) / current_price * 100.0
 
-    # PT revision data
-    pt_raises = ratings_data["raises"] if ratings_data is not None else 0
-    pt_lowers = ratings_data["lowers"] if ratings_data is not None else 0
-    raw_net_upgrades = ratings_data["net_upgrades"] if ratings_data is not None else 0
+    # PT revision data — integer fields cast explicitly to satisfy mypy (dict type is int | float).
+    pt_raises = int(ratings_data["raises"]) if ratings_data is not None else 0
+    pt_lowers = int(ratings_data["lowers"]) if ratings_data is not None else 0
+    raw_net_upgrades = int(ratings_data["net_upgrades"]) if ratings_data is not None else 0
     direction_label = (
         _pt_revision_direction_label(pt_raises, pt_lowers)
         if ratings_data is not None
         else "NO_DATA"
     )
 
-    # Compute F3 score when we have enough data
+    # Compute F3 score when we have analyst coverage (v7.3.5 — single path).
     f3_score: int | None = None
     f3_before: int | None = None
-    pvt: float | None = None
-    pvt_band: str | None = None
-    pvt_adj: int | None = None
     override_applied = False
     override_reason: str | None = None
+    weighted_net_upg: float = 0.0
 
-    if has_coverage and current_price and formula_pt and current_price > 0 and formula_pt > 0:
-        sell_count = sell + strong_sell
-        consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
-        # Use "HOLD" when no distribution data (zero total analysts)
-        if consensus_label == "NO COVERAGE":
-            consensus_label = "HOLD"
-
-        fs = score_f3(
-            consensus_rating=consensus_label,
-            analyst_count=effective_count,
-            pt_revision_direction=direction_label if direction_label != "NO_DATA" else "NO_CHANGE",
-            net_upgrades_30d=raw_net_upgrades,
-            current_price=current_price,
-            analyst_target=formula_pt,
-            sell_count=sell_count,
+    if has_coverage:
+        consensus_weighted_avg_val = _weighted_consensus_avg(
+            strong_buy, buy, hold, sell, strong_sell
         )
-
+        weighted_net_upg = (
+            float(ratings_data.get("weighted_net_upgrades", float(raw_net_upgrades)))
+            if ratings_data is not None
+            else 0.0
+        )
+        fs = score_f3(
+            formula_pt=formula_pt,
+            current_price=current_price,
+            pt_revision_direction=direction_label if direction_label != "NO_DATA" else "NO_CHANGE",
+            num_analysts=effective_count,
+            consensus_weighted_avg=consensus_weighted_avg_val,
+            weighted_net_upgrades=weighted_net_upg,
+        )
         f3_score = round(fs.raw_score)
-        f3_before = fs.breakdown["f3_before_price_adjustment"]
-        pvt = fs.breakdown["price_vs_target"]
-        pvt_band = fs.breakdown["price_vs_target_band_label"]
-        pvt_adj = fs.breakdown["price_vs_target_adjustment"]
+        f3_before = fs.breakdown["bucket_score"]
         override_applied = fs.override_applied
         override_reason = fs.override_reason
-    elif has_coverage and (not current_price or not formula_pt):
-        # Coverage exists but no price data — score without price adjustment
-        sell_count = sell + strong_sell
-        consensus_label, _base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
-        if consensus_label == "NO COVERAGE":
-            consensus_label = "HOLD"
-        count = effective_count
-        pt_mod = _pt_revision_modifier(
-            direction_label if direction_label != "NO_DATA" else "NO_CHANGE"
-        )
-        ud_mod = _upgrade_downgrade_modifier(raw_net_upgrades)
-        base = _base_score_from_consensus(consensus_label)
-        count_mod = _analyst_count_modifier(count)
-        raw = base + count_mod + pt_mod + ud_mod
-        raw_clamped = max(0, min(100, raw))
 
-        # No price data → skip pvt adjustment; still check override
-        is_buy_or_sb = consensus_label.upper() in ("BUY", "STRONG BUY")
-        no_sells = sell_count == 0
-        sufficient_cov = count >= 9
-        pt_ok = (direction_label if direction_label != "NO_DATA" else "NO_CHANGE").upper() in (
-            "MULTIPLE_RAISES",
-            "SINGLE_RAISE",
-            "NO_CHANGE",
-        )
-        if (
-            is_buy_or_sb
-            and no_sells
-            and sufficient_cov
-            and pt_ok
-            and raw_clamped < _HIGH_CONSENSUS_MIN
-        ):
-            raw_clamped = _HIGH_CONSENSUS_MIN
-            override_applied = True
-            override_reason = "High consensus minimum rule applied"
-
-        f3_score = raw_clamped
-        f3_before = raw
-        pvt_adj = 0
-        pvt_band = _BAND_NEUTRAL
+    # Price-vs-target for display in pt_upside_indicator only (not used in scoring).
+    pvt: float | None = None
+    pvt_band: str | None = None
+    if current_price and formula_pt and current_price > 0 and formula_pt > 0:
+        pvt = _price_vs_target(current_price, formula_pt)
+        pvt_band = _price_vs_target_band(pvt)
 
     # Build sub-indicators
     cr_label, cr_base = classify_consensus(strong_buy, buy, hold, sell, strong_sell)
@@ -599,9 +550,7 @@ def _build_analyst_response(
         upgrades_30d=max(0, raw_net_upgrades) if ratings_data is not None else 0,
         downgrades_30d=max(0, -raw_net_upgrades) if ratings_data is not None else 0,
         net_upgrades_30d=raw_net_upgrades,
-        modifier=_upgrade_downgrade_modifier(raw_net_upgrades)
-        if ratings_data is not None
-        else None,
+        modifier=_weighted_upgrade_modifier(weighted_net_upg) if ratings_data is not None else None,
     )
 
     pt_upside_indicator = PtUpsideIndicator(
@@ -611,7 +560,7 @@ def _build_analyst_response(
         upside_pct=upside_pct,
         price_vs_target=pvt,
         price_vs_target_band=pvt_band,
-        adjustment=pvt_adj,
+        adjustment=None,  # display-only field; no longer derived from scoring (v7.3.5)
         upside_color=_upside_color(pvt) if pvt is not None else None,
     )
 
@@ -938,8 +887,14 @@ class AnalystService:
 
     async def _fetch_recent_ratings(
         self, client: httpx.AsyncClient, ticker: str
-    ) -> dict[str, int] | None:
-        """Count PT raises/lowers and net rating upgrades from Benzinga (last 30 days).
+    ) -> dict[str, int | float] | None:
+        """Count PT raises/lowers (30d) and recency-weighted net upgrades (90d).
+
+        PT raises/lowers use the 30-day window only — they drive the bucket 2
+        PT revision direction signal.
+
+        Upgrade/downgrade events are recency-weighted over 90 days:
+          0-30d → 1.0x | 31-60d → 0.5x | 61-90d → 0.25x | >90d → 0
 
         action_pt values that count as raises: 'Raises', 'Announces'
         action_pt values that count as lowers: 'Lowers'
@@ -949,8 +904,9 @@ class AnalystService:
         Returns None on any fetch/parse failure.
         """
         try:
-            date_from = (date.today() - timedelta(days=_REVISION_DAYS)).isoformat()
-            date_to = date.today().isoformat()
+            today = date.today()
+            date_from = (today - timedelta(days=_REVISION_DAYS_EXTENDED)).isoformat()
+            date_to = today.isoformat()
 
             resp = await client.get(
                 f"{_BENZINGA_BASE_URL}/api/v2.1/calendar/ratings",
@@ -968,29 +924,50 @@ class AnalystService:
             ratings: list[Any] = payload.get("ratings") or []
             raises = 0
             lowers = 0
-            upgrades = 0
-            downgrades = 0
+            upgrades_30d = 0
+            downgrades_30d = 0
+            weighted_upgrades = 0.0
+            weighted_downgrades = 0.0
 
             for r in ratings:
                 if r.get("ticker", "").upper() != ticker.upper():
                     continue
 
-                action_pt: str = (r.get("action_pt") or "").strip().lower()
-                if action_pt in ("raises", "announces"):
-                    raises += 1
-                elif action_pt == "lowers":
-                    lowers += 1
+                # Parse event date for recency weighting.
+                raw_date: str = (r.get("date") or r.get("updated") or "").split("T")[0]
+                days_ago: int = _REVISION_DAYS_EXTENDED + 1  # default: outside window
+                try:
+                    event_date = date.fromisoformat(raw_date)
+                    days_ago = (today - event_date).days
+                except ValueError:
+                    pass
 
-                action_co: str = (r.get("action_company") or "").strip().lower()
-                if action_co in ("upgrades", "initiates coverage on"):
-                    upgrades += 1
-                elif action_co == "downgrades":
-                    downgrades += 1
+                # PT revision direction — 30d window only.
+                if days_ago <= _REVISION_DAYS:
+                    action_pt: str = (r.get("action_pt") or "").strip().lower()
+                    if action_pt in ("raises", "announces"):
+                        raises += 1
+                    elif action_pt == "lowers":
+                        lowers += 1
+
+                # Upgrade/downgrade momentum — recency-weighted over 90d.
+                weight = _recency_weight(days_ago)
+                if weight > 0:
+                    action_co: str = (r.get("action_company") or "").strip().lower()
+                    if action_co in ("upgrades", "initiates coverage on"):
+                        weighted_upgrades += weight
+                        if days_ago <= _REVISION_DAYS:
+                            upgrades_30d += 1
+                    elif action_co == "downgrades":
+                        weighted_downgrades += weight
+                        if days_ago <= _REVISION_DAYS:
+                            downgrades_30d += 1
 
             return {
                 "raises": raises,
                 "lowers": lowers,
-                "net_upgrades": upgrades - downgrades,
+                "net_upgrades": upgrades_30d - downgrades_30d,
+                "weighted_net_upgrades": weighted_upgrades - weighted_downgrades,
             }
         except Exception:
             return None

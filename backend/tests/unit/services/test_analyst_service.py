@@ -1,14 +1,11 @@
-"""Unit tests for AnalystService — v7.3.4 F3 scoring algorithm.
+"""Unit tests for AnalystService — v7.3.5 F3 scoring algorithm.
 
-F3 v7.3.4 uses a base-score + modifier approach:
-  Priority 1: Consensus label → base score (90/78/55/30)
-  Priority 2: Analyst count   → modifier (+8/+5/+3/0/-5)
-  Priority 3: PT revision     → modifier (+5/+3/0/-5/-10)
-  Priority 4: Net upgrades    → modifier (+5/+3/0/-5/-10)
-  Priority 5: Price vs target adjustment (with override rules)
-
-High consensus override: Buy/SB + ≥9 analysts + 0 sells + raised/maintained PT → min 78
-Hard cap: when pvt > +20%, f3_final = min(f3_before, 45)
+F3 v7.3.5 uses a 4-bucket PT approach + recency-weighted upgrade modifier:
+  Bucket 1: PT > price                              → base 80
+  Bucket 2: PT ≤ price + positive revision (30d)   → base 55
+  Bucket 3: PT ≤ price + ≥20 analysts + avg ≥ 4.0 → base 65
+  Bucket 4: Neither                                 → base 40
+  Plus: recency-weighted upgrade modifier (+5/+3/0/-5/-10)
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from atlas.services.analyst_service import (
-    _HARD_CAP_ABOVE_20,
+    AnalystService,
     _analyst_count_modifier,
     _base_score_from_consensus,
     _build_analyst_response,
@@ -27,11 +24,13 @@ from atlas.services.analyst_service import (
     _price_vs_target_band,
     _pt_revision_direction_label,
     _pt_revision_modifier,
+    _recency_weight,
     _upgrade_downgrade_modifier,
     _upside_color,
+    _weighted_consensus_avg,
+    _weighted_upgrade_modifier,
     classify_consensus,
     score_f3,
-    AnalystService,
 )
 
 # ---------------------------------------------------------------------------
@@ -283,76 +282,311 @@ class TestGradeFromTotal:
 
 
 # ---------------------------------------------------------------------------
-# score_f3 — six spec test cases + edge cases
+# _weighted_consensus_avg
 # ---------------------------------------------------------------------------
 
 
-class TestHighConsensusOverride:
-    """Min 78 fires when Buy/SB + >=9 analysts + 0 sells + raised/maintained PT."""
+class TestWeightedConsensusAvg:
+    """Weighted avg (SB=5, B=4, H=3, S=2, SS=1). 0.0 when total=0."""
 
-    def test_override_lifts_score_to_78(self) -> None:
-        # Buy(78) + count=9(0) + NO_CHANGE(0) + 0 upgrades(0) = 78,
-        # pvt ~+0.1387 (14% above) -> flat -15 -> 63 < 78.
-        # Override: Buy + 9 + 0 sells + NO_CHANGE (maintained) -> min 78.
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=9,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=521.95,
-            analyst_target=458.25,
-            sell_count=0,
-        )
-        assert result.raw_score == 78
-        assert result.override_applied is True
+    def test_all_strong_buy_returns_5(self) -> None:
+        assert _weighted_consensus_avg(10, 0, 0, 0, 0) == 5.0
 
-    def test_override_does_not_fire_with_sell_count_nonzero(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=9,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=521.95,
-            analyst_target=458.25,
-            sell_count=1,
-        )
-        assert result.override_applied is False
+    def test_all_strong_sell_returns_1(self) -> None:
+        assert _weighted_consensus_avg(0, 0, 0, 0, 10) == 1.0
 
-    def test_override_does_not_fire_with_hold_consensus(self) -> None:
+    def test_zero_total_returns_0(self) -> None:
+        assert _weighted_consensus_avg(0, 0, 0, 0, 0) == 0.0
+
+    def test_buy_dominated_distribution(self) -> None:
+        # SB=0, B=55, H=11, S=2, SS=0 → (220+33+4)/68 = 257/68 ≈ 3.779
+        avg = _weighted_consensus_avg(0, 55, 11, 2, 0)
+        assert abs(avg - (257 / 68)) < 0.001
+
+    def test_threshold_4_point_0_exactly(self) -> None:
+        # SB=1, B=3, H=0, S=0, SS=0 → (5+12)/4 = 17/4 = 4.25
+        avg = _weighted_consensus_avg(1, 3, 0, 0, 0)
+        assert avg == pytest.approx(4.25, abs=0.001)
+
+
+# ---------------------------------------------------------------------------
+# _recency_weight
+# ---------------------------------------------------------------------------
+
+
+class TestRecencyWeight:
+    """Recency weight for upgrade/downgrade events."""
+
+    def test_0_days_returns_1(self) -> None:
+        assert _recency_weight(0) == 1.0
+
+    def test_30_days_returns_1(self) -> None:
+        assert _recency_weight(30) == 1.0
+
+    def test_31_days_returns_0_5(self) -> None:
+        assert _recency_weight(31) == 0.5
+
+    def test_60_days_returns_0_5(self) -> None:
+        assert _recency_weight(60) == 0.5
+
+    def test_61_days_returns_0_25(self) -> None:
+        assert _recency_weight(61) == 0.25
+
+    def test_90_days_returns_0_25(self) -> None:
+        assert _recency_weight(90) == 0.25
+
+    def test_91_days_returns_0(self) -> None:
+        assert _recency_weight(91) == 0.0
+
+    def test_365_days_returns_0(self) -> None:
+        assert _recency_weight(365) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _weighted_upgrade_modifier
+# ---------------------------------------------------------------------------
+
+
+class TestWeightedUpgradeModifier:
+    """Recency-weighted net upgrades (float) → score modifier."""
+
+    def test_above_2_returns_5(self) -> None:
+        assert _weighted_upgrade_modifier(2.1) == 5
+        assert _weighted_upgrade_modifier(10.0) == 5
+
+    def test_exactly_2_returns_3(self) -> None:
+        # 2.0 is NOT > 2.0 → falls to >= 1.0 → +3
+        assert _weighted_upgrade_modifier(2.0) == 3
+
+    def test_1_to_2_returns_3(self) -> None:
+        assert _weighted_upgrade_modifier(1.0) == 3
+        assert _weighted_upgrade_modifier(1.5) == 3
+
+    def test_near_zero_returns_0(self) -> None:
+        assert _weighted_upgrade_modifier(0.0) == 0
+        assert _weighted_upgrade_modifier(0.5) == 0
+        assert _weighted_upgrade_modifier(-0.5) == 0
+
+    def test_minus_1_to_minus_2_returns_minus_5(self) -> None:
+        assert _weighted_upgrade_modifier(-1.0) == -5
+        assert _weighted_upgrade_modifier(-1.5) == -5
+        assert _weighted_upgrade_modifier(-2.0) == -5
+
+    def test_below_minus_2_returns_minus_10(self) -> None:
+        assert _weighted_upgrade_modifier(-2.1) == -10
+        assert _weighted_upgrade_modifier(-5.0) == -10
+
+
+# ---------------------------------------------------------------------------
+# score_f3 — v7.3.5 four-bucket tests
+# ---------------------------------------------------------------------------
+
+
+class TestScoreF3:
+    """v7.3.5 — 4-bucket PT scoring + recency-weighted upgrade modifier."""
+
+    def test_bucket1_pt_above_price_returns_80(self) -> None:
         result = score_f3(
-            consensus_rating="Hold",
-            analyst_count=15,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
+            formula_pt=120.0,
             current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
-        )
-        assert result.override_applied is False
-
-    def test_override_does_not_fire_when_count_below_9(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=8,
             pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
+            num_analysts=15,
+            consensus_weighted_avg=3.8,
+            weighted_net_upgrades=0.0,
         )
-        assert result.override_applied is False
+        assert result.raw_score == 80.0
 
-    def test_override_does_not_fire_with_multiple_cuts(self) -> None:
+    def test_bucket1_pt_just_above_price(self) -> None:
         result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=10,
-            pt_revision_direction="MULTIPLE_CUTS",
-            net_upgrades_30d=0,
+            formula_pt=100.01,
             current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=5,
+            consensus_weighted_avg=2.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 80.0
+
+    def test_bucket1_pt_equal_to_price_falls_to_lower_bucket(self) -> None:
+        # PT == price → NOT > price → evaluated against buckets 2-4
+        result = score_f3(
+            formula_pt=100.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=5,
+            consensus_weighted_avg=2.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 40.0  # bucket 4: neither
+
+    def test_bucket2_checked_before_bucket3(self) -> None:
+        # PT < price, positive revision AND strong coverage — bucket 2 fires first → 55
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="SINGLE_RAISE",
+            num_analysts=25,
+            consensus_weighted_avg=4.5,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 55.0
+
+    def test_bucket2_multiple_raises_returns_55(self) -> None:
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="MULTIPLE_RAISES",
+            num_analysts=5,
+            consensus_weighted_avg=3.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 55.0
+
+    def test_bucket3_strong_coverage_and_consensus_returns_65(self) -> None:
+        # PT < price, no positive revision, ≥20 analysts, avg ≥ 4.0 → bucket 3
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=20,
+            consensus_weighted_avg=4.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 65.0
+
+    def test_bucket3_requires_consensus_avg_at_least_4(self) -> None:
+        # avg 3.9 → bucket 3 NOT met → bucket 4
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=25,
+            consensus_weighted_avg=3.9,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 40.0
+
+    def test_bucket3_requires_at_least_20_analysts(self) -> None:
+        # 19 analysts + high avg → bucket 3 NOT met → bucket 4
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=19,
+            consensus_weighted_avg=4.5,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 40.0
+
+    def test_bucket4_neither_returns_40(self) -> None:
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=10,
+            consensus_weighted_avg=3.5,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 40.0
+
+    def test_none_prices_skip_bucket1(self) -> None:
+        # No price data → skip bucket 1; positive revision fires bucket 2
+        result = score_f3(
+            formula_pt=None,
+            current_price=None,
+            pt_revision_direction="MULTIPLE_RAISES",
+            num_analysts=5,
+            consensus_weighted_avg=3.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.raw_score == 55.0
+
+    def test_weighted_upgrade_modifier_applied_to_bucket_score(self) -> None:
+        # bucket 1 (80) + 3 weighted upgrades (+5) = 85
+        result = score_f3(
+            formula_pt=120.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=10,
+            consensus_weighted_avg=3.5,
+            weighted_net_upgrades=2.5,
+        )
+        assert result.raw_score == 85.0
+
+    def test_negative_upgrade_modifier_reduces_score(self) -> None:
+        # bucket 4 (40) + heavy downgrades (-10) = 30
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=5,
+            consensus_weighted_avg=2.0,
+            weighted_net_upgrades=-3.0,
+        )
+        assert result.raw_score == 30.0
+
+    def test_score_clamped_at_0(self) -> None:
+        # bucket 4 (40) + worst modifier (-10) = 30; can't go below 0
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=5,
+            consensus_weighted_avg=2.0,
+            weighted_net_upgrades=-100.0,
+        )
+        assert result.raw_score == 30.0  # 40 - 10 = 30 (not below 0)
+
+    def test_weight_is_015(self) -> None:
+        result = score_f3(
+            formula_pt=120.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=15,
+            consensus_weighted_avg=3.8,
+            weighted_net_upgrades=0.0,
+        )
+        assert result.weight == 0.15
+
+    def test_weighted_contribution_equals_score_times_weight(self) -> None:
+        result = score_f3(
+            formula_pt=90.0,
+            current_price=100.0,
+            pt_revision_direction="SINGLE_RAISE",
+            num_analysts=5,
+            consensus_weighted_avg=3.0,
+            weighted_net_upgrades=0.0,
+        )
+        assert abs(result.weighted_contribution - result.raw_score * 0.15) < 0.001
+
+    def test_override_applied_always_false(self) -> None:
+        result = score_f3(
+            formula_pt=120.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=15,
+            consensus_weighted_avg=3.8,
+            weighted_net_upgrades=0.0,
         )
         assert result.override_applied is False
+        assert result.override_reason is None
+
+    def test_breakdown_has_required_keys(self) -> None:
+        result = score_f3(
+            formula_pt=120.0,
+            current_price=100.0,
+            pt_revision_direction="NO_CHANGE",
+            num_analysts=15,
+            consensus_weighted_avg=3.8,
+            weighted_net_upgrades=1.5,
+        )
+        for key in (
+            "bucket_score",
+            "bucket_reason",
+            "weighted_net_upgrades_90d",
+            "upgrade_modifier",
+        ):
+            assert key in result.breakdown, f"Missing breakdown key: {key}"
 
 
 # ---------------------------------------------------------------------------
@@ -450,183 +684,32 @@ class TestUpsideColor:
         assert _upside_color(0.50) == "RED"
 
 
-class TestScoreF3:
-    """spec test cases 1-6 plus edge cases."""
-
-    def test_1_price_at_target_neutral_not_penalized(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=38,
-            pt_revision_direction="MULTIPLE_RAISES",
-            net_upgrades_30d=2,
-            current_price=458.25,
-            analyst_target=458.25,
-            sell_count=0,
-        )
-        # f3_before = 78+8+5+3 = 94; pvt=0 neutral; no adjustment
-        assert result.raw_score == 94
-        assert result.raw_score > 59, "Bug: price-at-target must not penalize F3"
-        assert result.breakdown["price_vs_target_adjustment"] == 0
-
-    def test_2_ten_to_twenty_pct_below_adds_5(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=15,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=400.0,
-            analyst_target=460.0,
-            sell_count=0,
-        )
-        assert result.breakdown["f3_before_price_adjustment"] == 81
-        assert result.breakdown["price_vs_target_adjustment"] == 5
-        assert result.raw_score == 86
-
-    def test_3_twenty_plus_pct_above_hard_cap_45(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=10,
-            pt_revision_direction="SINGLE_RAISE",
-            net_upgrades_30d=1,
-            current_price=580.0,
-            analyst_target=460.0,
-            sell_count=0,
-        )
-        assert result.breakdown["f3_before_price_adjustment"] == 87
-        assert result.raw_score == _HARD_CAP_ABOVE_20
-
-    def test_4_high_consensus_override_minimum_78(self) -> None:
-        result = score_f3(
-            consensus_rating="Strong Buy",
-            analyst_count=9,
-            pt_revision_direction="SINGLE_RAISE",
-            net_upgrades_30d=3,
-            current_price=470.0,
-            analyst_target=458.25,
-            sell_count=0,
-        )
-        assert result.raw_score >= 78
-        assert result.raw_score == 98  # already above 78
-
-    def test_5_hold_above_target_full_penalty_capped(self) -> None:
-        result = score_f3(
-            consensus_rating="Hold",
-            analyst_count=8,
-            pt_revision_direction="SINGLE_CUT",
-            net_upgrades_30d=-3,
-            current_price=560.0,
-            analyst_target=458.25,
-            sell_count=2,
-        )
-        # f3_before=55+0-5-10=40; pvt>20% above; min(40,45)=40
-        assert result.breakdown["f3_before_price_adjustment"] == 40
-        assert result.raw_score == 40
-        assert result.override_applied is False
-
-    def test_6_ten_to_twenty_above_flat_penalty(self) -> None:
-        # Buy(78) + count=20(+5) + SINGLE_RAISE(+3) + net=2(+3) = 89
-        # pvt ~11.3% above target → flat -15 → 74 < 78
-        # Override fires: Buy + 20 analysts + 0 sells + SINGLE_RAISE → min 78
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=20,
-            pt_revision_direction="SINGLE_RAISE",
-            net_upgrades_30d=2,
-            current_price=510.0,
-            analyst_target=458.25,
-            sell_count=0,
-        )
-        assert result.breakdown["f3_before_price_adjustment"] == 89
-        assert result.breakdown["price_vs_target_adjustment"] == -15
-        assert result.raw_score == 78
-        assert result.override_applied is True
-
-    def test_score_clamped_at_100(self) -> None:
-        # Strong Buy(90) + >30(+8) + multiple_raises(+5) + >2 upgrades(+5) = 108 -> 100
-        result = score_f3(
-            consensus_rating="Strong Buy",
-            analyst_count=35,
-            pt_revision_direction="MULTIPLE_RAISES",
-            net_upgrades_30d=5,
-            current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
-        )
-        assert result.raw_score == 100
-
-    def test_weight_is_0_15(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=15,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
-        )
-        assert result.weight == 0.15
-
-    def test_weighted_contribution_equals_score_times_weight(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=15,
-            pt_revision_direction="NO_CHANGE",
-            net_upgrades_30d=0,
-            current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
-        )
-        assert abs(result.weighted_contribution - result.raw_score * 0.15) < 0.001
-
-    def test_breakdown_has_all_required_keys(self) -> None:
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=15,
-            pt_revision_direction="SINGLE_RAISE",
-            net_upgrades_30d=1,
-            current_price=100.0,
-            analyst_target=100.0,
-            sell_count=0,
-        )
-        for key in (
-            "base_score",
-            "analyst_count_modifier",
-            "pt_revision_modifier",
-            "upgrade_downgrade_modifier",
-            "f3_before_price_adjustment",
-            "price_vs_target",
-            "price_vs_target_band_label",
-            "price_vs_target_adjustment",
-        ):
-            assert key in result.breakdown, f"Missing breakdown key: {key}"
-
-    def test_full_penalty_when_deteriorating(self) -> None:
-        # Price ~15% above AND deteriorating (net_upgrades=-1, single_cut) -> -15
-        result = score_f3(
-            consensus_rating="Buy",
-            analyst_count=10,
-            pt_revision_direction="SINGLE_CUT",
-            net_upgrades_30d=-1,
-            current_price=529.0,
-            analyst_target=458.25,
-            sell_count=0,
-        )
-        assert result.breakdown["price_vs_target_adjustment"] == -15
-
-
 # ---------------------------------------------------------------------------
 # _build_analyst_response smoke tests
 # ---------------------------------------------------------------------------
 
 
-def _make_ratings(raises: int, lowers: int, net_upgrades: int) -> dict[str, int]:
-    return {"raises": raises, "lowers": lowers, "net_upgrades": net_upgrades}
+def _make_ratings(
+    raises: int,
+    lowers: int,
+    net_upgrades: int,
+    weighted_net_upgrades: float | None = None,
+) -> dict[str, int | float]:
+    return {
+        "raises": raises,
+        "lowers": lowers,
+        "net_upgrades": net_upgrades,
+        "weighted_net_upgrades": (
+            weighted_net_upgrades if weighted_net_upgrades is not None else float(net_upgrades)
+        ),
+    }
 
 
 class TestBuildAnalystResponse:
     """Smoke tests for _build_analyst_response assembly."""
 
-    def test_at_target_no_penalty(self) -> None:
+    def test_at_target_positive_revision_bucket2(self) -> None:
+        # PT == price → NOT bucket 1; MULTIPLE_RAISES → bucket 2 (55) + modifier +3 = 58
         response = _build_analyst_response(
             ticker="MU",
             strong_buy=20,
@@ -641,8 +724,8 @@ class TestBuildAnalystResponse:
             ratings_data=_make_ratings(raises=3, lowers=0, net_upgrades=2),
         )
         assert response.f3_score is not None
-        assert response.f3_score > 59, (
-            f"Bug regression: price-at-target returned {response.f3_score}"
+        assert response.f3_score == 58, (
+            f"at-target with MULTIPLE_RAISES: expected 58, got {response.f3_score}"
         )
 
     def test_no_coverage_returns_none_score(self) -> None:
@@ -661,8 +744,8 @@ class TestBuildAnalystResponse:
         )
         assert response.f3_score is None
 
-    def test_override_flag_propagated(self) -> None:
-        # Buy + 9 analysts + 0 sells + no cut PT, pvt neutral -> f3=78, override present but no change
+    def test_override_applied_always_false(self) -> None:
+        # v7.3.5: override mechanism removed; always False regardless of inputs
         response = _build_analyst_response(
             ticker="TST",
             strong_buy=0,
@@ -677,7 +760,6 @@ class TestBuildAnalystResponse:
             ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
         )
         assert response.f3_score is not None
-        # score=78 already, override min 78 met but no actual lift needed
         assert response.override_applied is False
 
     def test_grade_matches_score(self) -> None:
@@ -721,9 +803,12 @@ class TestBuildAnalystResponse:
         )
         assert response.pt_upside.upside_color == "NEUTRAL"
 
-    def test_spec_case_1_correct_score_and_label(self) -> None:
-        # Bug 1 + Bug 2 fix: SB=0, B=55, H=11, S=2, SS=0 → BUY (not STRONG BUY)
-        # f3 = 78 (BUY base) + 8 (>30 analysts) + 0 + 0 + 0 (neutral adj) = 86
+    def test_spec_case_1_correct_label_and_bucket4_score(self) -> None:
+        # SB=0, B=55, H=11, S=2, SS=0 → BUY label (weighted avg 3.779)
+        # PT (428.65) < price (451.62) → not bucket 1
+        # raises=0, lowers=0 → NO_CHANGE → not bucket 2
+        # 68 analysts ≥ 20 but avg 3.779 < 4.0 → not bucket 3
+        # bucket 4 (40) + 0 modifier = 40
         response = _build_analyst_response(
             ticker="BUGFIX",
             strong_buy=0,
@@ -739,7 +824,7 @@ class TestBuildAnalystResponse:
         )
         assert response.consensus_rating.label == "BUY"
         assert response.consensus_rating.base_score == 78
-        assert response.f3_score == 86
+        assert response.f3_score == 40
 
 
 # ---------------------------------------------------------------------------
@@ -883,16 +968,17 @@ class TestBuildAnalystResponseHighestPt:
             sell=0,
             strong_sell=0,
             num_analysts=40,
-            consensus_pt=573.90,   # mean — kept for display only
-            highest_pt=1000.0,     # drives formula
+            consensus_pt=573.90,  # mean — kept for display only
+            highest_pt=1000.0,  # drives formula
             current_price=766.58,
             has_coverage=True,
             ratings_data=_make_ratings(raises=3, lowers=0, net_upgrades=2),
         )
-        # pvt = (766.58 - 1000.0) / 1000.0 = -0.2334 → 20%+ below target → +10 adj
+        # PT (1000) > price (766.58) → bucket 1 → score 80 + modifier
+        # pvt = (766.58 - 1000.0) / 1000.0 ≈ -0.2334 (display-only; no scoring adjustment)
         assert response.pt_upside.highest_pt == 1000.0
         assert response.pt_upside.consensus_pt == pytest.approx(573.90, abs=0.01)
-        assert response.pt_upside.adjustment == 10
+        assert response.pt_upside.adjustment is None
 
     def test_upside_pct_uses_highest_pt_when_available(self) -> None:
         """upside_pct on the indicator reflects the highest_pt."""
@@ -914,8 +1000,10 @@ class TestBuildAnalystResponseHighestPt:
         assert response.pt_upside.upside_pct is not None
         assert response.pt_upside.upside_pct == pytest.approx(30.45, abs=0.1)
 
-    def test_hard_cap_triggered_when_above_highest_pt_by_more_than_20pct(self) -> None:
-        """Hard cap fires when price > 120% of highest_pt."""
+    def test_stock_above_pt_with_strong_coverage_bucket3(self) -> None:
+        """v7.3.5: hard cap removed; stock above PT with strong coverage → bucket 3 (65)."""
+        # PT=100 < price=125 → not bucket 1; NO_CHANGE → not bucket 2
+        # 25 analysts ≥ 20, weighted_avg = (75+40)/25 = 4.6 ≥ 4.0 → bucket 3 → 65
         response = _build_analyst_response(
             ticker="XX",
             strong_buy=15,
@@ -926,12 +1014,12 @@ class TestBuildAnalystResponseHighestPt:
             num_analysts=25,
             consensus_pt=100.0,
             highest_pt=100.0,
-            current_price=125.0,   # 25% above → cap at 45
+            current_price=125.0,
             has_coverage=True,
             ratings_data=_make_ratings(raises=0, lowers=0, net_upgrades=0),
         )
         assert response.f3_score is not None
-        assert response.f3_score <= 45
+        assert response.f3_score == 65
 
     def test_falls_back_to_consensus_pt_when_highest_pt_is_none(self) -> None:
         """If yfinance highest PT unavailable, formula uses consensus_pt (old behaviour)."""
@@ -944,7 +1032,7 @@ class TestBuildAnalystResponseHighestPt:
             strong_sell=0,
             num_analysts=40,
             consensus_pt=460.0,
-            highest_pt=None,    # not available
+            highest_pt=None,  # not available
             current_price=400.0,
             has_coverage=True,
             ratings_data=_make_ratings(raises=1, lowers=0, net_upgrades=1),
@@ -964,4 +1052,3 @@ class TestBuildAnalystResponseHighestPt:
             ratings_data=_make_ratings(raises=1, lowers=0, net_upgrades=1),
         )
         assert r_with.f3_score == r_without.f3_score
-

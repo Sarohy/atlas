@@ -319,44 +319,22 @@ export const handlers = [
     const ticker = String(params['ticker'] ?? 'AAPL');
     return HttpResponse.json({
       ticker,
-      whale_block: {
-        largest_premium: 1500000,
-        score: 80,
-        weight: 0.35,
-      },
-      call_put_ratio: {
-        call_premium: 2400000,
-        put_premium: 800000,
-        ratio: 3,
-        score: 75,
-        weight: 0.2,
-      },
-      volume_oi: {
-        call_volume: 120000,
-        call_open_interest: 60000,
-        vol_oi_ratio: 2,
-        score: 70,
-        weight: 0.2,
-      },
-      dark_pool: {
-        total_dark_pool_premium: 950000,
-        largest_print: 300000,
-        print_count: 4,
-        score: 72,
-        weight: 0.15,
-      },
-      sweep_type: {
-        has_golden_sweep: false,
-        has_single_sweep: true,
-        has_repeated_hits: true,
-        sweep_premium: 250000,
-        score: 68,
-        weight: 0.1,
-      },
-      signal_tier: 'BLUE',
-      collar_flag: false,
       f4_score: 74,
       f4_grade: 'BUY',
+      dark_pool_score: 72,
+      options_flow_score: 76,
+      dark_pool_net_flow_usd: 12_500_000,
+      options_net_flow_usd: 4_300_000,
+      market_cap_usd: 75_000_000_000,
+      market_cap_tier: 'LARGE',
+      flow_direction: 'BULLISH',
+      data_source: 'BOTH',
+      data_gap_reason: null,
+      lookback_sessions: 5,
+      dark_pool_prints_count: 18,
+      dark_pool_large_buy_count: 3,
+      largest_dark_pool_buy_usd: 2_500_000,
+      largest_options_buy_usd: 850_000,
     });
   }),
 
@@ -429,7 +407,9 @@ export const handlers = [
   http.get(`${BASE}/api/v1/regime-modifier/:ticker`, ({ params, request }) => {
     const ticker = String(params['ticker'] ?? 'AAPL');
     const url = new URL(request.url);
-    const geopoliticalState = (url.searchParams.get('geopolitical_state') ?? 'ACTIVE_RISK').toUpperCase();
+    const geopoliticalState = (
+      url.searchParams.get('geopolitical_state') ?? 'ACTIVE_RISK'
+    ).toUpperCase();
     const ruleTriggered = 2;
     const baseScore = 79;
     const specialCaseActive = geopoliticalState === 'ESCALATING';
@@ -450,15 +430,19 @@ export const handlers = [
       max_cash_pct: 0.35,
       min_cash_usd: 25000,
       max_cash_usd: 35000,
-      output_text: specialCaseActive ? 'must stay in cash\nGEO PENALTY ACTIVE: CAUTION + ESCALATING' : 'must stay in cash',
+      output_text: specialCaseActive
+        ? 'must stay in cash\nGEO PENALTY ACTIVE: CAUTION + ESCALATING'
+        : 'must stay in cash',
       determination_text: `CAUTION regime from Brent/VIX data. Brent streak below $95: 2. Geo flag: ${geopoliticalState}. Modifier: ${modifier}.`,
       brent_condition: '$97.50 — $95-110 (CAUTION trigger)',
       vix_condition: '27.30 — 24-35 (CAUTION trigger)',
       geo_condition: geopoliticalState,
       trigger_logic: 'OR — either Brent or VIX triggers',
-      modifier_reason: specialCaseActive ? 'CAUTION + Escalating geo → −7' : `CAUTION + ${geopoliticalState} → −5`,
+      modifier_reason: specialCaseActive
+        ? 'CAUTION + Escalating geo → −7'
+        : `CAUTION + ${geopoliticalState} → −5`,
       special_case_active: specialCaseActive,
-      cash_floor_pct: 0.20,
+      cash_floor_pct: 0.2,
     });
   }),
 
@@ -490,7 +474,10 @@ export const handlers = [
     const iranResolution = url.searchParams.get('iran_resolution');
     const positionWeightOverride = url.searchParams.get('position_weight_override');
     const signalsCountOverride = url.searchParams.get('signals_count_override');
-    const brentConsecutive = parseInt(url.searchParams.get('brent_consecutive_below_95_count') ?? '0', 10);
+    const brentConsecutive = parseInt(
+      url.searchParams.get('brent_consecutive_below_95_count') ?? '0',
+      10,
+    );
     const geoState = (url.searchParams.get('geopolitical_state') ?? 'NONE').toUpperCase();
     const brentPriceParam = url.searchParams.get('brent_price');
     const brentPrice = brentPriceParam !== null ? parseFloat(brentPriceParam) : null;
@@ -550,7 +537,8 @@ export const handlers = [
 
     // Sequential gate: T2/T3/T4 blocked until T1 fires.
     const t1Fired = initialCatalyst === 'yes';
-    const t2Value = t1Fired && brentPrice !== null && brentPrice < 110 ? '20-25% of available cash' : 'Blocked';
+    const t2Value =
+      t1Fired && brentPrice !== null && brentPrice < 110 ? '20-25% of available cash' : 'Blocked';
     const t3Value = t1Fired && andGatePassed ? '30-40% of available cash' : 'Blocked';
     const t2Conditions = t2Value !== 'Blocked';
     const t3Conditions = t3Value !== 'Blocked';
@@ -574,8 +562,7 @@ export const handlers = [
       t1: t1Fired ? '10-15% of available cash' : 'Blocked',
       t2: t2Value,
       t3: t3Value,
-      t4:
-        t1Fired && iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
+      t4: t1Fired && iranResolution === 'confirmed' ? 'Remaining cash to floor' : 'Blocked',
     });
   }),
 
@@ -676,8 +663,7 @@ export const handlers = [
       cluster_red_threshold: 0.25,
       adds_permitted: false,
       trim_recommended: true,
-      message:
-        `${ticker} is grandfathered above the 8% soft cap. No new adds. Monitor expiry threshold.`,
+      message: `${ticker} is grandfathered above the 8% soft cap. No new adds. Monitor expiry threshold.`,
     });
   }),
 
@@ -693,7 +679,7 @@ export const handlers = [
       warning_message: null,
       position_betas: [
         { ticker: 'AAOI', weight: 0.005, beta: 4.03, contribution: 0.02015, source: 'CONFIRMED' },
-        { ticker: 'MU',   weight: 0.030, beta: 1.65, contribution: 0.0495, source: 'CONFIRMED' },
+        { ticker: 'MU', weight: 0.03, beta: 1.65, contribution: 0.0495, source: 'CONFIRMED' },
       ],
     });
   }),
@@ -705,10 +691,23 @@ export const handlers = [
 
     // Hardcoded confirmed beta table — mirrors backend service
     const CONFIRMED_BETAS: Record<string, number> = {
-      AAOI: 4.03, CRDO: 2.67, UCTT: 2.00, MRVL: 1.98, VICR: 1.95,
-      TTMI: 1.95, NBIS: 1.90, SNDK: 1.85, LITE: 1.80, COHR: 1.75,
-      AEHR: 1.75, MU: 1.65, CIEN: 1.55, TSM: 1.30, FN: 2.70,
-      TSEM: 0.82, NEM: 0.55,
+      AAOI: 4.03,
+      CRDO: 2.67,
+      UCTT: 2.0,
+      MRVL: 1.98,
+      VICR: 1.95,
+      TTMI: 1.95,
+      NBIS: 1.9,
+      SNDK: 1.85,
+      LITE: 1.8,
+      COHR: 1.75,
+      AEHR: 1.75,
+      MU: 1.65,
+      CIEN: 1.55,
+      TSM: 1.3,
+      FN: 2.7,
+      TSEM: 0.82,
+      NEM: 0.55,
     };
 
     const isChina = ticker === 'GCT';
@@ -717,12 +716,25 @@ export const handlers = [
 
     let capLimitPct: number;
     let sizingTier: string;
-    if (isChina) { capLimitPct = 0.25; sizingTier = 'CHINA_RISK'; }
-    else if (beta >= 3.0) { capLimitPct = 1.0; sizingTier = 'AAOI_TYPE_HIGH_BETA'; }
-    else if (beta >= 2.0) { capLimitPct = 1.0; sizingTier = 'VERY_HIGH_BETA'; }
-    else if (beta >= 1.5) { capLimitPct = 2.5; sizingTier = 'HIGH_BETA'; }
-    else if (beta >= 1.0) { capLimitPct = 5.0; sizingTier = 'MODERATE_BETA'; }
-    else { capLimitPct = 5.0; sizingTier = 'LOW_BETA'; }
+    if (isChina) {
+      capLimitPct = 0.25;
+      sizingTier = 'CHINA_RISK';
+    } else if (beta >= 3.0) {
+      capLimitPct = 1.0;
+      sizingTier = 'AAOI_TYPE_HIGH_BETA';
+    } else if (beta >= 2.0) {
+      capLimitPct = 1.0;
+      sizingTier = 'VERY_HIGH_BETA';
+    } else if (beta >= 1.5) {
+      capLimitPct = 2.5;
+      sizingTier = 'HIGH_BETA';
+    } else if (beta >= 1.0) {
+      capLimitPct = 5.0;
+      sizingTier = 'MODERATE_BETA';
+    } else {
+      capLimitPct = 5.0;
+      sizingTier = 'LOW_BETA';
+    }
 
     const betaCapActive = positionWeight >= capLimitPct / 100;
     const effectiveExposurePct = parseFloat((positionWeight * beta * 100).toFixed(2));
@@ -734,8 +746,7 @@ export const handlers = [
       position_weight_pct: parseFloat((positionWeight * 100).toFixed(2)),
       position_dollars: 0,
       effective_exposure_pct: effectiveExposurePct,
-      effective_exposure_note:
-        `${(positionWeight * 100).toFixed(1)}% position × beta ${beta} = ${effectiveExposurePct.toFixed(2)}% effective exposure`,
+      effective_exposure_note: `${(positionWeight * 100).toFixed(1)}% position × beta ${beta} = ${effectiveExposurePct.toFixed(2)}% effective exposure`,
       beta_cap_active: betaCapActive,
       beta_cap_limit_pct: capLimitPct,
       beta_cap_reason: betaCapActive ? `Beta ${beta} — cap at ${capLimitPct}%` : null,

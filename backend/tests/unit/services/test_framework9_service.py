@@ -32,16 +32,13 @@ from __future__ import annotations
 
 import pytest
 
-from atlas.schemas.framework9 import DataGapDetail, DataSourceStatus
+from atlas.schemas.framework9 import DataSourceStatus
 from atlas.services.framework9_service import (
     _grade_from_score,
     _resolve_spread_position,
     build_data_gap_details,
     evaluate_exceptional_conviction,
-    _cache,
-    _cache_set,
 )
-
 
 # ---------------------------------------------------------------------------
 # _grade_from_score — pure helper
@@ -89,11 +86,11 @@ class TestResolveSpreadPosition:
         assert not any(flags.values())
 
     def test_buy_side_above_0_6(self) -> None:
-        sp, flags = _resolve_spread_position(price=51.5, bid=50.0, ask=52.0)
+        sp, _flags = _resolve_spread_position(price=51.5, bid=50.0, ask=52.0)
         assert sp is not None and sp > 0.6
 
     def test_sell_side_below_0_4(self) -> None:
-        sp, flags = _resolve_spread_position(price=50.3, bid=50.0, ask=52.0)
+        sp, _flags = _resolve_spread_position(price=50.3, bid=50.0, ask=52.0)
         assert sp is not None and sp < 0.4
 
     def test_price_missing(self) -> None:
@@ -126,7 +123,7 @@ class TestBuildDataGapDetails:
     """Test 11 — No gaps — severity=NONE, no badge."""
 
     def test_all_online_no_gaps(self) -> None:
-        gaps, severity, f1_badge, f1_msg, f1_tip = build_data_gap_details(
+        gaps, severity, f1_badge, _f1_msg, _f1_tip = build_data_gap_details(
             uw_status=DataSourceStatus.ONLINE,
             polygon_status=DataSourceStatus.ONLINE,
             av_status=DataSourceStatus.ONLINE,
@@ -141,7 +138,7 @@ class TestBuildDataGapDetails:
     """Test 12 — All offline — severity=CRITICAL, f1_badge=F4 DATA UNAVAILABLE."""
 
     def test_all_offline_critical(self) -> None:
-        gaps, severity, f1_badge, f1_msg, f1_tip = build_data_gap_details(
+        _gaps, severity, f1_badge, f1_msg, f1_tip = build_data_gap_details(
             uw_status=DataSourceStatus.OFFLINE,
             polygon_status=DataSourceStatus.OFFLINE,
             av_status=DataSourceStatus.OFFLINE,
@@ -155,7 +152,7 @@ class TestBuildDataGapDetails:
         assert f1_tip is not None
 
     def test_uw_offline_major(self) -> None:
-        gaps, severity, f1_badge, _, _ = build_data_gap_details(
+        _gaps, severity, f1_badge, _, _ = build_data_gap_details(
             uw_status=DataSourceStatus.OFFLINE,
             polygon_status=DataSourceStatus.ONLINE,
             av_status=DataSourceStatus.ONLINE,
@@ -218,27 +215,18 @@ def _build_mock_f4(
 ) -> object:
     """Build a synthetic OptionsFlowResponse from legacy test input dicts.
 
-    Mirrors the F4 data structure that evaluate_framework9 now consumes.
+    Mirrors the F4 v2 data structure that evaluate_framework9 now consumes.
     """
-    from atlas.schemas.options_flow import (
-        CallPutRatioIndicator,
-        DarkPoolIndicator,
-        OptionsFlowResponse,
-        SweepTypeIndicator,
-        VolumeOiIndicator,
-        WhaleBlockIndicator,
-    )
+    from atlas.schemas.options_flow import OptionsFlowResponse
 
-    # --- Whale block ---
-    largest_premium: float | None = (
-        float(uw_data.get("largest_print_usd") or 0.0) or None
-    )
-    if uw_status in (DataSourceStatus.PARTIAL,):
-        # Partial UW — respect missing_fields from test data
-        if "largest_print_usd" in uw_data.get("missing_fields", []):
-            largest_premium = None
+    # --- Largest options buy (legacy "whale block") -----------------------
+    largest_premium: float | None = float(uw_data.get("largest_print_usd") or 0.0) or None
+    if uw_status == DataSourceStatus.PARTIAL and "largest_print_usd" in uw_data.get(
+        "missing_fields", []
+    ):
+        largest_premium = None
 
-    # --- Dark pool ---
+    # --- Dark pool --------------------------------------------------------
     if polygon_status == DataSourceStatus.OFFLINE:
         dp_total: float | None = None
         dp_count = 0
@@ -246,7 +234,7 @@ def _build_mock_f4(
         dp_total = float(dp_data.get("total_usd") or 0.0) or None
         dp_count = int(dp_data.get("num_prints", 0))
 
-    # --- Call/put ratio (prefer call_volume/put_volume over inverted pc_ratio) ---
+    # --- Call/put ratio (kept for direction derivation only) --------------
     cp_ratio: float | None
     call_v = vol_data.get("call_volume")
     put_v = vol_data.get("put_volume")
@@ -258,70 +246,69 @@ def _build_mock_f4(
     else:
         cp_ratio = None
 
-    # --- Signal tier → spec-aligned midpoint score ---
+    # --- F4 score (mirrors legacy spec midpoints) -------------------------
     whale_val = float(largest_premium or 0.0)
-    if (
-        whale_val >= 10_000_000
-        and uw_status not in (DataSourceStatus.RATE_LIMITED, DataSourceStatus.STALE)
+    if whale_val >= 10_000_000 and uw_status not in (
+        DataSourceStatus.RATE_LIMITED,
+        DataSourceStatus.STALE,
     ):
-        tier_str = "GOLD"
-        # Score 92 (TIER_1 midpoint per spec)
         f4_score_raw = 92
     elif whale_val >= 1_000_000:
-        tier_str = "BLUE"
         f4_score_raw = 86
     elif dp_total is not None and dp_total >= 500_000:
-        tier_str = "GREEN"
         f4_score_raw = 82
     elif whale_val >= 100_000:
-        tier_str = "GREY"
         f4_score_raw = 74
     else:
-        tier_str = "WHITE"
         f4_score_raw = 66
 
-    # Rate-limited/stale caps at GREY (no whale confirmation).
-    if uw_status in (DataSourceStatus.RATE_LIMITED, DataSourceStatus.STALE):
-        if tier_str in ("GOLD", "BLUE"):
-            tier_str = "GREY"
-            f4_score_raw = 74
+    if uw_status in (DataSourceStatus.RATE_LIMITED, DataSourceStatus.STALE) and f4_score_raw >= 80:
+        f4_score_raw = 74
 
-    f4_grade = (
-        "STRONG BUY" if f4_score_raw >= 80 else "BUY" if f4_score_raw >= 60 else "NEUTRAL"
-    )
+    f4_grade = "STRONG BUY" if f4_score_raw >= 80 else "BUY" if f4_score_raw >= 60 else "NEUTRAL"
+
+    # --- Direction (BULLISH/BEARISH/NEUTRAL) ------------------------------
+    if cp_ratio is None:
+        direction = "NEUTRAL"
+    elif cp_ratio > 1.5:
+        direction = "BULLISH"
+    elif cp_ratio < 0.7:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    # --- Data source label (matches F9's expectations) --------------------
+    has_options = largest_premium is not None
+    has_dp = dp_total is not None
+    if has_options and has_dp:
+        data_source = "BOTH"
+    elif has_options:
+        data_source = "OPTIONS_ONLY"
+    elif has_dp:
+        data_source = "DARK_POOL_ONLY"
+    else:
+        data_source = "DATA_GAP"
 
     return OptionsFlowResponse(
         ticker="TEST",
-        whale_block=WhaleBlockIndicator(
-            largest_premium=largest_premium,
-            score=100 if tier_str in ("GOLD",) else 85 if tier_str == "BLUE" else 30,
-        ),
-        call_put_ratio=CallPutRatioIndicator(
-            call_premium=None,
-            put_premium=None,
-            ratio=cp_ratio,
-            score=70,
-        ),
-        volume_oi=VolumeOiIndicator(
-            call_volume=None, call_open_interest=None, vol_oi_ratio=None, score=70
-        ),
-        dark_pool=DarkPoolIndicator(
-            total_dark_pool_premium=dp_total,
-            largest_print=dp_total,
-            print_count=dp_count,
-            score=80 if dp_total and dp_total >= 1_000_000 else 50 if dp_total else 30,
-        ),
-        sweep_type=SweepTypeIndicator(
-            has_golden_sweep=tier_str == "GOLD",
-            has_single_sweep=False,
-            has_repeated_hits=False,
-            sweep_premium=None,
-            score=40,
-        ),
-        signal_tier=tier_str,
-        collar_flag=False,
         f4_score=f4_score_raw,
         f4_grade=f4_grade,
+        dark_pool_score=80 if (dp_total and dp_total >= 1_000_000) else (50 if dp_total else None),
+        options_flow_score=(85 if whale_val >= 1_000_000 else 60) if has_options else None,
+        dark_pool_net_flow_usd=dp_total if dp_total is not None else None,
+        options_net_flow_usd=largest_premium if has_options else None,
+        market_cap_usd=None,
+        market_cap_tier="LARGE",
+        flow_direction=direction,
+        data_source=data_source,
+        data_gap_reason=None,
+        lookback_sessions=5,
+        dark_pool_prints_count=dp_count,
+        dark_pool_large_buy_count=(
+            dp_count if (dp_total is not None and dp_total >= 1_000_000) else 0
+        ),
+        largest_dark_pool_buy_usd=dp_total,
+        largest_options_buy_usd=largest_premium,
     )
 
 
@@ -342,10 +329,10 @@ class TestEvaluateFramework9:
         gate_active: bool = False,
     ):
         """Patch OptionsFlowService and earnings date, then call evaluate_framework9."""
-        import atlas.services.framework9_service as svc
         import atlas.services.framework7_service as f7svc
-        from atlas.services.options_flow_service import OptionsFlowService
+        import atlas.services.framework9_service as svc
         from atlas.config import Settings
+        from atlas.services.options_flow_service import OptionsFlowService
 
         if uw_status == DataSourceStatus.OFFLINE and polygon_status == DataSourceStatus.OFFLINE:
             # Both primary sources offline → F4 service fails → degraded path.
@@ -388,7 +375,7 @@ class TestEvaluateFramework9:
         monkeypatch.setattr(f7svc, "get_earnings_date", _mock_earnings)
 
         import atlas.config as atlas_config
-        from atlas.config import Settings
+
         monkeypatch.setattr(
             atlas_config,
             "get_settings",
@@ -409,15 +396,30 @@ class TestEvaluateFramework9:
     async def test_1_whale_block_bullish(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"largest_print_usd": 12_000_000, "flow_direction": "BULLISH", "total_premium": 12_000_000},
+            uw_data={
+                "largest_print_usd": 12_000_000,
+                "flow_direction": "BULLISH",
+                "total_premium": 12_000_000,
+            },
             uw_status=DataSourceStatus.ONLINE,
-            dp_data={"num_prints": 15, "total_usd": 800_000, "avg_spread_position": 0.7, "missing_fields": []},
+            dp_data={
+                "num_prints": 15,
+                "total_usd": 800_000,
+                "avg_spread_position": 0.7,
+                "missing_fields": [],
+            },
             polygon_status=DataSourceStatus.ONLINE,
-            vol_data={"put_call_ratio": 0.6, "total_volume": 500_000, "call_volume": 400_000, "put_volume": 100_000},
+            vol_data={
+                "put_call_ratio": 0.6,
+                "total_volume": 500_000,
+                "call_volume": 400_000,
+                "put_volume": 100_000,
+            },
             av_status=DataSourceStatus.ONLINE,
             adv=5_000_000,
         )
         from atlas.schemas.framework9 import SignalTier
+
         assert result.signal_tier == SignalTier.TIER_1_WHALE
         assert result.f4_score >= 90
         assert result.uw_status == DataSourceStatus.ONLINE
@@ -430,13 +432,19 @@ class TestEvaluateFramework9:
             monkeypatch=monkeypatch,
             uw_data={},
             uw_status=DataSourceStatus.OFFLINE,
-            dp_data={"num_prints": 12, "total_usd": 600_000, "avg_spread_position": 0.65, "missing_fields": []},
+            dp_data={
+                "num_prints": 12,
+                "total_usd": 600_000,
+                "avg_spread_position": 0.65,
+                "missing_fields": [],
+            },
             polygon_status=DataSourceStatus.ONLINE,
             vol_data={"put_call_ratio": 0.7, "total_volume": 200_000},
             av_status=DataSourceStatus.ONLINE,
             adv=1_000_000,
         )
         from atlas.schemas.framework9 import SignalTier
+
         # UW offline → no whale data → whale tier blocked
         assert result.signal_tier != SignalTier.TIER_1_WHALE
         # F4 still returned (polygon available) but whale data missing → MAJOR gap
@@ -447,7 +455,11 @@ class TestEvaluateFramework9:
     async def test_3_polygon_offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"largest_print_usd": 15_000_000, "flow_direction": "BULLISH", "total_premium": 15_000_000},
+            uw_data={
+                "largest_print_usd": 15_000_000,
+                "flow_direction": "BULLISH",
+                "total_premium": 15_000_000,
+            },
             uw_status=DataSourceStatus.ONLINE,
             dp_data={},
             polygon_status=DataSourceStatus.OFFLINE,
@@ -458,6 +470,7 @@ class TestEvaluateFramework9:
         assert result.dark_pool_modifier == 0
         assert "dark_pool" in result.modifiers_skipped
         from atlas.schemas.framework9 import SignalTier
+
         assert result.signal_tier != SignalTier.TIER_2_INSTITUTIONAL
 
     # Test 4 — Put/call ratio missing
@@ -466,7 +479,12 @@ class TestEvaluateFramework9:
             monkeypatch=monkeypatch,
             uw_data={"largest_print_usd": 0, "flow_direction": "NEUTRAL", "total_premium": 0},
             uw_status=DataSourceStatus.ONLINE,
-            dp_data={"num_prints": 12, "total_usd": 600_000, "avg_spread_position": 0.5, "missing_fields": []},
+            dp_data={
+                "num_prints": 12,
+                "total_usd": 600_000,
+                "avg_spread_position": 0.5,
+                "missing_fields": [],
+            },
             polygon_status=DataSourceStatus.ONLINE,
             vol_data={"put_call_ratio": None, "total_volume": 100_000},
             av_status=DataSourceStatus.PARTIAL,
@@ -481,7 +499,12 @@ class TestEvaluateFramework9:
             monkeypatch=monkeypatch,
             uw_data={"largest_print_usd": 0, "flow_direction": "NEUTRAL", "total_premium": 0},
             uw_status=DataSourceStatus.ONLINE,
-            dp_data={"num_prints": 5, "total_usd": 400_000, "avg_spread_position": None, "missing_fields": ["price"]},
+            dp_data={
+                "num_prints": 5,
+                "total_usd": 400_000,
+                "avg_spread_position": None,
+                "missing_fields": ["price"],
+            },
             polygon_status=DataSourceStatus.PARTIAL,
             vol_data={"put_call_ratio": 0.9, "total_volume": 80_000},
             av_status=DataSourceStatus.ONLINE,
@@ -512,9 +535,18 @@ class TestEvaluateFramework9:
     async def test_7_partial_field_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"missing_fields": ["largest_print_usd"], "flow_direction": "NEUTRAL", "total_premium": 200_000},
+            uw_data={
+                "missing_fields": ["largest_print_usd"],
+                "flow_direction": "NEUTRAL",
+                "total_premium": 200_000,
+            },
             uw_status=DataSourceStatus.PARTIAL,
-            dp_data={"num_prints": 8, "total_usd": 400_000, "avg_spread_position": None, "missing_fields": ["bid"]},
+            dp_data={
+                "num_prints": 8,
+                "total_usd": 400_000,
+                "avg_spread_position": None,
+                "missing_fields": ["bid"],
+            },
             polygon_status=DataSourceStatus.PARTIAL,
             vol_data={"put_call_ratio": 0.9, "total_volume": 100_000},
             av_status=DataSourceStatus.ONLINE,
@@ -529,9 +561,18 @@ class TestEvaluateFramework9:
     async def test_8_rate_limited_uw_with_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"largest_print_usd": 500_000, "flow_direction": "BULLISH", "total_premium": 500_000},
+            uw_data={
+                "largest_print_usd": 500_000,
+                "flow_direction": "BULLISH",
+                "total_premium": 500_000,
+            },
             uw_status=DataSourceStatus.RATE_LIMITED,
-            dp_data={"num_prints": 10, "total_usd": 600_000, "avg_spread_position": 0.6, "missing_fields": []},
+            dp_data={
+                "num_prints": 10,
+                "total_usd": 600_000,
+                "avg_spread_position": 0.6,
+                "missing_fields": [],
+            },
             polygon_status=DataSourceStatus.ONLINE,
             vol_data={"put_call_ratio": 0.7, "total_volume": 200_000},
             av_status=DataSourceStatus.ONLINE,
@@ -539,6 +580,7 @@ class TestEvaluateFramework9:
         )
         # Rate-limited UW → mock caps signal tier below TIER_1_WHALE
         from atlas.schemas.framework9 import SignalTier
+
         assert result.signal_tier != SignalTier.TIER_1_WHALE
         # Result is valid (F4 returned a response)
         assert result.f4_score > 0
@@ -547,9 +589,18 @@ class TestEvaluateFramework9:
     async def test_9_stale_uw_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"largest_print_usd": 500_000, "flow_direction": "NEUTRAL", "total_premium": 500_000},
+            uw_data={
+                "largest_print_usd": 500_000,
+                "flow_direction": "NEUTRAL",
+                "total_premium": 500_000,
+            },
             uw_status=DataSourceStatus.STALE,
-            dp_data={"num_prints": 10, "total_usd": 600_000, "avg_spread_position": 0.5, "missing_fields": []},
+            dp_data={
+                "num_prints": 10,
+                "total_usd": 600_000,
+                "avg_spread_position": 0.5,
+                "missing_fields": [],
+            },
             polygon_status=DataSourceStatus.ONLINE,
             vol_data={"put_call_ratio": 0.8, "total_volume": 100_000},
             av_status=DataSourceStatus.ONLINE,
@@ -558,13 +609,18 @@ class TestEvaluateFramework9:
         # Stale UW → mock caps tier; result is still returned
         assert result.f4_score > 0
         from atlas.schemas.framework9 import SignalTier
+
         assert result.signal_tier != SignalTier.TIER_1_WHALE
 
     # Test 10 — Covered call unverifiable
     async def test_10_covered_call_unverifiable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         result = await self._run(
             monkeypatch=monkeypatch,
-            uw_data={"largest_print_usd": 2_000_000, "flow_direction": "BEARISH", "total_premium": 2_000_000},
+            uw_data={
+                "largest_print_usd": 2_000_000,
+                "flow_direction": "BEARISH",
+                "total_premium": 2_000_000,
+            },
             uw_status=DataSourceStatus.ONLINE,
             dp_data={},
             polygon_status=DataSourceStatus.OFFLINE,
@@ -588,41 +644,49 @@ class TestScoreConstants:
     def test_tier1_bullish_in_spec_range(self) -> None:
         # Spec: $10M+ whale block confirmed → 88-92
         from atlas.services.framework9_service import _SCORE_TIER1_BULLISH
+
         assert 88.0 <= _SCORE_TIER1_BULLISH <= 92.0
 
     def test_tier2_base_in_spec_range(self) -> None:
         # Spec: dark pool accumulation $500K+ → 80-85
         from atlas.services.framework9_service import _SCORE_TIER2_BASE
+
         assert 80.0 <= _SCORE_TIER2_BASE <= 85.0
 
     def test_tier3_base_in_spec_range(self) -> None:
         # Spec: 150%+ above normal call volume → 78-82
         from atlas.services.framework9_service import _SCORE_TIER3_BASE
+
         assert 78.0 <= _SCORE_TIER3_BASE <= 82.0
 
     def test_tier4_base_in_spec_range(self) -> None:
         # Spec: moderate unusual call activity → 72-76
         from atlas.services.framework9_service import _SCORE_TIER4_BASE
+
         assert 72.0 <= _SCORE_TIER4_BASE <= 76.0
 
     def test_tier5_baseline_in_spec_range(self) -> None:
         # Spec: normal baseline activity → 65-68
         from atlas.services.framework9_service import _SCORE_TIER5_BASELINE
+
         assert 65.0 <= _SCORE_TIER5_BASELINE <= 68.0
 
     def test_tier1_bearish_in_spec_range(self) -> None:
         # Spec: bearish put flow (genuine, not covered calls) → 55-65
         from atlas.services.framework9_service import _SCORE_TIER1_BEARISH
+
         assert 55.0 <= _SCORE_TIER1_BEARISH <= 65.0
 
     def test_pre_earnings_reduction_pct_is_25(self) -> None:
         # Spec: normal pre-earnings 0-7 days → 25% reduction
         from atlas.services.framework9_service import _PRE_EARNINGS_REDUCTION_PCT
-        assert _PRE_EARNINGS_REDUCTION_PCT == pytest.approx(0.25)
+
+        assert pytest.approx(0.25) == _PRE_EARNINGS_REDUCTION_PCT
 
     def test_pre_earnings_window_is_7_days(self) -> None:
         # Spec: reduction window is 0-7 days before earnings
         from atlas.services.framework9_service import _PRE_EARNINGS_WINDOW_DAYS
+
         assert _PRE_EARNINGS_WINDOW_DAYS == 7
 
 
@@ -720,46 +784,53 @@ def _make_f4_response(
     cp_ratio: float | None = 1.5,
     dp_total: float | None = 300_000,
     dp_count: int = 5,
-) -> "object":
+) -> object:
     """Build a minimal mock OptionsFlowResponse for pre-earnings and EC tests."""
-    from atlas.schemas.options_flow import (
-        CallPutRatioIndicator,
-        DarkPoolIndicator,
-        OptionsFlowResponse,
-        SweepTypeIndicator,
-        VolumeOiIndicator,
-        WhaleBlockIndicator,
-    )
+    # signal_tier is preserved as a parameter for backward-compat with callers
+    # but is no longer surfaced on F4 v2 — F9 derives its tier from f4_score.
+    _ = signal_tier
+    from atlas.schemas.options_flow import OptionsFlowResponse
+
+    if cp_ratio is None:
+        direction = "NEUTRAL"
+    elif cp_ratio > 1.5:
+        direction = "BULLISH"
+    elif cp_ratio < 0.7:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    has_options = largest_premium is not None
+    has_dp = dp_total is not None
+    if has_options and has_dp:
+        data_source = "BOTH"
+    elif has_options:
+        data_source = "OPTIONS_ONLY"
+    elif has_dp:
+        data_source = "DARK_POOL_ONLY"
+    else:
+        data_source = "DATA_GAP"
 
     return OptionsFlowResponse(
         ticker="TEST",
-        whale_block=WhaleBlockIndicator(largest_premium=largest_premium, score=85),
-        call_put_ratio=CallPutRatioIndicator(
-            call_premium=(cp_ratio or 1.0) * 100_000,
-            put_premium=100_000,
-            ratio=cp_ratio,
-            score=70,
-        ),
-        volume_oi=VolumeOiIndicator(
-            call_volume=100_000, call_open_interest=50_000, vol_oi_ratio=2.0, score=70
-        ),
-        dark_pool=DarkPoolIndicator(
-            total_dark_pool_premium=dp_total,
-            largest_print=dp_total,
-            print_count=dp_count,
-            score=50,
-        ),
-        sweep_type=SweepTypeIndicator(
-            has_golden_sweep=False,
-            has_single_sweep=False,
-            has_repeated_hits=False,
-            sweep_premium=None,
-            score=40,
-        ),
-        signal_tier=signal_tier,
-        collar_flag=False,
         f4_score=f4_score,
         f4_grade="BUY",
+        dark_pool_score=50 if has_dp else None,
+        options_flow_score=80 if has_options else None,
+        dark_pool_net_flow_usd=dp_total,
+        options_net_flow_usd=largest_premium,
+        market_cap_usd=None,
+        market_cap_tier="LARGE",
+        flow_direction=direction,
+        data_source=data_source,
+        data_gap_reason=None,
+        lookback_sessions=5,
+        dark_pool_prints_count=dp_count,
+        dark_pool_large_buy_count=(
+            dp_count if (dp_total is not None and dp_total >= 1_000_000) else 0
+        ),
+        largest_dark_pool_buy_usd=dp_total,
+        largest_options_buy_usd=largest_premium,
     )
 
 
@@ -778,10 +849,11 @@ class TestPreEarningsReduction:
         dp_count: int = 1,
         cp_ratio: float | None = 1.5,
     ):
-        import atlas.services.framework9_service as svc
-        from atlas.services.options_flow_service import OptionsFlowService
-        from atlas.config import Settings
         from datetime import date
+
+        import atlas.services.framework9_service as svc
+        from atlas.config import Settings
+        from atlas.services.options_flow_service import OptionsFlowService
 
         mock_f4 = _make_f4_response(
             f4_score=base_f4_score,
@@ -795,22 +867,27 @@ class TestPreEarningsReduction:
         monkeypatch.setattr(OptionsFlowService, "compute_options_flow", _mock_f4)
 
         if days_to_earnings is not None:
-            earnings_date = date.today().replace(
-                year=date.today().year + (1 if (date.today().toordinal() + days_to_earnings) > 365 else 0)
+            date.today().replace(
+                year=date.today().year
+                + (1 if (date.today().toordinal() + days_to_earnings) > 365 else 0)
             )
             from datetime import timedelta
+
             earnings_date_str = (date.today() + timedelta(days=days_to_earnings)).isoformat()
 
             async def _mock_earnings(ticker, api_key):
                 return earnings_date_str
         else:
+
             async def _mock_earnings(ticker, api_key):
                 return None
 
         import atlas.services.framework7_service as f7svc
+
         monkeypatch.setattr(f7svc, "get_earnings_date", _mock_earnings)
 
         import atlas.config as atlas_config
+
         monkeypatch.setattr(
             atlas_config,
             "get_settings",
@@ -830,9 +907,7 @@ class TestPreEarningsReduction:
             transcript_cross_references_ge5=transcript_cross_references_ge5,
         )
 
-    async def test_18_25pct_reduction_within_7_days(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_18_25pct_reduction_within_7_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # 5 days to earnings → 25% reduction
         result = await self._run_with_earnings(
             monkeypatch=monkeypatch,
@@ -844,9 +919,7 @@ class TestPreEarningsReduction:
         assert result.pre_earnings_modifier == -20
         assert result.f4_score == pytest.approx(60.0)
 
-    async def test_19_no_reduction_8_days_out(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_19_no_reduction_8_days_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # 8 days to earnings → outside window, no reduction
         result = await self._run_with_earnings(
             monkeypatch=monkeypatch,

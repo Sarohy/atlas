@@ -349,19 +349,22 @@ def _grade_from_total(total: int) -> str:
 # v7.3.4 F2 scoring constants
 # ---------------------------------------------------------------------------
 
-_W_SF1: Final[float] = 0.30          # Revenue Growth YoY (normal)
-_W_SF2: Final[float] = 0.20          # Gross Margin Trend
-_W_SF3: Final[float] = 0.20          # EPS Beat Consistency 4Q
-_W_SF4: Final[float] = 0.15          # Guidance Reliability
-_W_SF5: Final[float] = 0.15          # Forward Visibility
+_W_SF1: Final[float] = 0.30  # Revenue Growth YoY (normal)
+_W_SF2: Final[float] = 0.20  # Gross Margin Trend
+_W_SF3: Final[float] = 0.20  # EPS Beat Consistency 4Q
+_W_SF4: Final[float] = 0.15  # Guidance Reliability
+_W_SF5: Final[float] = 0.15  # Forward Visibility
 
-_W_SF1_PP: Final[float] = 0.375      # Revenue — pre-profit re-weight
-_W_SF2_PP: Final[float] = 0.25       # Gross Margin — pre-profit
-_W_SF4_PP: Final[float] = 0.1875     # Guidance — pre-profit
-_W_SF5_PP: Final[float] = 0.1875     # Forward Visibility — pre-profit
+_W_SF1_PP: Final[float] = 0.375  # Revenue — pre-profit re-weight
+_W_SF2_PP: Final[float] = 0.25  # Gross Margin — pre-profit
+_W_SF4_PP: Final[float] = 0.1875  # Guidance — pre-profit
+_W_SF5_PP: Final[float] = 0.1875  # Forward Visibility — pre-profit
 
-_DATA_GAP_GUIDANCE_SCORE: Final[float] = 10.0  # Bloomberg not available in V1
-_W_F2: Final[float] = 0.25           # F2 weight in overall conviction score
+# DATA_GAP raw score is set so the *weighted* contribution to F2 equals 10 points
+# at the normal 15% SF4 weight (10 / 0.15 ≈ 66.67).  In pre-profit mode (weight
+# 18.75%) the contribution becomes ~12.5 pts — acceptable until Bloomberg lands.
+_DATA_GAP_GUIDANCE_SCORE: Final[float] = 10.0 / _W_SF4  # Bloomberg not available in V1
+_W_F2: Final[float] = 0.25  # F2 weight in overall conviction score
 
 # Forward visibility label → integer score mapping
 _FWD_VIS_SCORES: Final[dict[str, int]] = {
@@ -381,18 +384,52 @@ _FWD_VIS_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
     (re.compile(r"lower\w*\s+(?:our\s+)?(?:guid\w*|outlook)", re.I), "WITHDRAWN_REDUCED"),
     (re.compile(r"reduc\w+\s+(?:our\s+)?(?:guid\w*|forecast|outlook)", re.I), "WITHDRAWN_REDUCED"),
     # SPECIFIC_RAISED
-    (re.compile(r"rais\w+\s+(?:our\s+)?(?:full.?year|annual|fy\w*)\s+(?:guid\w*|outlook|forecast|revenue|eps)", re.I), "SPECIFIC_RAISED"),
-    (re.compile(r"rais\w+\s+(?:our\s+)?(?:guid\w*|revenue\s+guid\w*|eps\s+guid\w*)", re.I), "SPECIFIC_RAISED"),
+    (
+        re.compile(
+            r"rais\w+\s+(?:our\s+)?(?:full.?year|annual|fy\w*)\s+(?:guid\w*|outlook|forecast|revenue|eps)",
+            re.I,
+        ),
+        "SPECIFIC_RAISED",
+    ),
+    (
+        re.compile(r"rais\w+\s+(?:our\s+)?(?:guid\w*|revenue\s+guid\w*|eps\s+guid\w*)", re.I),
+        "SPECIFIC_RAISED",
+    ),
     (re.compile(r"increas\w+\s+(?:our\s+)?(?:guid\w*|outlook)", re.I), "SPECIFIC_RAISED"),
     # SPECIFIC_MAINTAINED
-    (re.compile(r"reiterat\w+\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I), "SPECIFIC_MAINTAINED"),
-    (re.compile(r"reaffirm\w*\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I), "SPECIFIC_MAINTAINED"),
-    (re.compile(r"maintain\w+\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I), "SPECIFIC_MAINTAINED"),
-    (re.compile(r"on\s+track\s+to\s+(?:achieve|deliver|meet)\s+(?:our\s+)?(?:full.?year|annual)", re.I), "SPECIFIC_MAINTAINED"),
+    (
+        re.compile(r"reiterat\w+\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I),
+        "SPECIFIC_MAINTAINED",
+    ),
+    (
+        re.compile(r"reaffirm\w*\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I),
+        "SPECIFIC_MAINTAINED",
+    ),
+    (
+        re.compile(r"maintain\w+\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I),
+        "SPECIFIC_MAINTAINED",
+    ),
+    (
+        re.compile(
+            r"on\s+track\s+to\s+(?:achieve|deliver|meet)\s+(?:our\s+)?(?:full.?year|annual)", re.I
+        ),
+        "SPECIFIC_MAINTAINED",
+    ),
     # DIRECTIONAL
-    (re.compile(r"expect\s+(?:revenue|sales|earnings|eps)\s+(?:to\s+)?(?:grow|increas|expand)", re.I), "DIRECTIONAL"),
-    (re.compile(r"anticipat\w+\s+(?:continued\s+)?(?:growth|increas|expansion)", re.I), "DIRECTIONAL"),
-    (re.compile(r"target\w*\s+(?:revenue|earnings|eps|sales)\s+(?:of|range|between|\$)", re.I), "DIRECTIONAL"),
+    (
+        re.compile(
+            r"expect\s+(?:revenue|sales|earnings|eps)\s+(?:to\s+)?(?:grow|increas|expand)", re.I
+        ),
+        "DIRECTIONAL",
+    ),
+    (
+        re.compile(r"anticipat\w+\s+(?:continued\s+)?(?:growth|increas|expansion)", re.I),
+        "DIRECTIONAL",
+    ),
+    (
+        re.compile(r"target\w*\s+(?:revenue|earnings|eps|sales)\s+(?:of|range|between|\$)", re.I),
+        "DIRECTIONAL",
+    ),
 ]
 
 
@@ -606,7 +643,7 @@ def score_f2(
 
     # Flags
     data_gap_applied = sf4_data_gap
-    guidance_concern = (sf4_score == 0.0 and sf5_score == 0.0)
+    guidance_concern = sf4_score == 0.0 and sf5_score == 0.0
 
     if current_price > 0.0 and analyst_target > 0.0:
         pvt = (current_price - analyst_target) / analyst_target
@@ -831,9 +868,7 @@ class EarningsService:
             logger.debug("AV EARNINGS request failed for %s — trying FMP", ticker)
             return await self._fetch_earnings_fmp(ticker)
 
-    async def _fetch_income_statement_polygon(
-        self, ticker: str
-    ) -> dict[str, object]:
+    async def _fetch_income_statement_polygon(self, ticker: str) -> dict[str, object]:
         """Fetch quarterly income statement from Polygon and normalise to AV shape.
 
         Returns ``{"quarterlyReports": [{"totalRevenue": ..., "grossProfit": ...}, ...]}``,
@@ -861,9 +896,7 @@ class EarningsService:
             for r in results:
                 financials = r.get("financials", {})
                 income = (
-                    financials.get("income_statement", {})
-                    if isinstance(financials, dict)
-                    else {}
+                    financials.get("income_statement", {}) if isinstance(financials, dict) else {}
                 )
                 rev_entry = income.get("revenues", {}) if isinstance(income, dict) else {}
                 gp_entry = income.get("gross_profit", {}) if isinstance(income, dict) else {}
@@ -871,12 +904,8 @@ class EarningsService:
                 gp_val = gp_entry.get("value") if isinstance(gp_entry, dict) else None
                 quarterly_reports.append(
                     {
-                        "totalRevenue": (
-                            str(int(rev_val)) if rev_val is not None else "None"
-                        ),
-                        "grossProfit": (
-                            str(int(gp_val)) if gp_val is not None else "None"
-                        ),
+                        "totalRevenue": (str(int(rev_val)) if rev_val is not None else "None"),
+                        "grossProfit": (str(int(gp_val)) if gp_val is not None else "None"),
                     }
                 )
             logger.debug(
@@ -922,9 +951,7 @@ class EarningsService:
                 quarterly_earnings.append(
                     {
                         "fiscalDateEnding": str(date),
-                        "reportedEPS": (
-                            str(eps_actual) if eps_actual is not None else "None"
-                        ),
+                        "reportedEPS": (str(eps_actual) if eps_actual is not None else "None"),
                         "estimatedEPS": (
                             str(eps_estimated) if eps_estimated is not None else "None"
                         ),
@@ -953,6 +980,7 @@ class EarningsService:
         (year, quarter) returns empty, the method probes up to three adjacent
         quarter slots in reverse-chronological order before giving up.
         """
+
         # Build a probe sequence: primary slot first, then up to 3 prior quarters.
         def _prev_quarter(y: int, q: int) -> tuple[int, int]:
             return (y - 1, 4) if q == 1 else (y, q - 1)
@@ -988,7 +1016,11 @@ class EarningsService:
                 if text:
                     logger.debug(
                         "[F2] %s transcript found at slot %dQ%d (primary was %dQ%d)",
-                        ticker.upper(), slot_year, slot_quarter, year, quarter,
+                        ticker.upper(),
+                        slot_year,
+                        slot_quarter,
+                        year,
+                        quarter,
                     )
                     return text
             except (httpx.HTTPStatusError, httpx.RequestError):

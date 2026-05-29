@@ -18,8 +18,6 @@ Pre-profitability: when net_income_ttm < 0
 
 from __future__ import annotations
 
-import pytest
-
 from atlas.services.earnings_service import (
     _classify_forward_visibility_from_transcript,
     _grade_from_total,
@@ -30,7 +28,6 @@ from atlas.services.earnings_service import (
     _score_revenue_growth_v2,
     score_f2,
 )
-
 
 # ---------------------------------------------------------------------------
 # Revenue Growth YoY — v7.3.4 bands (input as decimal fraction)
@@ -256,6 +253,55 @@ class TestClassifyForwardVisibilityFromTranscript:
         text = "Revenue came in at $1.2 billion, slightly above consensus."
         assert _classify_forward_visibility_from_transcript(text) == "VAGUE_NONE"
 
+    # MRVL-style upward-revision phrasings (Q1 FY27 prepared remarks)
+    def test_now_expect_fy_revenue_classified_specific_raised(self) -> None:
+        text = "We now expect FY27 revenue to be approximately $11.5 billion."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_above_prior_guide_classified_specific_raised(self) -> None:
+        text = "FY28 revenue is now $16.5 billion, $1.5 billion above our prior guide."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_increased_fy_outlook_classified_specific_raised(self) -> None:
+        text = "We increased our FY28 outlook to $16.5 billion this quarter."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_now_expect_full_year_eps_classified_specific_raised(self) -> None:
+        text = "We now expect full-year EPS of $5.20 to $5.40."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_below_prior_guide_classified_withdrawn_reduced(self) -> None:
+        # Symmetric counterpart — must NOT match SPECIFIC_RAISED.
+        text = "FY27 revenue is now $9.0 billion, below our prior guidance."
+        assert _classify_forward_visibility_from_transcript(text) == "WITHDRAWN_REDUCED"
+
+    # MRVL-style DIRECTIONAL phrasings (Q2 FY26 prepared remarks, actual wording)
+    def test_expect_revenue_with_intervening_words_classified_directional(self) -> None:
+        text = (
+            "we expect revenue from our electro-optics products to grow double digits sequentially"
+        )
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_expect_revenue_to_continue_delivering_growth_classified_directional(self) -> None:
+        text = "we expect data center revenue to continue to deliver strong growth"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_looking_ahead_we_expect_classified_directional(self) -> None:
+        text = "Looking ahead to the third quarter, we expect aggregate revenue to be up"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_forecast_to_grow_percent_classified_directional(self) -> None:
+        text = "non-GAAP earnings per share forecast to grow 10% sequentially"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_quarter_guidance_reflects_classified_directional(self) -> None:
+        text = "Our second quarter results and third quarter guidance reflect robust contributions."
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_midpoint_of_guidance_classified_directional(self) -> None:
+        text = "at the midpoint of guidance, more than double our projected revenue growth rate"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
 
 # ---------------------------------------------------------------------------
 # F2 grade thresholds — unchanged
@@ -323,17 +369,17 @@ class TestScoreF2:
             forward_visibility_score=80,
             net_income_ttm=1_000_000,
         )
-        assert result.sf1_score == 85.0   # 20-30% band
-        assert result.sf2_score == 85.0   # 200bps, 100-300 band
+        assert result.sf1_score == 85.0  # 20-30% band
+        assert result.sf2_score == 85.0  # 200bps, 100-300 band
         assert result.sf3_score == 100.0  # 4/4 beats
         assert result.sf3_excluded is False
-        assert result.sf4_score == 10.0   # DATA_GAP default
+        assert abs(result.sf4_score - 66.6667) < 0.01  # DATA_GAP → 10 pts weighted
         assert result.sf4_data_gap is True
         assert result.sf5_score == 80.0
-        # f2_raw = 85*0.30 + 85*0.20 + 100*0.20 + 10*0.15 + 80*0.15
-        #        = 25.5 + 17.0 + 20.0 + 1.5 + 12.0 = 76.0
-        assert abs(result.f2_raw - 76.0) < 0.01
-        assert abs(result.f2_contribution - 19.0) < 0.01
+        # f2_raw = 85*0.30 + 85*0.20 + 100*0.20 + 66.67*0.15 + 80*0.15
+        #        = 25.5 + 17.0 + 20.0 + 10.0 + 12.0 = 84.5
+        assert abs(result.f2_raw - 84.5) < 0.01
+        assert abs(result.f2_contribution - 21.125) < 0.01
         assert result.pre_profit_status is False
         assert result.pre_profit_reweighted is False
         assert result.data_gap_applied is True
@@ -343,27 +389,27 @@ class TestScoreF2:
         """Test 2 — pre-profit: sf3 excluded, remaining sub-factors re-weighted.
 
         Re-weighted: sf1=37.5%, sf2=25%, sf4=18.75%, sf5=18.75%.
-        f2_raw = 100*0.375 + 85*0.250 + 10*0.1875 + 60*0.1875 = 71.875
+        f2_raw = 100*0.375 + 85*0.250 + 66.6667*0.1875 + 60*0.1875 = 82.5
         """
         result = score_f2(
             ticker="TEST",
             revenue_growth_yoy=0.45,
             gross_margin_current=0.515,
-            gross_margin_prior_year=0.500,   # (0.515-0.500)*10000 = 150 bps
+            gross_margin_prior_year=0.500,  # (0.515-0.500)*10000 = 150 bps
             eps_beats_last_4q=0,
             eps_quarters_available=4,
             guidance_reliability_4q=None,
             guidance_data_available=False,
             forward_visibility_score=60,
-            net_income_ttm=-50_000_000,      # negative → pre-profit
+            net_income_ttm=-50_000_000,  # negative → pre-profit
         )
-        assert result.sf1_score == 100.0   # >40%
-        assert result.sf2_score == 85.0    # 150bps, 100-300 band
+        assert result.sf1_score == 100.0  # >40%
+        assert result.sf2_score == 85.0  # 150bps, 100-300 band
         assert result.sf3_excluded is True
         assert result.sf3_score is None
-        assert result.sf4_score == 10.0    # DATA_GAP
+        assert abs(result.sf4_score - 66.6667) < 0.01  # DATA_GAP
         assert result.sf5_score == 60.0
-        assert abs(result.f2_raw - 71.875) < 0.01
+        assert abs(result.f2_raw - 82.5) < 0.01
         assert result.pre_profit_status is True
         assert result.pre_profit_reweighted is True
         assert result.data_gap_applied is True
@@ -378,7 +424,7 @@ class TestScoreF2:
             ticker="TEST",
             revenue_growth_yoy=-0.08,
             gross_margin_current=0.38,
-            gross_margin_prior_year=0.40,   # -200bps
+            gross_margin_prior_year=0.40,  # -200bps
             eps_beats_last_4q=1,
             eps_quarters_available=4,
             guidance_reliability_4q=None,
@@ -414,7 +460,7 @@ class TestScoreF2:
             ticker="TEST",
             revenue_growth_yoy=0.15,
             gross_margin_current=0.505,
-            gross_margin_prior_year=0.500,   # +50bps → flat → 60
+            gross_margin_prior_year=0.500,  # +50bps → flat → 60
             eps_beats_last_4q=2,
             eps_quarters_available=4,
             guidance_reliability_4q=0,
@@ -425,7 +471,7 @@ class TestScoreF2:
         assert result.sf4_score == 0.0
         assert result.sf5_score == 0.0
         assert result.guidance_concern is True
-        assert result.sf4_data_gap is False   # data IS available, just zero
+        assert result.sf4_data_gap is False  # data IS available, just zero
 
     def test_5_ipo_limited_history_scored_proportionally(self) -> None:
         """Test 5 — eps_quarters_available=2, eps_beats=2 → 100 (2/2 = 100% beat rate)."""
@@ -433,15 +479,15 @@ class TestScoreF2:
             ticker="TEST",
             revenue_growth_yoy=0.25,
             gross_margin_current=0.45,
-            gross_margin_prior_year=0.43,    # +200bps → 85
+            gross_margin_prior_year=0.43,  # +200bps → 85
             eps_beats_last_4q=2,
-            eps_quarters_available=2,        # only 2Q available
+            eps_quarters_available=2,  # only 2Q available
             guidance_reliability_4q=None,
             guidance_data_available=False,
             forward_visibility_score=60,
             net_income_ttm=1_000_000,
         )
-        assert result.sf3_score == 100.0   # 2/2 → proportional → 100
+        assert result.sf3_score == 100.0  # 2/2 → proportional → 100
         assert result.ipo_limited_history is True
         assert result.limited_history is True
         assert result.sf4_data_gap is True
@@ -456,7 +502,7 @@ class TestScoreF2:
             ticker="TEST",
             revenue_growth_yoy=0.42,
             gross_margin_current=0.38,
-            gross_margin_prior_year=0.44,   # -600bps → 15
+            gross_margin_prior_year=0.44,  # -600bps → 15
             eps_beats_last_4q=3,
             eps_quarters_available=4,
             guidance_reliability_4q=3,
@@ -496,7 +542,7 @@ class TestScoreF2:
             ticker="MU",
             revenue_growth_yoy=0.12,
             gross_margin_current=0.46,
-            gross_margin_prior_year=0.42,   # +400bps → 100
+            gross_margin_prior_year=0.42,  # +400bps → 100
             eps_beats_last_4q=3,
             eps_quarters_available=4,
             guidance_reliability_4q=None,
@@ -506,5 +552,8 @@ class TestScoreF2:
         )
         assert result_fn.ticker == "FN"
         assert result_mu.ticker == "MU"
-        assert abs(result_mu.f2_raw - 67.5) < 0.01
+        # MU: sf1=70 (12%) + sf2=100 (+400bps) + sf3=80 (3/4) + sf4=66.67 (DATA_GAP) + sf5=60
+        # f2_raw = 70*0.30 + 100*0.20 + 80*0.20 + 66.67*0.15 + 60*0.15
+        #        = 21 + 20 + 16 + 10 + 9 = 76.0
+        assert abs(result_mu.f2_raw - 76.0) < 0.01
         assert result_fn.f2_raw != result_mu.f2_raw

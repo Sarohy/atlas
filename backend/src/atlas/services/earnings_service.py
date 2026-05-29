@@ -383,6 +383,12 @@ _FWD_VIS_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
     (re.compile(r"withdraw\w*\s+(?:our\s+)?guid\w*", re.I), "WITHDRAWN_REDUCED"),
     (re.compile(r"lower\w*\s+(?:our\s+)?(?:guid\w*|outlook)", re.I), "WITHDRAWN_REDUCED"),
     (re.compile(r"reduc\w+\s+(?:our\s+)?(?:guid\w*|forecast|outlook)", re.I), "WITHDRAWN_REDUCED"),
+    (
+        re.compile(
+            r"below\s+(?:our\s+)?(?:prior|previous)\s+(?:guid\w*|outlook|forecast|guide)", re.I
+        ),
+        "WITHDRAWN_REDUCED",
+    ),
     # SPECIFIC_RAISED
     (
         re.compile(
@@ -395,7 +401,26 @@ _FWD_VIS_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
         re.compile(r"rais\w+\s+(?:our\s+)?(?:guid\w*|revenue\s+guid\w*|eps\s+guid\w*)", re.I),
         "SPECIFIC_RAISED",
     ),
-    (re.compile(r"increas\w+\s+(?:our\s+)?(?:guid\w*|outlook)", re.I), "SPECIFIC_RAISED"),
+    # "increased our [FY28] outlook/guidance/forecast" — allow 0-3 words between
+    (
+        re.compile(r"increas\w+\s+(?:our\s+)?(?:\w+\s+){0,3}?(?:guid\w*|outlook|forecast)", re.I),
+        "SPECIFIC_RAISED",
+    ),
+    # "we now expect FY27 revenue / full-year EPS / ..." — upward revision phrasing
+    (
+        re.compile(
+            r"now\s+expect\w*\s+(?:.{0,60}?)(?:revenue|sales|eps|earnings|\$\s*\d|billion|million)",
+            re.I,
+        ),
+        "SPECIFIC_RAISED",
+    ),
+    # "above our prior guide / previous outlook" — explicit upward revision
+    (
+        re.compile(
+            r"above\s+(?:our\s+)?(?:prior|previous)\s+(?:guid\w*|outlook|forecast|guide)", re.I
+        ),
+        "SPECIFIC_RAISED",
+    ),
     # SPECIFIC_MAINTAINED
     (
         re.compile(r"reiterat\w+\b.{0,40}\b(?:guid\w*|outlook|forecast)", re.I),
@@ -420,6 +445,41 @@ _FWD_VIS_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
         re.compile(
             r"expect\s+(?:revenue|sales|earnings|eps)\s+(?:to\s+)?(?:grow|increas|expand)", re.I
         ),
+        "DIRECTIONAL",
+    ),
+    # "we expect [data center] revenue [...] to grow/continue/deliver/be up/down/flat" —
+    # allows intervening words (including hyphenated tokens) between subject and verb.
+    (
+        re.compile(
+            r"expect\s+(?:\S+\s+){0,6}?(?:revenue|sales|earnings|eps|business|growth|guid\w*)"
+            r"\s+(?:\S+\s+){0,6}?(?:grow|increas|expand|continu|deliver|be\s+(?:up|down|flat|stronger))",
+            re.I,
+        ),
+        "DIRECTIONAL",
+    ),
+    # "Looking ahead [to the next quarter], we expect ..."
+    (
+        re.compile(
+            r"looking\s+ahead\b.{0,80}?\bexpect\b.{0,60}?(?:revenue|growth|sales|guid\w*|forecast)",
+            re.I,
+        ),
+        "DIRECTIONAL",
+    ),
+    # "forecast to grow X%" / "forecast to deliver $X"
+    (
+        re.compile(
+            r"forecast\w*\s+to\s+(?:grow|deliver|generate|reach|exceed|expand|increas)", re.I
+        ),
+        "DIRECTIONAL",
+    ),
+    # "third/next quarter guidance reflect" — acknowledges issuing forward guidance
+    (
+        re.compile(r"(?:third|fourth|next|second)\s+quarter\s+guid\w+", re.I),
+        "DIRECTIONAL",
+    ),
+    # "at the midpoint of guidance / forecast / range"
+    (
+        re.compile(r"midpoint\s+of\s+(?:our\s+)?(?:guid\w*|forecast|range|outlook)", re.I),
         "DIRECTIONAL",
     ),
     (

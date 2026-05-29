@@ -253,6 +253,55 @@ class TestClassifyForwardVisibilityFromTranscript:
         text = "Revenue came in at $1.2 billion, slightly above consensus."
         assert _classify_forward_visibility_from_transcript(text) == "VAGUE_NONE"
 
+    # MRVL-style upward-revision phrasings (Q1 FY27 prepared remarks)
+    def test_now_expect_fy_revenue_classified_specific_raised(self) -> None:
+        text = "We now expect FY27 revenue to be approximately $11.5 billion."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_above_prior_guide_classified_specific_raised(self) -> None:
+        text = "FY28 revenue is now $16.5 billion, $1.5 billion above our prior guide."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_increased_fy_outlook_classified_specific_raised(self) -> None:
+        text = "We increased our FY28 outlook to $16.5 billion this quarter."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_now_expect_full_year_eps_classified_specific_raised(self) -> None:
+        text = "We now expect full-year EPS of $5.20 to $5.40."
+        assert _classify_forward_visibility_from_transcript(text) == "SPECIFIC_RAISED"
+
+    def test_below_prior_guide_classified_withdrawn_reduced(self) -> None:
+        # Symmetric counterpart — must NOT match SPECIFIC_RAISED.
+        text = "FY27 revenue is now $9.0 billion, below our prior guidance."
+        assert _classify_forward_visibility_from_transcript(text) == "WITHDRAWN_REDUCED"
+
+    # MRVL-style DIRECTIONAL phrasings (Q2 FY26 prepared remarks, actual wording)
+    def test_expect_revenue_with_intervening_words_classified_directional(self) -> None:
+        text = (
+            "we expect revenue from our electro-optics products to grow double digits sequentially"
+        )
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_expect_revenue_to_continue_delivering_growth_classified_directional(self) -> None:
+        text = "we expect data center revenue to continue to deliver strong growth"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_looking_ahead_we_expect_classified_directional(self) -> None:
+        text = "Looking ahead to the third quarter, we expect aggregate revenue to be up"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_forecast_to_grow_percent_classified_directional(self) -> None:
+        text = "non-GAAP earnings per share forecast to grow 10% sequentially"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_quarter_guidance_reflects_classified_directional(self) -> None:
+        text = "Our second quarter results and third quarter guidance reflect robust contributions."
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
+    def test_midpoint_of_guidance_classified_directional(self) -> None:
+        text = "at the midpoint of guidance, more than double our projected revenue growth rate"
+        assert _classify_forward_visibility_from_transcript(text) == "DIRECTIONAL"
+
 
 # ---------------------------------------------------------------------------
 # F2 grade thresholds — unchanged

@@ -576,6 +576,35 @@ def _score_guidance_reliability(delivered: int) -> float:
     return {4: 100.0, 3: 80.0, 2: 55.0, 1: 30.0, 0: 0.0}[clamped]
 
 
+def _score_guidance_from_eps_proxy(beats: int, quarters_available: int) -> float:
+    """Proxy for SF4 guidance reliability derived from EPS beat consistency.
+
+    Used when Bloomberg guidance data is unavailable.  Consistent EPS beats
+    indicate the company is reliably meeting (or guiding conservatively toward)
+    analyst expectations — a reasonable stand-in for delivery on guidance.
+
+    Beat rate ≥100% (all available quarters beaten) → 100
+    Beat rate  ≥75%                                 →  80
+    Beat rate  ≥50%                                 →  55
+    Beat rate  ≥25%                                 →  30
+    Beat rate   <25%                                →   0
+
+    Minimum 2 quarters required; returns None for fewer (triggers data gap).
+    """
+    if quarters_available < 2:
+        return _DATA_GAP_GUIDANCE_SCORE
+    beat_rate = beats / quarters_available
+    if beat_rate >= 1.0:
+        return 100.0
+    if beat_rate >= 0.75:
+        return 80.0
+    if beat_rate >= 0.50:
+        return 55.0
+    if beat_rate >= 0.25:
+        return 30.0
+    return 0.0
+
+
 def _score_forward_visibility(label: str) -> int:
     """Map forward visibility label to an integer score.
 
@@ -860,6 +889,29 @@ class EarningsService:
         fwd_vis_label = _classify_forward_visibility_from_transcript(transcript_text)
         fwd_vis_score = _score_forward_visibility(fwd_vis_label)
 
+        # ---- Guidance Reliability proxy (EPS beats as stand-in for Bloomberg) ----
+        # When EPS data is available for ≥2 quarters, derive a guidance reliability
+        # proxy from the beat rate.  This fills the Bloomberg data gap with real data.
+        _guidance_proxy_score = _score_guidance_from_eps_proxy(eps_beats, eps_avail)
+        _guidance_data_available = (
+            eps_avail >= 2 and _guidance_proxy_score != _DATA_GAP_GUIDANCE_SCORE
+        )
+        # Convert proxy score back to a 0-4 integer for score_f2 compatibility.
+        # Use the same beat count directly since score_f2 → _score_guidance_reliability
+        # maps integer delivered count; but the proxy already returns the right score,
+        # so we pass guidance_reliability_4q=None and override via guidance_data_available.
+        # Instead, we bypass the int-count path by using a pre-scored value injected
+        # through a dedicated field.  We achieve this by mapping the proxy float back
+        # to a delivered-quarters integer (conservative: floor).
+        _guidance_delivered_proxy: int | None = None
+        if _guidance_data_available:
+            _score_to_delivered = {100.0: 4, 80.0: 3, 55.0: 2, 30.0: 1, 0.0: 0}
+            _guidance_delivered_proxy = _score_to_delivered.get(
+                _guidance_proxy_score, None
+            )
+            if _guidance_delivered_proxy is None:
+                _guidance_data_available = False
+
         # ---- Net Income TTM ----
         net_income_ttm = self._compute_net_income_ttm(income_data)
         if net_income_ttm is None:
@@ -873,8 +925,8 @@ class EarningsService:
             gross_margin_prior_year=gm_prior,
             eps_beats_last_4q=eps_beats,
             eps_quarters_available=eps_avail,
-            guidance_reliability_4q=None,
-            guidance_data_available=False,
+            guidance_reliability_4q=_guidance_delivered_proxy,
+            guidance_data_available=_guidance_data_available,
             forward_visibility_score=fwd_vis_score,
             net_income_ttm=net_income_ttm,
         )

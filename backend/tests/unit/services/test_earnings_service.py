@@ -18,12 +18,15 @@ Pre-profitability: when net_income_ttm < 0
 
 from __future__ import annotations
 
+import pytest
+
 from atlas.services.earnings_service import (
     _classify_forward_visibility_from_transcript,
     _grade_from_total,
     _score_eps_consistency_4q,
     _score_forward_visibility,
     _score_gross_margin_trend_v2,
+    _score_guidance_from_eps_proxy,
     _score_guidance_reliability,
     _score_revenue_growth_v2,
     score_f2,
@@ -198,6 +201,41 @@ class TestScoreGuidanceReliability:
 # ---------------------------------------------------------------------------
 # Forward Visibility — label to score mapping
 # ---------------------------------------------------------------------------
+
+
+class TestScoreGuidanceFromEpsProxy:
+    """EPS beat rate proxy for SF4 guidance reliability.
+
+    beat_rate=100% → 100, ≥75% → 80, ≥50% → 55, ≥25% → 30, <25% → 0.
+    Fewer than 2 quarters → data-gap default (~66.7).
+    """
+
+    def test_all_beats_3q_returns_100(self) -> None:
+        assert _score_guidance_from_eps_proxy(3, 3) == 100.0
+
+    def test_all_beats_4q_returns_100(self) -> None:
+        assert _score_guidance_from_eps_proxy(4, 4) == 100.0
+
+    def test_3_of_4_beats_returns_80(self) -> None:
+        assert _score_guidance_from_eps_proxy(3, 4) == 80.0
+
+    def test_2_of_4_beats_returns_55(self) -> None:
+        assert _score_guidance_from_eps_proxy(2, 4) == 55.0
+
+    def test_1_of_4_beats_returns_30(self) -> None:
+        assert _score_guidance_from_eps_proxy(1, 4) == 30.0
+
+    def test_0_of_4_beats_returns_0(self) -> None:
+        assert _score_guidance_from_eps_proxy(0, 4) == 0.0
+
+    def test_fewer_than_2q_returns_data_gap_default(self) -> None:
+        # Not enough history — fall back to data-gap score (~66.7)
+        score = _score_guidance_from_eps_proxy(1, 1)
+        assert score == pytest.approx(10.0 / 0.15, rel=1e-3)
+
+    def test_zero_quarters_returns_data_gap_default(self) -> None:
+        score = _score_guidance_from_eps_proxy(0, 0)
+        assert score == pytest.approx(10.0 / 0.15, rel=1e-3)
 
 
 class TestScoreForwardVisibility:

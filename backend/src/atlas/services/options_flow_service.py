@@ -2,19 +2,18 @@
 
 Data sources:
   1. Unusual Whales — GET /api/darkpool/{ticker}                (dark-pool prints)
-  2. Unusual Whales — GET /api/stock/{ticker}/flow-recent       (options trades)
+  2. Unusual Whales — GET /api/option-trades/flow-alerts        (options flow alerts)
   3. Polygon.io     — GET /v3/reference/tickers/{ticker}         (market cap)
 
 Pipeline (per ticker):
   1. Excluded-ticker check (10 OTC/ADR symbols → DATA_GAP, no API calls).
-  2. Three concurrent fetches: market cap, dark-pool prints, flow-recent trades.
+  2. Three concurrent fetches: market cap, dark-pool prints, flow-alerts.
   3. Tier = LARGE / MID / SMALL from market cap (>$50B / $5B-$50B / <$5B).
   4. Filter prints to the last 5 trading sessions (rolling window).
   5. Classify each dark-pool print as BUY / SELL / SETTLEMENT (NBBO anchored).
      Strip SETTLEMENT. dark_pool_net_flow = sum(BUY $) - sum(SELL $).
-  6. Classify each option trade as NEW_BULL / PUT_SELL / NEW_BEAR /
-     PROFIT_TAKING / SPREAD_CROSS. Strip PROFIT_TAKING + SPREAD_CROSS.
-     options_net_flow = sum(NEW_BULL + PUT_SELL $) - sum(NEW_BEAR $).
+  6. Aggregate flow-alert records: net_options_flow = sum(call ask_prem)
+     - sum(put ask_prem). Each alert carries total_ask_side_prem / type.
   7. Map each net flow → 0-100 score via the tier's anchor table
      (linear interpolation, clamped 0-100).
   8. Combine: 50/50 average when both available; single source otherwise.
@@ -197,68 +196,69 @@ async def _fetch_dark_pool_prints(
 
 
 # ---------------------------------------------------------------------------
-# Network I/O — UW option trades
+# Network I/O — UW flow alerts (replaces the old flow-recent endpoint)
 # ---------------------------------------------------------------------------
 
-
-# Tags emitted by UW flow-recent that signal trade direction.
-_UW_TAG_ASK_SIDE: Final[str] = "ask_side"
-_UW_TAG_BID_SIDE: Final[str] = "bid_side"
-
-
-def _side_from_tags(tags: Any) -> str:
-    """Derive a BID/ASK/NONE side label from the UW flow-recent `tags` list.
-
-    The flow-recent endpoint does not expose a bare `side` field; instead each
-    record carries a `tags` array (e.g. ["ask_side", "bullish"]).  We map:
-      "ask_side" in tags -> "ASK"  (bought at the ask — opening buyer)
-      "bid_side" in tags -> "BID"  (sold at the bid — opening seller)
-      otherwise          -> "NONE" (spread-cross / ambiguous)
-    """
-    if not isinstance(tags, list):
-        return _UW_SIDE_NONE
-    tag_set = {t.lower() for t in tags if isinstance(t, str)}
-    if _UW_TAG_ASK_SIDE in tag_set:
-        return _UW_SIDE_ASK
-    if _UW_TAG_BID_SIDE in tag_set:
-        return _UW_SIDE_BID
-    return _UW_SIDE_NONE
+# Maximum pages to fetch per call. 4 pages × 200 = 800 alerts — enough to
+# cover 5 sessions of even the most active large-cap names.
+_UW_FLOW_ALERTS_MAX_PAGES: Final[int] = 4
 
 
-async def _fetch_option_trades(
+async def _fetch_option_flow_alerts(
     client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
 ) -> list[dict[str, Any]] | None:
-    """Fetch recent option trades for *ticker* from Unusual Whales.
+    """Fetch flow-alert records for *ticker* from Unusual Whales.
 
-    Uses the /api/stock/{ticker}/flow-recent endpoint (the only real per-ticker
-    trade-level options endpoint in the UW API — /option-trades does not exist).
+    Uses /api/option-trades/flow-alerts?ticker_symbol={ticker} — the canonical
+    endpoint that replaces the deprecated per-ticker flow-recent tape.  Each
+    alert represents an aggregated sweep, block, or repeated-hit event and
+    exposes total_ask_side_prem / total_bid_side_prem broken out by call/put.
 
-    Returns a normalised list of dicts with a synthetic `side` key derived from
-    the record's `tags` field so that `_classify_options_print` can run without
-    changes.  Cancelled records are stripped.  Returns None on API error.
+    Paginates backwards via the ``older_than`` cursor until 5 distinct session
+    days are covered or _UW_FLOW_ALERTS_MAX_PAGES pages are exhausted.
+
+    Returns None on API error; returns whatever was collected on partial errors.
     """
-    try:
-        resp = await client.get(
-            f"{_UW_BASE_URL}/api/stock/{ticker}/flow-recent",
-            params={"limit": _UW_FETCH_LIMIT},
-            headers=headers,
-        )
-        resp.raise_for_status()
-        payload: Any = resp.json()
-        raw: list[Any] = payload if isinstance(payload, list) else payload.get("data", [])
-        out: list[dict[str, Any]] = []
-        for rec in raw:
-            if not isinstance(rec, dict):
-                continue
-            if rec.get("canceled"):
-                continue
-            # Normalise: inject a `side` key so downstream code is unchanged.
-            normalised = dict(rec)
-            normalised["side"] = _side_from_tags(rec.get("tags"))
-            out.append(normalised)
-        return out
-    except (httpx.HTTPError, ValueError, TypeError):
-        return None
+    all_alerts: list[dict[str, Any]] = []
+    params: dict[str, Any] = {"ticker_symbol": ticker, "limit": 200}
+
+    for _ in range(_UW_FLOW_ALERTS_MAX_PAGES):
+        try:
+            resp = await client.get(
+                f"{_UW_BASE_URL}/api/option-trades/flow-alerts",
+                params=params,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            payload: Any = resp.json()
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Return whatever we have so far; None only if we have nothing.
+            return all_alerts if all_alerts else None
+
+        if not isinstance(payload, dict):
+            break
+        batch: list[Any] = payload.get("data", [])
+        if not isinstance(batch, list) or not batch:
+            break
+
+        all_alerts.extend(r for r in batch if isinstance(r, dict))
+
+        # Stop once we have data from at least _F4_LOOKBACK_SESSIONS distinct days.
+        distinct_days = {
+            r.get("created_at", "")[:10]
+            for r in all_alerts
+            if r.get("created_at")
+        }
+        if len(distinct_days) >= _F4_LOOKBACK_SESSIONS:
+            break
+
+        # Paginate: request alerts older than the last record in this batch.
+        oldest_ts = batch[-1].get("created_at") if batch else None
+        if not oldest_ts:
+            break
+        params = {"ticker_symbol": ticker, "limit": 200, "older_than": oldest_ts}
+
+    return all_alerts if all_alerts else None
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +390,38 @@ def _aggregate_options(
     return net_flow, (largest_bull if largest_bull > 0 else None)
 
 
+def _aggregate_flow_alerts(
+    alerts: list[dict[str, Any]],
+) -> tuple[float, float | None]:
+    """Aggregate flow-alert records into an options net-flow figure.
+
+    Each alert carries ``total_ask_side_prem`` (bullish) and ``type``
+    (``"call"`` / ``"put"``).  Net flow is:
+
+        net = sum(call total_ask_side_prem) − sum(put total_ask_side_prem)
+
+    Positive → net call buying (bullish); negative → net put buying (bearish).
+
+    Returns ``(net_flow_usd, largest_single_alert_premium_usd)``.
+    """
+    net_flow = 0.0
+    largest_bull: float = 0.0
+
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask_prem = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        total_prem = _safe_float(rec.get("total_premium")) or 0.0
+
+        if opt_type == "call":
+            net_flow += ask_prem
+            if total_prem > largest_bull:
+                largest_bull = total_prem
+        elif opt_type == "put":
+            net_flow -= ask_prem
+
+    return net_flow, (largest_bull if largest_bull > 0 else None)
+
+
 # ---------------------------------------------------------------------------
 # Response builders
 # ---------------------------------------------------------------------------
@@ -454,8 +486,8 @@ def _build_response_v2(
         opt_score = None
         opt_net_flow = None
     else:
-        windowed_opts = _filter_to_recent_sessions(opt_trades)
-        opt_net_flow, largest_opt_buy = _aggregate_options(windowed_opts)
+        windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
+        opt_net_flow, largest_opt_buy = _aggregate_flow_alerts(windowed_opts)
         opt_score = _map_net_flow_to_score(opt_net_flow, tier)
 
     f4_raw, source = _combine_f4_scores(dp_score, opt_score)
@@ -535,7 +567,7 @@ class OptionsFlowService:
             market_cap, dp_prints, opt_trades = await asyncio.gather(
                 _fetch_market_cap(client, ticker, self._polygon_api_key),
                 _fetch_dark_pool_prints(client, ticker, self._uw_headers),
-                _fetch_option_trades(client, ticker, self._uw_headers),
+                _fetch_option_flow_alerts(client, ticker, self._uw_headers),
             )
 
         # Step 3: aggregate + score + build response.

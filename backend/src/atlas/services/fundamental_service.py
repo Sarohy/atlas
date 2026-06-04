@@ -5,7 +5,8 @@ scores each 0-100, applies internal F5 weights, cap overrides, and produces
 a 0-100 composite F5 score.
 
 Data sources:
-  sec-api.io            — Form 4 insider transactions (last 90 days)
+  yfinance (primary)    — insider_transactions (last 90 days)
+  sec-api.io (fallback) — Form 4 insider transactions (last 90 days)
   Alpha Vantage         — BALANCE_SHEET, INCOME_STATEMENT, CASH_FLOW, OVERVIEW
 
 F5 internal weights (Factor_Mapping_Guide §F5):
@@ -17,8 +18,6 @@ F5 internal weights (Factor_Mapping_Guide §F5):
   TOTAL                  100%  → max 100 pts
 
 Caps and hard blocks applied AFTER composite score is computed:
-  C-suite officer sale >$1M  → F5 capped at 72
-  CEO / CFO sale      >$10M  → F5 capped at 65
   Altman Z in 1.8–2.0        → F5 capped at 75
   Altman Z < 1.8             → Hard block  (f5_blocked = True)
 
@@ -34,6 +33,7 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 import httpx
+import yfinance as yf  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +61,6 @@ _W_INST: Final[float] = 0.10
 # Cap / block constants
 # ---------------------------------------------------------------------------
 
-_CAP_OFFICER_SELL: Final[int] = 72       # C-suite sale > $1M
-_CAP_CEO_CFO_MEGA: Final[int] = 65       # CEO/CFO sale > $10M
 _CAP_ALTMAN_GREY: Final[int] = 75        # Altman Z in grey zone 1.8–2.0
 _OFFICER_SELL_THRESHOLD: Final[float] = 1_000_000.0
 _CEO_CFO_MEGA_THRESHOLD: Final[float] = 10_000_000.0
@@ -97,24 +95,18 @@ def _score_insider_activity(
 ) -> tuple[int, str]:
     """Score insider activity and derive the activity label.
 
+    Insider selling is disregarded — only buying is a meaningful signal.
+    Selling is treated as no activity regardless of amount or who sold.
+
     Returns (score, label) tuple.
 
     Guide:
-      Net buying (buys > 0, no sells)    → 100  NET_BUYING
-      No activity                        →  70  NO_ACTIVITY
-      1 small sale (<$500K)              →  55  SMALL_SALE
-      Multiple sales (≥2 transactions)   →  30  MULTIPLE_SALES
-      CEO/CFO sale >$10M                 →  20  CEO_MEGA_SALE
+      Net buying (buys > 0)  → 100  NET_BUYING
+      No buying activity     →  70  NO_ACTIVITY
     """
-    if ceo_cfo_sell >= _CEO_CFO_MEGA_THRESHOLD:
-        return 20, "CEO_MEGA_SALE"
-    if net_buy > 0 and net_sell == 0:
+    if net_buy > 0:
         return 100, "NET_BUYING"
-    if net_sell == 0 and net_buy == 0:
-        return 70, "NO_ACTIVITY"
-    if sell_transaction_count == 1 and net_sell < 500_000:
-        return 55, "SMALL_SALE"
-    return 30, "MULTIPLE_SALES"
+    return 70, "NO_ACTIVITY"
 
 
 def _score_altman_z(z: float | None) -> tuple[int, str]:
@@ -332,7 +324,8 @@ class FundamentalService:
         ticker = ticker.upper()
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            insider_raw, bs_raw, inc_raw, cf_raw, ov_raw = await asyncio.gather(
+            yf_insider_rows, insider_raw, bs_raw, inc_raw, cf_raw, ov_raw = await asyncio.gather(
+                self._fetch_insider_trades_yf(ticker),
                 self._fetch_insider_trades(client, ticker),
                 self._fetch_balance_sheet(client, ticker),
                 # Use pre-fetched shared task when provided to avoid a
@@ -348,7 +341,12 @@ class FundamentalService:
         av_data_available = bool(bs_raw or inc_raw or cf_raw or ov_raw)
 
         # ---- Insider Activity ------------------------------------------------
-        insider_ind = self._build_insider_indicator(insider_raw)
+        # yfinance is the primary source; sec-api.io is the fallback when
+        # yfinance returns no rows (e.g. network issue or missing data).
+        if yf_insider_rows:
+            insider_ind = self._build_insider_indicator_from_yf_data(yf_insider_rows)
+        else:
+            insider_ind = self._build_insider_indicator(insider_raw)
 
         # ---- Balance sheet data extraction -----------------------------------
         bs = self._extract_balance_sheet(bs_raw)
@@ -383,14 +381,6 @@ class FundamentalService:
         altman_cap: int | None = None
         f5_blocked = False
 
-        # Insider selling caps
-        c_suite_sell = insider_ind.c_suite_sell_value or 0.0
-        ceo_cfo_sell = insider_ind.ceo_cfo_sell_value or 0.0
-        if ceo_cfo_sell >= _CEO_CFO_MEGA_THRESHOLD:
-            insider_cap = _CAP_CEO_CFO_MEGA
-        elif c_suite_sell >= _OFFICER_SELL_THRESHOLD:
-            insider_cap = _CAP_OFFICER_SELL
-
         # Altman Z caps / block
         z = altman_ind.z_score
         if z is not None:
@@ -423,7 +413,111 @@ class FundamentalService:
         )
 
     # ------------------------------------------------------------------
-    # SEC API — insider trading Form 4
+    # yfinance — insider transactions (primary source)
+    # ------------------------------------------------------------------
+
+    async def _fetch_insider_trades_yf(self, ticker: str) -> list[dict[str, Any]]:
+        """Fetch insider transactions from Yahoo Finance (last 90 days).
+
+        Returns a list of normalised dicts with keys:
+          value           float   — USD transaction value
+          transaction_type str    — 'sale' | 'purchase'
+          is_officer      bool    — True for any C-suite / officer title
+          is_ceo_cfo      bool    — True for CEO or CFO specifically
+
+        Excludes awards, grants, gift transfers, and option conversions.
+        Returns [] on any error or empty DataFrame.
+        """
+        cutoff = date.today() - timedelta(days=90)
+        loop = asyncio.get_running_loop()
+        try:
+            df = await loop.run_in_executor(
+                None,
+                lambda: yf.Ticker(ticker).insider_transactions,
+            )
+        except Exception:
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            tx_date = row.get("Start Date")
+            if hasattr(tx_date, "date"):
+                tx_date = tx_date.date()
+            if not isinstance(tx_date, date) or tx_date < cutoff:
+                continue
+
+            text = str(row.get("Text", "")).lower()
+            value = float(row.get("Value", 0) or 0)
+
+            # Exclude zero-value grants, awards, gifts, and option conversions.
+            _EXCLUDE_KEYWORDS = ("award", "grant", "gift", "conversion")
+            if any(kw in text for kw in _EXCLUDE_KEYWORDS) or value <= 0:
+                continue
+
+            is_sale = "sale" in text
+            is_purchase = "purchase" in text
+            if not is_sale and not is_purchase:
+                continue
+
+            position = str(row.get("Position", "")).lower()
+            is_officer = any(kw in position for kw in ("officer", "ceo", "cfo", "chief"))
+            is_ceo_cfo = any(
+                kw in position for kw in ("chief executive", "chief financial", "ceo", "cfo")
+            )
+
+            rows.append({
+                "value": value,
+                "transaction_type": "sale" if is_sale else "purchase",
+                "is_officer": is_officer,
+                "is_ceo_cfo": is_ceo_cfo,
+            })
+
+        return rows
+
+    def _build_insider_indicator_from_yf_data(
+        self, rows: list[dict[str, Any]]
+    ) -> "InsiderActivityIndicator":  # noqa: F821
+        """Build InsiderActivityIndicator from normalised yfinance rows.
+
+        Accepts the output of _fetch_insider_trades_yf directly.
+        """
+        net_buy: float = 0.0
+        net_sell: float = 0.0
+        sell_tx_count: int = 0
+        c_suite_sell: float = 0.0
+        ceo_cfo_sell: float = 0.0
+        total_tx: int = len(rows)
+
+        for row in rows:
+            value = float(row.get("value", 0))
+            if row.get("transaction_type") == "sale":
+                net_sell += value
+                sell_tx_count += 1
+                if row.get("is_officer"):
+                    c_suite_sell += value
+                if row.get("is_ceo_cfo"):
+                    ceo_cfo_sell += value
+            else:
+                net_buy += value
+
+        score, label = _score_insider_activity(net_buy, net_sell, sell_tx_count, ceo_cfo_sell)
+
+        return InsiderActivityIndicator(
+            net_buy_value=round(net_buy, 2) if net_buy > 0 else None,
+            net_sell_value=round(net_sell, 2) if net_sell > 0 else None,
+            transaction_count=total_tx,
+            c_suite_sell_value=round(c_suite_sell, 2) if c_suite_sell > 0 else None,
+            ceo_cfo_sell_value=round(ceo_cfo_sell, 2) if ceo_cfo_sell > 0 else None,
+            activity_label=label,
+            score=score,
+            weight=_W_INSIDER,
+        )
+
+    # ------------------------------------------------------------------
+    # SEC API — insider trading Form 4 (fallback)
     # ------------------------------------------------------------------
 
     async def _fetch_insider_trades(

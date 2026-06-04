@@ -1,13 +1,18 @@
 """Application configuration via Pydantic Settings."""
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve .env relative to this file so the server can be started from any cwd.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
     """All configuration is read from environment variables or a .env file."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE), extra="ignore")
 
     app_name: str = Field(default="atlas-backend")
     environment: str = Field(default="development")

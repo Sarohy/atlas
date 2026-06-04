@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
 
 import httpx
@@ -46,6 +46,11 @@ logger = logging.getLogger(__name__)
 _TIMEOUT: Final[float] = 10.0
 _UW_BASE_URL: Final[str] = "https://api.unusualwhales.com"
 _POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
+
+# In-memory cache: avoids burning through the 120 req/min UW rate limit on
+# repeated page refreshes.  Entries expire after 5 minutes.
+_F4_CACHE_TTL: Final[timedelta] = timedelta(minutes=5)
+_f4_cache: dict[str, tuple[datetime, OptionsFlowResponse]] = {}
 
 # UW pagination cap. 5 sessions x ~200 prints/day ~= 1000 prints for very
 # liquid names; a single 500-print batch covers most cases and accepts a
@@ -562,7 +567,16 @@ class OptionsFlowService:
         if _is_excluded_ticker(ticker):
             return _build_excluded_response(ticker)
 
-        # Step 2: three concurrent fetches.
+        # Step 1b: return cached result if still fresh.
+        cached = _f4_cache.get(ticker)
+        if cached is not None:
+            cached_at, cached_response = cached
+            if datetime.now(UTC) - cached_at < _F4_CACHE_TTL:
+                logger.debug("[F4] %s served from cache (age=%s)", ticker,
+                             datetime.now(UTC) - cached_at)
+                return cached_response
+
+        # Step 2: three concurrent fetches — retry UW calls once on failure.
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             market_cap, dp_prints, opt_trades = await asyncio.gather(
                 _fetch_market_cap(client, ticker, self._polygon_api_key),
@@ -570,13 +584,33 @@ class OptionsFlowService:
                 _fetch_option_flow_alerts(client, ticker, self._uw_headers),
             )
 
+        # Retry whichever UW call returned None — single retry with 1s backoff.
+        if dp_prints is None or opt_trades is None:
+            await asyncio.sleep(1.0)
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                if dp_prints is None and opt_trades is None:
+                    dp_prints, opt_trades = await asyncio.gather(
+                        _fetch_dark_pool_prints(client, ticker, self._uw_headers),
+                        _fetch_option_flow_alerts(client, ticker, self._uw_headers),
+                    )
+                elif dp_prints is None:
+                    dp_prints = await _fetch_dark_pool_prints(client, ticker, self._uw_headers)
+                else:
+                    opt_trades = await _fetch_option_flow_alerts(client, ticker, self._uw_headers)
+
         # Step 3: aggregate + score + build response.
-        return _build_response_v2(
+        result = _build_response_v2(
             ticker=ticker,
             market_cap=market_cap,
             dp_prints=dp_prints,
             opt_trades=opt_trades,
         )
+
+        # Cache only real data (not data-gap fallbacks) to avoid caching stale 50s.
+        if dp_prints is not None or opt_trades is not None:
+            _f4_cache[ticker] = (datetime.now(UTC), result)
+
+        return result
 
 
 # ===========================================================================

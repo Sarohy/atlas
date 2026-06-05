@@ -9,7 +9,7 @@ Covers:
 from __future__ import annotations
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -333,3 +333,118 @@ class TestBuildInsiderIndicatorFromYfData:
         ind = svc._build_insider_indicator_from_yf_data([])
         assert ind.score == 70
         assert ind.activity_label == "NO_ACTIVITY"
+
+
+# ---------------------------------------------------------------------------
+# FundamentalService institutional-ownership yfinance fallback
+# ---------------------------------------------------------------------------
+
+
+class TestInstitutionalOwnershipYfFallback:
+    def _make_service(self) -> FundamentalService:
+        return FundamentalService(sec_api_key="", alphavantage_key="")
+
+    @pytest.mark.asyncio
+    async def test_compute_fundamental_uses_yf_info_held_percent_institutions_when_av_missing(
+        self,
+    ) -> None:
+        svc = self._make_service()
+
+        mock_ticker = MagicMock()
+        mock_ticker.info = {"heldPercentInstitutions": 0.62}
+        mock_ticker.major_holders = pd.DataFrame()
+
+        with (
+            patch.object(
+                FundamentalService,
+                "_fetch_insider_trades_yf",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_insider_trades",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_balance_sheet",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_income_statement",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_cash_flow",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_overview",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("atlas.services.fundamental_service.yf.Ticker", return_value=mock_ticker),
+        ):
+            result = await svc.compute_fundamental("SNDK")
+
+        assert result.institutional_ownership.ownership_pct == pytest.approx(0.62)
+        assert result.institutional_ownership.score == 80
+        assert result.institutional_ownership.change_label == "FLAT"
+        assert result.f5_score == 68
+
+    @pytest.mark.asyncio
+    async def test_compute_fundamental_uses_yf_major_holders_institutions_percent_held_when_av_missing(
+        self,
+    ) -> None:
+        svc = self._make_service()
+
+        mock_ticker = MagicMock()
+        mock_ticker.info = {}
+        mock_ticker.major_holders = pd.DataFrame(
+            {
+                "Breakdown": ["institutionsPercentHeld", "insidersPercentHeld"],
+                "Value": [0.587, 0.011],
+            }
+        )
+
+        with (
+            patch.object(
+                FundamentalService,
+                "_fetch_insider_trades_yf",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_insider_trades",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_balance_sheet",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_income_statement",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_cash_flow",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(
+                FundamentalService,
+                "_fetch_overview",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("atlas.services.fundamental_service.yf.Ticker", return_value=mock_ticker),
+        ):
+            result = await svc.compute_fundamental("SNDK")
+
+        assert result.institutional_ownership.ownership_pct == pytest.approx(0.587)
+        assert result.institutional_ownership.score == 80
+        assert result.institutional_ownership.change_label == "FLAT"
+        assert result.f5_score == 68

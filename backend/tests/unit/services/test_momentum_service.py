@@ -519,6 +519,52 @@ class TestComputeF1Score:
         assert total == 78
         assert grade == "BUY"
 
+    def test_parabolic_trend_leader_with_weak_macd_scores_95(self) -> None:
+        """Parabolic leaders should not be dragged down by MACD lag.
+
+        This mirrors the SNDK-style profile: all trend-strength inputs at max,
+        RSI in strong-overbought band, but MACD still weak/lagging.
+        """
+        total, grade = _compute_f1_score(
+            rsi_raw=70,
+            macd_raw=20,
+            ma_raw=100,
+            week52_raw=100,
+            perf_1m_raw=100,
+            perf_6m_raw=100,
+            sector_raw=100,
+        )
+        assert total == 95
+        assert grade == "STRONG BUY"
+
+    def test_parabolic_floor_not_applied_when_sector_not_max(self) -> None:
+        """Relief must not apply when trend stack is not fully maxed."""
+        total, grade = _compute_f1_score(
+            rsi_raw=70,
+            macd_raw=20,
+            ma_raw=100,
+            week52_raw=100,
+            perf_1m_raw=100,
+            perf_6m_raw=100,
+            sector_raw=75,
+        )
+        assert total == 81
+        assert grade == "STRONG BUY"
+
+    def test_parabolic_floor_not_applied_below_rsi_threshold(self) -> None:
+        """Relief must not apply when RSI raw score is below 70."""
+        total, grade = _compute_f1_score(
+            rsi_raw=55,
+            macd_raw=20,
+            ma_raw=100,
+            week52_raw=100,
+            perf_1m_raw=100,
+            perf_6m_raw=100,
+            sector_raw=100,
+        )
+        assert total == 79
+        assert grade == "BUY"
+
     def test_score_is_capped_at_100(self) -> None:
         """Rounding can never push total above 100."""
         total, _ = _compute_f1_score(

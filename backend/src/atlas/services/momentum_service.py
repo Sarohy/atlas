@@ -136,6 +136,15 @@ _GRADE_BUY_MIN: Final[int] = 60
 _GRADE_NEUTRAL_MIN: Final[int] = 40
 _GRADE_WEAK_MIN: Final[int] = 20
 
+# Parabolic trend-leader relief.
+# When trend stack is fully maxed (MA/52W/1M/6M/sector) and RSI remains at
+# least in the healthy band, MACD lag should not drag F1 below high-conviction
+# territory. This captures names that cool from extreme momentum while price
+# structure stays decisively bullish.
+_F1_PARABOLIC_FLOOR: Final[int] = 95
+_F1_PARABOLIC_MIN_RSI_RAW: Final[int] = 70
+_F1_PARABOLIC_MAX_TREND_RAW: Final[int] = 100
+
 
 # ---------------------------------------------------------------------------
 # Pure computation helpers
@@ -490,6 +499,19 @@ def _compute_f1_score(
         + perf_6m_raw * _W_6M
         + sector_raw * _W_SECTOR
     )
+
+    # Parabolic leader floor: preserve high momentum score when trend structure
+    # is unanimously strong and RSI confirms strength, even if MACD lags.
+    if (
+        ma_raw == _F1_PARABOLIC_MAX_TREND_RAW
+        and week52_raw == _F1_PARABOLIC_MAX_TREND_RAW
+        and perf_1m_raw == _F1_PARABOLIC_MAX_TREND_RAW
+        and perf_6m_raw == _F1_PARABOLIC_MAX_TREND_RAW
+        and sector_raw == _F1_PARABOLIC_MAX_TREND_RAW
+        and rsi_raw >= _F1_PARABOLIC_MIN_RSI_RAW
+    ):
+        weighted = max(weighted, float(_F1_PARABOLIC_FLOOR))
+
     total = min(100, round(weighted))
     grade = _grade_from_total(total)
     return total, grade

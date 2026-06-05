@@ -472,6 +472,17 @@ _FWD_VIS_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
         ),
         "DIRECTIONAL",
     ),
+    # Explicit dollar-range quarterly guidance: "for the second quarter, we expect revenue
+    # between $2,550 million and $2,650 million" — most concrete forward visibility form.
+    (
+        re.compile(
+            r"(?:for\s+the\s+)?(?:second|third|fourth|next|first)\s+quarter"
+            r".{0,60}?(?:we\s+)?expect\s+(?:revenue|sales|eps|earnings).{0,40}?"
+            r"(?:between|\$\s*\d|range\s+of)",
+            re.I,
+        ),
+        "SPECIFIC_MAINTAINED",
+    ),
     # "third/next quarter guidance reflect" — acknowledges issuing forward guidance
     (
         re.compile(r"(?:third|fourth|next|second)\s+quarter\s+guid\w+", re.I),
@@ -1265,6 +1276,13 @@ class EarningsService:
 
         Compares reports[0] (most recent) with reports[4] (4 quarters prior).
         Returns (None, None) when insufficient data.
+
+        Anomaly guard: some data providers (AV, FMP) occasionally mis-classify
+        D&A as part of COGS for a single quarter, producing a grossProfit that
+        is drastically lower than surrounding quarters.  If the current quarter
+        GM deviates by more than 20 percentage points from the median of the 3
+        preceding quarters (reports[1:4]), the current value is replaced with
+        that median before computing the YoY delta.
         """
         reports: list[dict] = income_data.get("quarterlyReports", [])  # type: ignore[type-arg]
 
@@ -1281,6 +1299,27 @@ class EarningsService:
 
         current = _gm_ratio(reports[0]) if len(reports) >= 1 else None
         prior_year = _gm_ratio(reports[4]) if len(reports) >= 5 else None
+
+        # Anomaly guard: replace current GM only when it drops >20pp BELOW the
+        # median of the 3 preceding quarters.  This catches the specific provider
+        # bug where D&A is mis-classified as part of COGS for a single quarter,
+        # producing an artificially low grossProfit.  Upward deviations are left
+        # untouched — genuine margin expansion (e.g. spinoffs, restructurings) is
+        # a real business event, not a data error.
+        if current is not None and len(reports) >= 4:
+            recent = [_gm_ratio(reports[i]) for i in range(1, 4)]
+            recent_valid = sorted(x for x in recent if x is not None)
+            if recent_valid:
+                recent_median = recent_valid[len(recent_valid) // 2]
+                if recent_median - current > 0.20:
+                    logger.warning(
+                        "SF2 anomaly: current GM %.1f%% is >20pp below "
+                        "recent median %.1f%% — using median as corrected value",
+                        current * 100,
+                        recent_median * 100,
+                    )
+                    current = recent_median
+
         return current, prior_year
 
     @staticmethod

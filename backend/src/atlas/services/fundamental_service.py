@@ -324,8 +324,9 @@ class FundamentalService:
         ticker = ticker.upper()
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            yf_insider_rows, insider_raw, bs_raw, inc_raw, cf_raw, ov_raw = await asyncio.gather(
+            yf_insider_rows, yf_inst_pct, insider_raw, bs_raw, inc_raw, cf_raw, ov_raw = await asyncio.gather(
                 self._fetch_insider_trades_yf(ticker),
+                self._fetch_institutional_ownership_yf(ticker),
                 self._fetch_insider_trades(client, ticker),
                 self._fetch_balance_sheet(client, ticker),
                 # Use pre-fetched shared task when provided to avoid a
@@ -364,7 +365,7 @@ class FundamentalService:
         de_ind = self._build_debt_equity_indicator(bs)
 
         # ---- Institutional Ownership -----------------------------------------
-        inst_ind = self._build_institutional_indicator(ov_raw)
+        inst_ind = self._build_institutional_indicator(ov_raw, yf_fallback_pct=yf_inst_pct)
 
         # ---- Weighted F5 composite -------------------------------------------
         f5_raw = (
@@ -476,6 +477,64 @@ class FundamentalService:
             })
 
         return rows
+
+    async def _fetch_institutional_ownership_yf(self, ticker: str) -> float | None:
+        """Fetch institutional ownership fraction from yfinance.
+
+        Preferred source is ``Ticker.info['heldPercentInstitutions']``.
+        Fallback source is ``Ticker.major_holders`` row/field
+        ``institutionsPercentHeld``. Returns a normalized fraction in [0, 1]
+        or None when unavailable.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            ticker_obj = await loop.run_in_executor(None, lambda: yf.Ticker(ticker))
+        except Exception:
+            return None
+
+        try:
+            info = await loop.run_in_executor(None, lambda: ticker_obj.info)
+        except Exception:
+            info = {}
+
+        if isinstance(info, dict):
+            for key in ("heldPercentInstitutions", "institutionPercentHeld"):
+                pct = self._normalize_ownership_fraction(info.get(key))
+                if pct is not None:
+                    return pct
+
+        try:
+            major = await loop.run_in_executor(None, lambda: ticker_obj.major_holders)
+        except Exception:
+            major = None
+
+        if major is None:
+            return None
+
+        # Handle DataFrame with Breakdown/Value columns.
+        if hasattr(major, "iterrows") and hasattr(major, "columns"):
+            columns = {str(c).lower(): c for c in list(major.columns)}
+            b_col = columns.get("breakdown")
+            v_col = columns.get("value")
+            if b_col is not None and v_col is not None:
+                for _, row in major.iterrows():
+                    if str(row.get(b_col, "")).strip().lower() == "institutionspercentheld":
+                        return self._normalize_ownership_fraction(row.get(v_col))
+
+        # Handle DataFrame indexed by breakdown labels (common yfinance shape).
+        if hasattr(major, "index") and hasattr(major, "loc"):
+            index_labels = {str(idx).strip().lower(): idx for idx in list(major.index)}
+            idx = index_labels.get("institutionspercentheld")
+            if idx is not None:
+                try:
+                    row = major.loc[idx]
+                    if hasattr(row, "get"):
+                        return self._normalize_ownership_fraction(row.get("Value"))
+                    return self._normalize_ownership_fraction(row)
+                except Exception:
+                    return None
+
+        return None
 
     def _build_insider_indicator_from_yf_data(
         self, rows: list[dict[str, Any]]
@@ -801,21 +860,14 @@ class FundamentalService:
         )
 
     def _build_institutional_indicator(
-        self, overview: dict[str, Any]
+        self, overview: dict[str, Any], yf_fallback_pct: float | None = None
     ) -> InstitutionalOwnershipIndicator:
         raw = overview.get("PercentInstitutionsOwnership") or overview.get(
             "percentInstitutionsOwnership"
         )
-        pct: float | None = None
-        if raw is not None:
-            try:
-                pct = float(raw)
-                # AV returns as a decimal fraction (e.g. "0.623") OR a percentage
-                # string ("62.3").  Normalise to fraction 0–1.
-                if pct > 1.0:
-                    pct = pct / 100.0
-            except (TypeError, ValueError):
-                pct = None
+        pct = self._normalize_ownership_fraction(raw)
+        if pct is None:
+            pct = self._normalize_ownership_fraction(yf_fallback_pct)
 
         score, label = _score_institutional(pct)
         return InstitutionalOwnershipIndicator(
@@ -824,6 +876,25 @@ class FundamentalService:
             score=score,
             weight=_W_INST,
         )
+
+    @staticmethod
+    def _normalize_ownership_fraction(raw: Any) -> float | None:
+        """Normalize ownership value to a fraction in [0, 1]."""
+        if raw in (None, "", "None", "N/A"):
+            return None
+        try:
+            if isinstance(raw, str):
+                value = raw.strip().replace("%", "")
+            else:
+                value = raw
+            pct = float(value)
+        except (TypeError, ValueError):
+            return None
+        if pct < 0:
+            return None
+        if pct > 1.0:
+            pct = pct / 100.0
+        return min(pct, 1.0)
 
     # ------------------------------------------------------------------
     # Raw data extraction helpers

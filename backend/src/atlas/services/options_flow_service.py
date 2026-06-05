@@ -204,7 +204,7 @@ async def _fetch_dark_pool_prints(
 # Network I/O — UW flow alerts (replaces the old flow-recent endpoint)
 # ---------------------------------------------------------------------------
 
-# Maximum pages to fetch per call. 4 pages × 200 = 800 alerts — enough to
+# Maximum pages to fetch per call. 4 pages x 200 = 800 alerts - enough to
 # cover 5 sessions of even the most active large-cap names.
 _UW_FLOW_ALERTS_MAX_PAGES: Final[int] = 4
 
@@ -249,11 +249,7 @@ async def _fetch_option_flow_alerts(
         all_alerts.extend(r for r in batch if isinstance(r, dict))
 
         # Stop once we have data from at least _F4_LOOKBACK_SESSIONS distinct days.
-        distinct_days = {
-            r.get("created_at", "")[:10]
-            for r in all_alerts
-            if r.get("created_at")
-        }
+        distinct_days = {r.get("created_at", "")[:10] for r in all_alerts if r.get("created_at")}
         if len(distinct_days) >= _F4_LOOKBACK_SESSIONS:
             break
 
@@ -403,7 +399,7 @@ def _aggregate_flow_alerts(
     Each alert carries ``total_ask_side_prem`` (bullish) and ``type``
     (``"call"`` / ``"put"``).  Net flow is:
 
-        net = sum(call total_ask_side_prem) − sum(put total_ask_side_prem)
+        net = sum(call total_ask_side_prem) - sum(put total_ask_side_prem)
 
     Positive → net call buying (bullish); negative → net put buying (bearish).
 
@@ -424,7 +420,147 @@ def _aggregate_flow_alerts(
         elif opt_type == "put":
             net_flow -= ask_prem
 
+    net_flow = _apply_strategy_aware_adjustment(alerts, net_flow)
+
     return net_flow, (largest_bull if largest_bull > 0 else None)
+
+
+def _alert_dte_days(rec: dict[str, Any]) -> int | None:
+    """Return DTE from alert expiry-like fields when parseable."""
+    expiry = rec.get("expiry") or rec.get("expiration") or rec.get("expiry_date")
+    if not isinstance(expiry, str):
+        return None
+    try:
+        exp_date = datetime.fromisoformat(expiry.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+    return (exp_date - datetime.now(UTC).date()).days
+
+
+def _apply_strategy_aware_adjustment(alerts: list[dict[str, Any]], raw_net_flow: float) -> float:
+    """Neutralize bearish net flow for complex bullish multi-leg structures.
+
+    Relief is applied only when all are present:
+    - protective put-spread participation,
+    - near-dated covered-call overwriting,
+    - long-dated LEAP call accumulation.
+
+    Adjustment cannot flip bullish; cap at neutral (0).
+    """
+    if raw_net_flow >= 0:
+        return raw_net_flow
+
+    put_legs = 0
+    put_ask_total = 0.0
+    put_bid_total = 0.0
+    overwrite_bid_total = 0.0
+    leap_call_ask_total = 0.0
+
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask_prem = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        bid_prem = _safe_float(rec.get("total_bid_side_prem")) or 0.0
+        dte = _alert_dte_days(rec)
+
+        if opt_type == "put":
+            if ask_prem > 0 and bid_prem > 0:
+                put_legs += 1
+            put_ask_total += ask_prem
+            put_bid_total += bid_prem
+            continue
+
+        if opt_type != "call":
+            continue
+
+        if (
+            dte is not None
+            and dte <= _F4_STRAT_NEAR_DTE_MAX_DAYS
+            and bid_prem >= ask_prem * _F4_STRAT_OVERWRITE_BID_DOMINANCE
+            and bid_prem > 0
+        ):
+            overwrite_bid_total += bid_prem
+
+        if (
+            dte is not None
+            and dte >= _F4_STRAT_LEAP_DTE_MIN_DAYS
+            and ask_prem > bid_prem
+            and ask_prem > 0
+        ):
+            leap_call_ask_total += ask_prem
+
+    has_protective_put_spread = (
+        put_legs >= _F4_STRAT_MIN_PUT_LEGS and put_ask_total > 0 and put_bid_total > 0
+    )
+    has_covered_call_overwrite = overwrite_bid_total > 0
+    has_leap_call_accumulation = leap_call_ask_total > 0
+
+    if not (
+        has_protective_put_spread and has_covered_call_overwrite and has_leap_call_accumulation
+    ):
+        return raw_net_flow
+
+    relief_capacity = (
+        put_bid_total
+        + leap_call_ask_total
+        + overwrite_bid_total * _F4_STRAT_OVERWRITE_RELIEF_WEIGHT
+    )
+    relief = min(abs(raw_net_flow), relief_capacity)
+    return min(0.0, raw_net_flow + relief)
+
+
+def _dark_pool_settlement_ratio(prints: list[dict[str, Any]]) -> float | None:
+    """Return settlement ratio over windowed dark-pool prints.
+
+    Ratio = settlement_count / total_count using the same settlement classifier
+    as F4 aggregation. Returns None when no valid prints are present.
+    """
+    total = 0
+    settlements = 0
+    for rec in prints:
+        price = _safe_float(rec.get("price"))
+        if price is None:
+            continue
+        prem = _print_premium_usd(rec)
+        if prem <= 0:
+            continue
+        bid = _safe_float(rec.get("nbbo_bid"))
+        ask = _safe_float(rec.get("nbbo_ask"))
+        codes_raw = rec.get("sale_cond_codes") or ()
+        codes: tuple[str, ...] = (
+            tuple(c for c in codes_raw if isinstance(c, str))
+            if isinstance(codes_raw, (list, tuple))
+            else ()
+        )
+        total += 1
+        if _classify_dark_pool_print(price, bid, ask, codes) == "SETTLEMENT":
+            settlements += 1
+    if total == 0:
+        return None
+    return settlements / total
+
+
+def _apply_dark_pool_quality_boost(
+    dp_score: int | None,
+    dp_net_flow: float | None,
+    dp_large_buys: int,
+    dp_prints: list[dict[str, Any]],
+    opt_net_flow: float | None,
+) -> int | None:
+    """Boost dark-pool score for clean, large-block accumulation sessions."""
+    if dp_score is None or dp_net_flow is None or dp_net_flow <= 0:
+        return dp_score
+    if dp_large_buys < _F4_DP_QUALITY_MIN_LARGE_BUYS:
+        return dp_score
+    if dp_net_flow < _F4_DP_QUALITY_MIN_NET_FLOW_USD:
+        return dp_score
+    if opt_net_flow is not None and abs(opt_net_flow) > _F4_DP_QUALITY_MAX_OPTIONS_ABS_USD:
+        return dp_score
+
+    settlement_ratio = _dark_pool_settlement_ratio(dp_prints)
+    if settlement_ratio is None or settlement_ratio > _F4_DP_QUALITY_SETTLEMENT_MAX:
+        return dp_score
+
+    return min(100, dp_score + _F4_DP_QUALITY_BOOST_POINTS)
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +611,7 @@ def _build_response_v2(
     dp_count = 0
     dp_large_buys = 0
     largest_dp_buy: float | None = None
+    windowed_dp: list[dict[str, Any]] = []
     if dp_prints is None:
         dp_score = None
         dp_net_flow = None
@@ -494,6 +631,14 @@ def _build_response_v2(
         windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
         opt_net_flow, largest_opt_buy = _aggregate_flow_alerts(windowed_opts)
         opt_score = _map_net_flow_to_score(opt_net_flow, tier)
+
+    dp_score = _apply_dark_pool_quality_boost(
+        dp_score=dp_score,
+        dp_net_flow=dp_net_flow,
+        dp_large_buys=dp_large_buys,
+        dp_prints=windowed_dp,
+        opt_net_flow=opt_net_flow,
+    )
 
     f4_raw, source = _combine_f4_scores(dp_score, opt_score)
     direction = _derive_flow_direction(dp_net_flow, opt_net_flow)
@@ -572,8 +717,9 @@ class OptionsFlowService:
         if cached is not None:
             cached_at, cached_response = cached
             if datetime.now(UTC) - cached_at < _F4_CACHE_TTL:
-                logger.debug("[F4] %s served from cache (age=%s)", ticker,
-                             datetime.now(UTC) - cached_at)
+                logger.debug(
+                    "[F4] %s served from cache (age=%s)", ticker, datetime.now(UTC) - cached_at
+                )
                 return cached_response
 
         # Step 2: three concurrent fetches — retry UW calls once on failure.
@@ -706,6 +852,20 @@ _UW_SIDE_NONE: Final[str] = "NONE"
 _F4_NEUTRAL_SCORE: Final[int] = 50
 _F4_DISPLAY_DIVISOR: Final[int] = 100
 _F4_DISPLAY_MAX: Final[int] = 15
+
+# Strategy-aware options adjustment constants.
+_F4_STRAT_LEAP_DTE_MIN_DAYS: Final[int] = 180
+_F4_STRAT_NEAR_DTE_MAX_DAYS: Final[int] = 400
+_F4_STRAT_OVERWRITE_BID_DOMINANCE: Final[float] = 1.2
+_F4_STRAT_OVERWRITE_RELIEF_WEIGHT: Final[float] = 0.5
+_F4_STRAT_MIN_PUT_LEGS: Final[int] = 2
+
+# Dark-pool quality boost constants.
+_F4_DP_QUALITY_SETTLEMENT_MAX: Final[float] = 0.20
+_F4_DP_QUALITY_MIN_LARGE_BUYS: Final[int] = 3
+_F4_DP_QUALITY_MIN_NET_FLOW_USD: Final[float] = 10_000_000.0
+_F4_DP_QUALITY_MAX_OPTIONS_ABS_USD: Final[float] = 5_000_000.0
+_F4_DP_QUALITY_BOOST_POINTS: Final[int] = 10
 
 # Data-source labels for F4 response.
 _F4_SOURCE_BOTH: Final[str] = "BOTH"

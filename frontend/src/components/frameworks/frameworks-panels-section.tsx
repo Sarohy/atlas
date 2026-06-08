@@ -97,11 +97,10 @@ export function FrameworksPanelsSection() {
       : null;
   const regimeRule = regimeForActive?.rule ?? 'NORMAL';
 
-  const { data: rawFramework8 } = useFramework8(activeTicker);
-  const framework8ForActive =
-    rawFramework8 && rawFramework8.ticker.toUpperCase() === activeTicker.trim().toUpperCase()
-      ? rawFramework8
-      : undefined;
+  // Warm the TanStack Query cache for F8 (same pattern as useFrameworkScore
+  // above) so FrameworkScorePanel's own useFramework8 hook hits the cache
+  // instead of issuing a second request.
+  useFramework8(activeTicker);
 
   useEffect(() => {
     setActiveTicker(activeTicker);
@@ -163,7 +162,6 @@ export function FrameworksPanelsSection() {
           ticker={activeTicker}
           onPreviewDetails={() => setDetailsOverlayOpen(true)}
           regimeModifier={regimeForActive?.modifier ?? 0}
-          regimeAdjustedScore={regimeForActive?.adjusted_score ?? null}
         />
 
         <RegimeModifierPanel

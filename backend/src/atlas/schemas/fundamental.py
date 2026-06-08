@@ -84,7 +84,7 @@ class InsiderActivityIndicator(BaseModel):
     activity_label: str = Field(
         default="NO_ACTIVITY",
         description=(
-            "NET_BUYING | NO_ACTIVITY | SMALL_SALE | MULTIPLE_SALES | CEO_MEGA_SALE"
+            "NET_BUYING | NO_ACTIVITY | SMALL_SALE | MULTIPLE_SALES | CEO_MEGA_SALE | ROUTINE_DIVERSIFICATION"
         ),
     )
     score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
@@ -165,11 +165,11 @@ class FreeCashFlowIndicator(BaseModel):
         default="UNKNOWN",
         description=(
             "POSITIVE_GROWING | POSITIVE_FLAT | POSITIVE_DECLINING"
-            " | NEGATIVE_IMPROVING | NEGATIVE_WORSENING | UNKNOWN"
+            " | NEGATIVE_LARGE_IMPROVEMENT | NEGATIVE_IMPROVING | NEGATIVE_WORSENING | UNKNOWN"
         ),
     )
     score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
-    weight: float = Field(default=0.20, description="Weight in F5 formula.")
+    weight: float = Field(default=0.15, description="Weight in F5 formula (reduced from 0.20 to accommodate gross_margin).")
 
 
 class DebtEquityIndicator(BaseModel):
@@ -226,25 +226,45 @@ class InstitutionalOwnershipIndicator(BaseModel):
         description="NET_BUYING | FLAT | SMALL_SELLING | LARGE_SELLING",
     )
     score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
+    weight: float = Field(default=0.10, description="Weight in F5 formula (reduced from 0.15 to accommodate gross_margin).")
+
+
+class GrossMarginIndicator(BaseModel):
+    """Gross margin sub-indicator (Fix 3 addition, weight 0.10).
+
+    Gross margin = (Revenue − COGS) / Revenue, expressed as a fraction.
+    Sourced from TTM income statement (Alpha Vantage INCOME_STATEMENT).
+
+    Scoring rule (0-100):
+      ≥ 70%   → 100
+      50–70%  →  80
+      30–50%  →  60
+      10–30%  →  40
+      < 10%  →  20  (includes negative margins)
+      Unknown →  60  (neutral)
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    gross_margin: float | None = Field(
+        None, description="TTM gross margin as a fraction (0.0–1.0). Null when unavailable."
+    )
+    score: int = Field(ge=0, le=100, description="Raw indicator score (0-100).")
     weight: float = Field(default=0.10, description="Weight in F5 formula.")
-
-
-# ---------------------------------------------------------------------------
-# Top-level response
-# ---------------------------------------------------------------------------
 
 
 class FundamentalResponse(BaseModel):
     """Complete F5 Fundamental Quality analysis for a single ticker.
 
-    F5 = (insider_activity.score × 0.30)
-       + (altman_z.score       × 0.25)
-       + (free_cash_flow.score × 0.20)
-       + (debt_equity.score    × 0.15)
-       + (institutional.score  × 0.10)
+    F5 = (insider_activity.score  × 0.30)
+       + (altman_z.score          × 0.25)
+       + (free_cash_flow.score    × 0.15)
+       + (debt_equity.score       × 0.10)
+       + (gross_margin.score      × 0.10)
+       + (institutional.score     × 0.10)
 
     Caps are applied to the composite total (not individual indicators):
-      insider_cap  — 72 when C-suite sells >$1M; 65 when CEO/CFO sells >$10M
+      insider_cap  — set when C-suite sells above threshold
       altman_cap   — 75 when Z-score is in the grey zone (1.8–2.0)
       active_cap   — effective cap = min(insider_cap, altman_cap) if any set
 
@@ -258,6 +278,7 @@ class FundamentalResponse(BaseModel):
     altman_z: AltmanZScoreIndicator
     free_cash_flow: FreeCashFlowIndicator
     debt_equity: DebtEquityIndicator
+    gross_margin: GrossMarginIndicator
     institutional_ownership: InstitutionalOwnershipIndicator
 
     # --- Cap and block fields ---

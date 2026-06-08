@@ -33,12 +33,13 @@ from typing import Any, Final
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from atlas.schemas.earnings import (
     EarningsResponse,
     F2Grade,
 )
+from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Named constants — F2 internal weights
@@ -949,47 +950,31 @@ class EarningsService:
 
     async def _fetch_income_statement(self, ticker: str) -> dict[str, object]:
         """Fetch quarterly income statement from AV; falls back to Polygon on failure."""
-        try:
-            response = await self._client.get(
-                _AV_BASE_URL,
-                params={
-                    "function": "INCOME_STATEMENT",
-                    "symbol": ticker,
-                    "apikey": self._api_key,
-                },
-                timeout=15.0,
-            )
-            response.raise_for_status()
-            data: dict[str, object] = response.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV INCOME_STATEMENT unavailable for %s — trying Polygon", ticker)
-                return await self._fetch_income_statement_polygon(ticker)
+        data = await fetch_alpha_vantage_cached(
+            self._client,
+            api_key=self._api_key,
+            function="INCOME_STATEMENT",
+            symbol=ticker,
+            timeout=15.0,
+        )
+        if data:
             return data
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            logger.debug("AV INCOME_STATEMENT request failed for %s — trying Polygon", ticker)
-            return await self._fetch_income_statement_polygon(ticker)
+        logger.debug("AV INCOME_STATEMENT unavailable for %s — trying Polygon", ticker)
+        return await self._fetch_income_statement_polygon(ticker)
 
     async def _fetch_earnings(self, ticker: str) -> dict[str, object]:
         """Fetch quarterly EPS history from AV; falls back to FMP on failure."""
-        try:
-            response = await self._client.get(
-                _AV_BASE_URL,
-                params={
-                    "function": "EARNINGS",
-                    "symbol": ticker,
-                    "apikey": self._api_key,
-                },
-                timeout=15.0,
-            )
-            response.raise_for_status()
-            data: dict[str, object] = response.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV EARNINGS unavailable for %s — trying FMP", ticker)
-                return await self._fetch_earnings_fmp(ticker)
+        data = await fetch_alpha_vantage_cached(
+            self._client,
+            api_key=self._api_key,
+            function="EARNINGS",
+            symbol=ticker,
+            timeout=15.0,
+        )
+        if data:
             return data
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            logger.debug("AV EARNINGS request failed for %s — trying FMP", ticker)
-            return await self._fetch_earnings_fmp(ticker)
+        logger.debug("AV EARNINGS unavailable for %s — trying FMP", ticker)
+        return await self._fetch_earnings_fmp(ticker)
 
     async def _fetch_income_statement_polygon(self, ticker: str) -> dict[str, object]:
         """Fetch quarterly income statement from Polygon and normalise to AV shape.

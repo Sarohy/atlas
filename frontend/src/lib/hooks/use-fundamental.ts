@@ -18,7 +18,8 @@ export function useFundamental(ticker: string) {
     queryKey: fundamentalKey(ticker),
     queryFn: () => fetchFundamental(ticker),
     enabled: ticker.trim().length >= 1,
-    staleTime: 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     retry: 1,
   });
 }

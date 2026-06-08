@@ -563,6 +563,68 @@ def _apply_dark_pool_quality_boost(
     return min(100, dp_score + _F4_DP_QUALITY_BOOST_POINTS)
 
 
+def _detect_covered_call_posture(alerts: list[dict[str, Any]]) -> bool:
+    """Return True when the options flow exhibits a covered-call management posture.
+
+    The pattern requires all three legs:
+    1. Protective put spread — at least 2 put legs each with both ask and bid
+       side premium (indicating a debit spread, not a naked put write).
+    2. Near-dated covered-call overwriting — a call leg whose bid premium
+       exceeds its ask premium by at least ``_F4_STRAT_OVERWRITE_BID_DOMINANCE``
+       and DTE ≤ ``_F4_STRAT_NEAR_DTE_MAX_DAYS``.
+    3. Long-dated LEAP accumulation — a call leg with DTE ≥
+       ``_F4_STRAT_LEAP_DTE_MIN_DAYS`` where ask dominates bid (paid up for
+       long-dated optionality).
+
+    Pure function — no I/O, no side effects. Used by ``_build_response_v2``
+    to populate ``OptionsFlowResponse.options_strategy_type``.
+    """
+    put_legs_with_both_sides = 0
+    put_ask_total = 0.0
+    put_bid_total = 0.0
+    has_overwrite = False
+    has_leap = False
+
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask_prem = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        bid_prem = _safe_float(rec.get("total_bid_side_prem")) or 0.0
+        dte = _alert_dte_days(rec)
+
+        if opt_type == "put":
+            if ask_prem > 0 and bid_prem > 0:
+                put_legs_with_both_sides += 1
+            put_ask_total += ask_prem
+            put_bid_total += bid_prem
+            continue
+
+        if opt_type != "call":
+            continue
+
+        if (
+            dte is not None
+            and dte <= _F4_STRAT_NEAR_DTE_MAX_DAYS
+            and bid_prem >= ask_prem * _F4_STRAT_OVERWRITE_BID_DOMINANCE
+            and bid_prem > 0
+        ):
+            has_overwrite = True
+
+        if (
+            dte is not None
+            and dte >= _F4_STRAT_LEAP_DTE_MIN_DAYS
+            and ask_prem > bid_prem
+            and ask_prem > 0
+        ):
+            has_leap = True
+
+    has_protective_put_spread = (
+        put_legs_with_both_sides >= _F4_STRAT_MIN_PUT_LEGS
+        and put_ask_total > 0
+        and put_bid_total > 0
+    )
+    return has_protective_put_spread and has_overwrite and has_leap
+
+
 # ---------------------------------------------------------------------------
 # Response builders
 # ---------------------------------------------------------------------------
@@ -588,6 +650,8 @@ def _build_excluded_response(ticker: str) -> OptionsFlowResponse:
         dark_pool_large_buy_count=0,
         largest_dark_pool_buy_usd=None,
         largest_options_buy_usd=None,
+        dark_pool_settlement_ratio=None,
+        options_strategy_type=None,
     )
 
 
@@ -651,6 +715,20 @@ def _build_response_v2(
     elif source == _F4_SOURCE_OPT_ONLY:
         gap_reason = "Dark-pool data unavailable — score based on options only."
 
+    # Settlement ratio — computed from the same windowed set used for scoring.
+    dp_settlement_ratio: float | None = (
+        _dark_pool_settlement_ratio(windowed_dp) if windowed_dp else None
+    )
+
+    # Options strategy type — detect covered-call posture in windowed alerts.
+    strategy_type: str | None = None
+    if opt_trades is not None:
+        windowed_opts_for_strategy = _filter_to_recent_sessions(
+            opt_trades, timestamp_key="created_at"
+        )
+        if _detect_covered_call_posture(windowed_opts_for_strategy):
+            strategy_type = _F4_STRATEGY_COVERED_CALL_POSTURE
+
     return OptionsFlowResponse(
         ticker=ticker,
         f4_score=f4_raw,
@@ -669,6 +747,8 @@ def _build_response_v2(
         dark_pool_large_buy_count=dp_large_buys,
         largest_dark_pool_buy_usd=largest_dp_buy,
         largest_options_buy_usd=largest_opt_buy,
+        dark_pool_settlement_ratio=dp_settlement_ratio,
+        options_strategy_type=strategy_type,
     )
 
 
@@ -867,6 +947,24 @@ _F4_DP_QUALITY_MIN_NET_FLOW_USD: Final[float] = 10_000_000.0
 _F4_DP_QUALITY_MAX_OPTIONS_ABS_USD: Final[float] = 5_000_000.0
 _F4_DP_QUALITY_BOOST_POINTS: Final[int] = 10
 
+# Weighted DP/options blend constants.
+# Applied when dark_pool_score ≥ _F4_DP_DOMINANT_SCORE_MIN AND options_flow_score
+# falls inside the neutral band [_F4_OPT_NEUTRAL_LOW, _F4_OPT_NEUTRAL_HIGH].
+# Rationale: a neutral options score does NOT indicate bearish conviction — it
+# often reflects a covered-call management posture (overwriting + LEAP
+# accumulation) where the net premium flows cancel.  Letting a truly neutral
+# options score drag a 100-point DP reading down 25 pts misrepresents signal
+# quality.  The 65/35 weighting reflects that DP block activity from a single
+# counterparty is a higher-conviction institutional signal than mixed options flow.
+_F4_DP_DOMINANT_SCORE_MIN: Final[int] = 80
+_F4_OPT_NEUTRAL_BAND_LOW: Final[int] = 45
+_F4_OPT_NEUTRAL_BAND_HIGH: Final[int] = 55
+_F4_DP_DOMINANT_WEIGHT: Final[float] = 0.65
+_F4_OPT_DOMINANT_WEIGHT: Final[float] = 0.35
+
+# Options strategy type labels.
+_F4_STRATEGY_COVERED_CALL_POSTURE: Final[str] = "COVERED_CALL_POSTURE"
+
 # Data-source labels for F4 response.
 _F4_SOURCE_BOTH: Final[str] = "BOTH"
 _F4_SOURCE_DP_ONLY: Final[str] = "DARK_POOL_ONLY"
@@ -989,8 +1087,25 @@ def _combine_f4_scores(
     dp_score: int | None,
     opt_score: int | None,
 ) -> tuple[int, str]:
-    """Combine dark-pool + options scores into a single F4_raw + source label."""
+    """Combine dark-pool + options scores into a single F4_raw + source label.
+
+    When both sources are available the default is a 50/50 average.  One
+    exception applies: when the dark-pool score is strong (≥ 80) and the
+    options score is genuinely neutral (45–55) the blend shifts to 65/35
+    (DP / options).  A neutral options reading in that regime most often
+    reflects a covered-call management posture rather than a lack of
+    conviction, so giving it equal weight would systematically understate
+    the institutional block-buying signal.
+    """
     if dp_score is not None and opt_score is not None:
+        if (
+            dp_score >= _F4_DP_DOMINANT_SCORE_MIN
+            and _F4_OPT_NEUTRAL_BAND_LOW <= opt_score <= _F4_OPT_NEUTRAL_BAND_HIGH
+        ):
+            blended = round(
+                dp_score * _F4_DP_DOMINANT_WEIGHT + opt_score * _F4_OPT_DOMINANT_WEIGHT
+            )
+            return (blended, _F4_SOURCE_BOTH)
         return (round((dp_score + opt_score) / 2), _F4_SOURCE_BOTH)
     if dp_score is not None:
         return (dp_score, _F4_SOURCE_DP_ONLY)

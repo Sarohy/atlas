@@ -35,6 +35,7 @@ from atlas.schemas.analyst import (
     PtUpsideIndicator,
     RecentUpgradesIndicator,
 )
+from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
 
 # ---------------------------------------------------------------------------
 # F3 factor weight (in the conviction score formula)
@@ -772,16 +773,12 @@ class AnalystService:
             if overview_task is not None:
                 payload: dict[str, Any] = await overview_task
             else:
-                resp = await client.get(
-                    "https://www.alphavantage.co/query",
-                    params={
-                        "function": "OVERVIEW",
-                        "symbol": ticker.upper(),
-                        "apikey": self._av_key,
-                    },
+                payload = await fetch_alpha_vantage_cached(
+                    client,
+                    api_key=self._av_key,
+                    function="OVERVIEW",
+                    symbol=ticker,
                 )
-                resp.raise_for_status()
-                payload = resp.json()
 
             if not payload or "Note" in payload or "Information" in payload:
                 return {}

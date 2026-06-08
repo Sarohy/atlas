@@ -105,3 +105,20 @@ class OptionsFlowResponse(BaseModel):
     largest_options_buy_usd: float | None = Field(
         default=None, description="Largest single NEW_BULL or PUT_SELL options premium (USD)."
     )
+
+    # ---- Signal quality / strategy context (new) -------------------------
+    dark_pool_settlement_ratio: float | None = Field(
+        default=None,
+        description=(
+            "Fraction of dark-pool prints classified as SETTLEMENT over the 5-session window. "
+            "Low ratios (< 0.20) indicate directional, non-settlement block activity."
+        ),
+    )
+    options_strategy_type: str | None = Field(
+        default=None,
+        description=(
+            "Detected options strategy posture: COVERED_CALL_POSTURE when protective puts + "
+            "near-dated covered-call overwriting + LEAP accumulation are all present; "
+            "None otherwise."
+        ),
+    )

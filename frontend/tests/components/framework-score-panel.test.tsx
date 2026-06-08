@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameworkScorePanel } from '@/components/frameworks/framework-score-panel';
 
@@ -11,6 +11,8 @@ function makeWrapper() {
   );
   return Wrapper;
 }
+
+const mockState = vi.hoisted(() => ({ f8BuyingBonus: 0 }));
 
 vi.mock('@/lib/hooks/use-framework-score', () => ({
   useFrameworkScore: () => ({
@@ -69,7 +71,7 @@ vi.mock('@/lib/hooks/use-framework-score', () => ({
       action_tone: 'tone-yellow',
       f5_blocked: false,
       f5_raw_score: null,
-      f8_buying_bonus: 0,
+      f8_buying_bonus: mockState.f8BuyingBonus,
       f8_clustered_selling_note: null,
       flags: [],
       degraded: false,
@@ -119,6 +121,10 @@ vi.mock('@/lib/hooks/use-framework8', () => ({
 }));
 
 describe('FrameworkScorePanel', () => {
+  beforeEach(() => {
+    mockState.f8BuyingBonus = 0;
+  });
+
   it('renders factor rows from the same F1-F5 scores shown in the detailed cards', async () => {
     render(
       <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={0} />,
@@ -154,5 +160,25 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-regime-adjusted-score')).toHaveTextContent('67');
     expect(screen.getByText('Framework score before regime')).toBeInTheDocument();
     expect(screen.getByText('Displayed after regime modifier')).toBeInTheDocument();
+  });
+
+  it('folds the F8 insider-buying bonus into the before-regime score (matches backend)', async () => {
+    // raw_total from overrides = 71.6. With a +5 F8 bonus the backend computes
+    // round(71.6 + 5) = 77 before regime; the frontend must match rather than
+    // showing the advertised "+5" caption without applying it (round(71.6)=72).
+    mockState.f8BuyingBonus = 5;
+
+    render(
+      <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={-5} />,
+      { wrapper: makeWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-f8-bonus-note')).toHaveTextContent('+5');
+    expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('77');
+    expect(screen.getByTestId('fws-regime-adjusted-score')).toHaveTextContent('72');
   });
 });

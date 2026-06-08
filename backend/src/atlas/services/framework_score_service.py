@@ -39,6 +39,7 @@ from atlas.services.framework8_service import Framework8Service
 from atlas.services.framework9_service import evaluate_framework9
 from atlas.services.fundamental_service import FundamentalService
 from atlas.services.momentum_service import MomentumService
+from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
 
 logger = logging.getLogger(__name__)
 
@@ -295,24 +296,13 @@ class FrameworkScoreService:
         than once per framework-score request regardless of how many factor
         services need it.
         """
-        try:
-            resp = await client.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": function,
-                    "symbol": ticker.upper(),
-                    "apikey": self._alphavantage_key,
-                },
-                timeout=15.0,
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV %s rate-limited for %s (shared prefetch)", function, ticker)
-                return {}
-            return data
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return {}
+        return await fetch_alpha_vantage_cached(
+            client,
+            api_key=self._alphavantage_key,
+            function=function,
+            symbol=ticker,
+            timeout=15.0,
+        )
 
     async def _fetch_f2(
         self,

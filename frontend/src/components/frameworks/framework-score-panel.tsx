@@ -47,15 +47,6 @@ type FrameworkScorePanelProps = {
   onPreviewDetails: () => void;
   /** Score delta from Framework 2 regime modifier (-10, -5, 0, +5). */
   regimeModifier: number;
-  /**
-   * Authoritative post-regime conviction score from the backend
-   * (`/api/v1/regime-modifier/{ticker}.adjusted_score`). When provided this
-   * value is rendered as the headline score — same field every other
-   * F1-derived framework (F6/F7/F10) reads, guaranteeing display parity.
-   * Falls back to `clamp(final_score + regimeModifier)` when null/undefined
-   * (e.g. regime endpoint still loading or errored).
-   */
-  regimeAdjustedScore?: number | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -73,7 +64,6 @@ export function FrameworkScorePanel({
   ticker,
   onPreviewDetails,
   regimeModifier,
-  regimeAdjustedScore = null,
 }: FrameworkScorePanelProps) {
   const { data: rawData, isLoading, isError, error } = useFrameworkScore(ticker);
   const { data: rawMomentum } = useMomentum(ticker);
@@ -332,12 +322,14 @@ function FrameworkScoreContent({
   f4GapMessage: string | null;
 }) {
   // Headline is always computed locally from the individual-hook-based
-  // `data.final_score` + the regime delta.  The backend `adjusted_score`
-  // from the regime endpoint is NOT used here because it is derived from
-  // the aggregate framework-score endpoint's base (a separate computation
-  // that can diverge from the per-factor hook values shown in the table).
-  // Using the local computation guarantees the three numbers reconcile:
-  //   factor rows → raw_total → pre-regime → headline.
+  // `data.final_score` (raw_total + F8 bonus) + the regime delta. The backend
+  // regime endpoint's `adjusted_score` is intentionally NOT consumed here — it
+  // is derived from the aggregate framework-score endpoint's base, a separate
+  // computation that can diverge from the per-factor hook values shown in the
+  // table. Using the local computation guarantees the three numbers reconcile:
+  //   factor rows → raw_total (+F8) → pre-regime → headline.
+  // (This is why there is no `regimeAdjustedScore` prop — that path was removed
+  // deliberately; do not re-add it without resolving the divergence above.)
   const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
   const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
 
@@ -478,7 +470,12 @@ function buildDisplayFrameworkScore(
 ): FrameworkScoreResponse {
   const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
   const rawTotal = calculateRawTotal(factors);
-  const finalScore = calculateFinalScore(rawTotal);
+  // Mirror the backend: the F8 insider-buying bonus is added to the raw total
+  // before rounding/clamping (atlas/services/framework_score_service.py —
+  // `_compute_final_score(raw_total + f8_buying_bonus)`). Without this the
+  // "+N pts added to raw total" caption is shown but never reflected in the
+  // before-regime headline, leaving the panel internally inconsistent.
+  const finalScore = calculateFinalScore(rawTotal + (data.f8_buying_bonus ?? 0));
   // F2 regime modifier RE-ENABLED — action label maps from regime-adjusted score
   // so the pill matches the headline number.
   const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));

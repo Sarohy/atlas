@@ -3,8 +3,10 @@
 import { useState } from 'react';
 
 import { useWatchlist, useRemoveFromWatchlist, useSyncWatchlist } from '@/lib/hooks/use-watchlist';
+import { useTickers } from '@/lib/hooks/use-tickers';
 import type { WatchlistItemResponse } from '@/lib/schemas/watchlist';
 import { AddWatchlistDialog } from './add-watchlist-dialog';
+import { AddToPortfolioDialog } from './add-to-portfolio-dialog';
 
 /** Number of skeleton rows shown while loading. */
 const SKELETON_ROW_COUNT = 4;
@@ -62,9 +64,12 @@ function fmtBeta(value: number | null | undefined): { text: string; cls: string 
 
 interface RowProps {
   item: WatchlistItemResponse;
+  /** True when this ticker already exists in the portfolio (disables the add action). */
+  inPortfolio: boolean;
+  onAddToPortfolio: (item: WatchlistItemResponse) => void;
 }
 
-function WatchlistRow({ item }: RowProps) {
+function WatchlistRow({ item, inPortfolio, onAddToPortfolio }: RowProps) {
   const { mutate: remove, isPending } = useRemoveFromWatchlist();
   const pct = fmtPct(item.day_change_pct);
   const chg = fmtChange(item.day_change);
@@ -86,13 +91,23 @@ function WatchlistRow({ item }: RowProps) {
         {beta.text}
       </td>
       <td className="px-4 py-3 text-right">
-        <button
-          onClick={() => remove(item.id)}
-          disabled={isPending}
-          className="px-3 py-1 text-xs text-[#e05c5c] border border-[#3f2d2d] rounded hover:bg-[#2a1a1a] transition-colors disabled:opacity-40"
-        >
-          {isPending ? '…' : 'Remove'}
-        </button>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => remove(item.id)}
+            disabled={isPending}
+            className="px-3 py-1 text-xs text-[#e05c5c] border border-[#3f2d2d] rounded hover:bg-[#2a1a1a] transition-colors disabled:opacity-40"
+          >
+            {isPending ? '…' : 'Remove'}
+          </button>
+          <button
+            onClick={() => onAddToPortfolio(item)}
+            disabled={inPortfolio}
+            title={inPortfolio ? 'Already in portfolio' : 'Add this ticker to the portfolio'}
+            className="px-3 py-1 text-xs text-[#4a90d9] border border-[#2d3f5c] rounded hover:bg-[#1e2a3f] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {inPortfolio ? 'In portfolio' : 'Add to portfolio'}
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -100,8 +115,14 @@ function WatchlistRow({ item }: RowProps) {
 
 export function WatchlistTable() {
   const { data: items, isLoading } = useWatchlist();
+  const { data: portfolioTickers } = useTickers();
   const { mutate: sync, isPending: syncing } = useSyncWatchlist();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [addToPortfolioItem, setAddToPortfolioItem] = useState<WatchlistItemResponse | null>(null);
+
+  const portfolioSymbols = new Set(
+    (portfolioTickers ?? []).map((t) => t.ticker.toUpperCase()),
+  );
 
   const lastSynced =
     items
@@ -171,7 +192,14 @@ export function WatchlistTable() {
             {isLoading ? (
               Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => <SkeletonRow key={i} />)
             ) : items && items.length > 0 ? (
-              items.map((item) => <WatchlistRow key={item.id} item={item} />)
+              items.map((item) => (
+                <WatchlistRow
+                  key={item.id}
+                  item={item}
+                  inPortfolio={portfolioSymbols.has(item.ticker.toUpperCase())}
+                  onAddToPortfolio={setAddToPortfolioItem}
+                />
+              ))
             ) : (
               <tr>
                 <td colSpan={COLUMN_COUNT} className="px-4 py-12 text-center text-[#4a5568]">
@@ -184,6 +212,10 @@ export function WatchlistTable() {
       </div>
 
       <AddWatchlistDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <AddToPortfolioDialog
+        item={addToPortfolioItem}
+        onClose={() => setAddToPortfolioItem(null)}
+      />
     </>
   );
 }

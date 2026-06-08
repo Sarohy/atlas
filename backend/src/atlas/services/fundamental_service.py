@@ -35,17 +35,19 @@ from typing import Any, Final
 import httpx
 import yfinance as yf  # type: ignore[import-untyped]
 
-logger = logging.getLogger(__name__)
-
 from atlas.schemas.fundamental import (
     AltmanZScoreIndicator,
     DebtEquityIndicator,
     F5Grade,
     FreeCashFlowIndicator,
     FundamentalResponse,
+    GrossMarginIndicator,
     InsiderActivityIndicator,
     InstitutionalOwnershipIndicator,
 )
+from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # F5 internal weights
@@ -53,8 +55,9 @@ from atlas.schemas.fundamental import (
 
 _W_INSIDER: Final[float] = 0.30
 _W_ALTMAN: Final[float] = 0.25
-_W_FCF: Final[float] = 0.20
-_W_DEBT: Final[float] = 0.15
+_W_FCF: Final[float] = 0.15      # reduced from 0.20 to make room for gross margin
+_W_DEBT: Final[float] = 0.10      # reduced from 0.15 to make room for gross margin
+_W_GM: Final[float] = 0.10        # new: gross margin sub-indicator
 _W_INST: Final[float] = 0.10
 
 # ---------------------------------------------------------------------------
@@ -64,6 +67,41 @@ _W_INST: Final[float] = 0.10
 _CAP_ALTMAN_GREY: Final[int] = 75        # Altman Z in grey zone 1.8–2.0
 _OFFICER_SELL_THRESHOLD: Final[float] = 1_000_000.0
 _CEO_CFO_MEGA_THRESHOLD: Final[float] = 10_000_000.0
+
+# Insider selling score constants (Fix 1).
+# Selling is penalised when above _OFFICER_SELL_THRESHOLD; CEO/CFO sales above
+# _CEO_CFO_MEGA_THRESHOLD trigger the hard floor.
+_SCORE_INSIDER_NO_ACTIVITY: Final[int] = 70
+_SCORE_INSIDER_SMALL_SALE: Final[int] = 55
+_SCORE_INSIDER_MULTIPLE_SALES: Final[int] = 45  # recalibrated from 30 — real signal but less severe than CEO_MEGA_SALE
+_SCORE_INSIDER_CEO_MEGA_SALE: Final[int] = 20
+
+# Routine diversification: CEO/CFO "mega sale" is negligible relative to FCF.
+# When ceo_cfo_sell / fcf_current < this ratio AND FCF is positive, the selling
+# is routine executive diversification — no conviction-loss signal.
+# MU pattern: $59.9M CEO sell / $6.5B FCF = 0.9% → ROUTINE_DIVERSIFICATION.
+_INSIDER_FCF_ROUTINE_RATIO: Final[float] = 0.03      # 3% of annual FCF
+_SCORE_INSIDER_ROUTINE_DIVERSIFICATION: Final[int] = 70  # same as NO_ACTIVITY baseline
+_LABEL_ROUTINE_DIVERSIFICATION: Final[str] = "ROUTINE_DIVERSIFICATION"
+
+# FCF large-improvement threshold (Fix 2).
+# When negative FCF improves by ≥ 50% in absolute magnitude it is scored at
+# NEGATIVE_LARGE_IMPROVEMENT (50) rather than the generic NEGATIVE_IMPROVING (40).
+# This distinguishes structured investment-cycle burns from uncontrolled cash drain.
+_FCF_LARGE_IMPROVE_THRESHOLD: Final[float] = 0.50
+_SCORE_FCF_NEG_LARGE_IMPROVE: Final[int] = 50
+
+# Gross margin scoring thresholds (Fix 3).
+_GM_TIER_HIGH: Final[float] = 0.70
+_GM_TIER_MID_HIGH: Final[float] = 0.50
+_GM_TIER_MID: Final[float] = 0.30
+_GM_TIER_LOW: Final[float] = 0.10
+_SCORE_GM_HIGH: Final[int] = 100
+_SCORE_GM_MID_HIGH: Final[int] = 80
+_SCORE_GM_MID: Final[int] = 60
+_SCORE_GM_LOW: Final[int] = 40
+_SCORE_GM_FLOOR: Final[int] = 20
+_SCORE_GM_UNKNOWN: Final[int] = 60
 
 # Altman Z zone thresholds
 _Z_SAFE: Final[float] = 3.0
@@ -95,18 +133,68 @@ def _score_insider_activity(
 ) -> tuple[int, str]:
     """Score insider activity and derive the activity label.
 
-    Insider selling is disregarded — only buying is a meaningful signal.
-    Selling is treated as no activity regardless of amount or who sold.
+    Buying is always the strongest positive signal (100 / NET_BUYING).
+    Selling above defined thresholds reduces the score from the neutral
+    baseline of 70 (NO_ACTIVITY) to reflect distribution risk:
+
+      Net buying (buys > 0)            → 100  NET_BUYING
+      No activity                      →  70  NO_ACTIVITY
+      Sale < $1M (single, small)       →  70  NO_ACTIVITY  (routine; not penalised)
+      Sale ≥ $1M (single event)        →  55  SMALL_SALE
+      ≥ 2 separate sale events         →  30  MULTIPLE_SALES
+      CEO/CFO sale > $10M              →  20  CEO_MEGA_SALE
+
+    Buying and selling can coexist — if net_buy > 0 the score is always
+    NET_BUYING regardless of selling.
 
     Returns (score, label) tuple.
-
-    Guide:
-      Net buying (buys > 0)  → 100  NET_BUYING
-      No buying activity     →  70  NO_ACTIVITY
     """
     if net_buy > 0:
         return 100, "NET_BUYING"
-    return 70, "NO_ACTIVITY"
+    # CEO/CFO mega-sale takes highest priority among selling penalties.
+    if ceo_cfo_sell >= _CEO_CFO_MEGA_THRESHOLD:
+        return _SCORE_INSIDER_CEO_MEGA_SALE, "CEO_MEGA_SALE"
+    # Multiple distinct sale events.
+    if sell_transaction_count >= 2 and net_sell >= _OFFICER_SELL_THRESHOLD:
+        return _SCORE_INSIDER_MULTIPLE_SALES, "MULTIPLE_SALES"
+    # Single sale above the $1M officer threshold.
+    if net_sell >= _OFFICER_SELL_THRESHOLD:
+        return _SCORE_INSIDER_SMALL_SALE, "SMALL_SALE"
+    return _SCORE_INSIDER_NO_ACTIVITY, "NO_ACTIVITY"
+
+
+def _apply_fcf_routine_modifier(
+    indicator: "InsiderActivityIndicator",
+    fcf_current: float | None,
+) -> "InsiderActivityIndicator":
+    """Moderate CEO_MEGA_SALE penalty when the sell is trivially small vs FCF.
+
+    At large-cap companies with strong positive FCF, a CEO selling an absolute
+    "mega" amount can still be routine diversification when it represents < 3%
+    of annual free cash flow — no meaningful conviction-loss signal.
+
+    Conditions for upgrade to ROUTINE_DIVERSIFICATION (score 70):
+      1. indicator.activity_label == "CEO_MEGA_SALE"
+      2. fcf_current > 0 (positive FCF — selling while burning cash stays penalised)
+      3. indicator.ceo_cfo_sell_value is not None
+      4. ceo_cfo_sell_value / fcf_current < _INSIDER_FCF_ROUTINE_RATIO (3%)
+
+    All other labels are returned unchanged.
+    """
+    if indicator.activity_label != "CEO_MEGA_SALE":
+        return indicator
+    if fcf_current is None or fcf_current <= 0:
+        return indicator
+    if indicator.ceo_cfo_sell_value is None:
+        return indicator
+    if indicator.ceo_cfo_sell_value / fcf_current >= _INSIDER_FCF_ROUTINE_RATIO:
+        return indicator
+    return indicator.model_copy(
+        update={
+            "score": _SCORE_INSIDER_ROUTINE_DIVERSIFICATION,
+            "activity_label": _LABEL_ROUTINE_DIVERSIFICATION,
+        }
+    )
 
 
 def _score_altman_z(z: float | None) -> tuple[int, str]:
@@ -171,8 +259,14 @@ def _score_fcf(fcf_current: float | None, fcf_prior: float | None) -> tuple[int,
         return 80, "POSITIVE_FLAT"
     if positive and declining:
         return 60, "POSITIVE_DECLINING"
-    # Negative FCF
+    # Negative FCF — check for a large improvement in absolute magnitude.
+    # A ≥ 50% reduction in the absolute loss distinguishes a structured
+    # investment-cycle burn from uncontrolled cash drain.
     improving = fcf_current > fcf_prior  # less negative or turning positive
+    if improving and fcf_prior != 0:
+        abs_improvement = (abs(fcf_prior) - abs(fcf_current)) / abs(fcf_prior)
+        if abs_improvement >= _FCF_LARGE_IMPROVE_THRESHOLD:
+            return _SCORE_FCF_NEG_LARGE_IMPROVE, "NEGATIVE_LARGE_IMPROVEMENT"
     if improving:
         return 40, "NEGATIVE_IMPROVING"
     return 20, "NEGATIVE_WORSENING"
@@ -200,6 +294,33 @@ def _score_debt_equity(ratio: float | None) -> int:
     if ratio < 2.0:
         return 50
     return 25
+
+
+def _score_gross_margin(gross_margin: float | None) -> int:
+    """Map gross margin fraction to a 0-100 raw score.
+
+    Gross margin = (Revenue - COGS) / Revenue, expressed as a fraction
+    in [0, 1] (or negative for loss-making revenue lines).
+
+    Guide:
+      \u2265 70%      \u2192 100
+      50\u201370%     \u2192  80
+      30\u201350%     \u2192  60
+      10\u201330%     \u2192  40
+      < 10%     \u2192  20  (includes negative margins)
+      Unknown   \u2192  60  (neutral)
+    """
+    if gross_margin is None:
+        return _SCORE_GM_UNKNOWN
+    if gross_margin >= _GM_TIER_HIGH:
+        return _SCORE_GM_HIGH
+    if gross_margin >= _GM_TIER_MID_HIGH:
+        return _SCORE_GM_MID_HIGH
+    if gross_margin >= _GM_TIER_MID:
+        return _SCORE_GM_MID
+    if gross_margin >= _GM_TIER_LOW:
+        return _SCORE_GM_LOW
+    return _SCORE_GM_FLOOR
 
 
 def _score_institutional(ownership_pct: float | None) -> tuple[int, str]:
@@ -361,6 +482,14 @@ class FundamentalService:
         # ---- Free Cash Flow --------------------------------------------------
         fcf_ind = self._build_fcf_indicator(cf)
 
+        # ---- Routine diversification modifier --------------------------------
+        # Moderate CEO_MEGA_SALE penalty when the sell is < 3% of positive FCF.
+        # Must be applied after both insider and FCF indicators are computed.
+        insider_ind = _apply_fcf_routine_modifier(insider_ind, fcf_ind.fcf_current)
+
+        # ---- Gross Margin ----------------------------------------------------
+        gm_ind = self._build_gross_margin_indicator(inc)
+
         # ---- Debt / Equity ---------------------------------------------------
         de_ind = self._build_debt_equity_indicator(bs)
 
@@ -372,6 +501,7 @@ class FundamentalService:
             insider_ind.score * _W_INSIDER
             + altman_ind.score * _W_ALTMAN
             + fcf_ind.score * _W_FCF
+            + gm_ind.score * _W_GM
             + de_ind.score * _W_DEBT
             + inst_ind.score * _W_INST
         )
@@ -402,6 +532,7 @@ class FundamentalService:
             insider_activity=insider_ind,
             altman_z=altman_ind,
             free_cash_flow=fcf_ind,
+            gross_margin=gm_ind,
             debt_equity=de_ind,
             institutional_ownership=inst_ind,
             insider_cap=insider_cap,
@@ -620,19 +751,13 @@ class FundamentalService:
     async def _fetch_balance_sheet(
         self, client: httpx.AsyncClient, ticker: str
     ) -> dict[str, Any]:
-        try:
-            resp = await client.get(
-                _AV_BASE,
-                params={"function": "BALANCE_SHEET", "symbol": ticker, "apikey": self._av_key},
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV BALANCE_SHEET rate-limited for %s", ticker)
-                return {}
-            return data
-        except Exception:
-            return {}
+        return await fetch_alpha_vantage_cached(
+            client,
+            api_key=self._av_key,
+            function="BALANCE_SHEET",
+            symbol=ticker,
+            timeout=_TIMEOUT,
+        )
 
     # ------------------------------------------------------------------
     # Alpha Vantage — income statement
@@ -641,23 +766,13 @@ class FundamentalService:
     async def _fetch_income_statement(
         self, client: httpx.AsyncClient, ticker: str
     ) -> dict[str, Any]:
-        try:
-            resp = await client.get(
-                _AV_BASE,
-                params={
-                    "function": "INCOME_STATEMENT",
-                    "symbol": ticker,
-                    "apikey": self._av_key,
-                },
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV INCOME_STATEMENT rate-limited for %s", ticker)
-                return {}
-            return data
-        except Exception:
-            return {}
+        return await fetch_alpha_vantage_cached(
+            client,
+            api_key=self._av_key,
+            function="INCOME_STATEMENT",
+            symbol=ticker,
+            timeout=_TIMEOUT,
+        )
 
     # ------------------------------------------------------------------
     # Alpha Vantage — cash flow
@@ -666,19 +781,13 @@ class FundamentalService:
     async def _fetch_cash_flow(
         self, client: httpx.AsyncClient, ticker: str
     ) -> dict[str, Any]:
-        try:
-            resp = await client.get(
-                _AV_BASE,
-                params={"function": "CASH_FLOW", "symbol": ticker, "apikey": self._av_key},
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV CASH_FLOW rate-limited for %s", ticker)
-                return {}
-            return data
-        except Exception:
-            return {}
+        return await fetch_alpha_vantage_cached(
+            client,
+            api_key=self._av_key,
+            function="CASH_FLOW",
+            symbol=ticker,
+            timeout=_TIMEOUT,
+        )
 
     # ------------------------------------------------------------------
     # Alpha Vantage — overview (market cap, institutional ownership)
@@ -687,19 +796,13 @@ class FundamentalService:
     async def _fetch_overview(
         self, client: httpx.AsyncClient, ticker: str
     ) -> dict[str, Any]:
-        try:
-            resp = await client.get(
-                _AV_BASE,
-                params={"function": "OVERVIEW", "symbol": ticker, "apikey": self._av_key},
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json()
-            if "Note" in data or "Information" in data:
-                logger.debug("AV OVERVIEW rate-limited for %s", ticker)
-                return {}
-            return data
-        except Exception:
-            return {}
+        return await fetch_alpha_vantage_cached(
+            client,
+            api_key=self._av_key,
+            function="OVERVIEW",
+            symbol=ticker,
+            timeout=_TIMEOUT,
+        )
 
     # ------------------------------------------------------------------
     # Indicator builders
@@ -841,6 +944,15 @@ class FundamentalService:
             weight=_W_FCF,
         )
 
+    def _build_gross_margin_indicator(self, inc: dict[str, float | None]) -> GrossMarginIndicator:
+        """Build the gross margin sub-indicator from the extracted income data."""
+        gm = inc.get("gross_margin")
+        return GrossMarginIndicator(
+            gross_margin=round(gm, 4) if gm is not None else None,
+            score=_score_gross_margin(gm),
+            weight=_W_GM,
+        )
+
     def _build_debt_equity_indicator(
         self, bs: dict[str, float | None]
     ) -> DebtEquityIndicator:
@@ -950,21 +1062,63 @@ class FundamentalService:
         reports: list[dict[str, Any]] = data.get("quarterlyReports", [])
         ttm_rev: float = 0.0
         ttm_op: float = 0.0
+        ttm_gross: float = 0.0
         count = 0
+        # Gross margin uses only the most recent quarter (reports[0]) not TTM.
+        # For hyper-growth companies, legacy quarters have vastly different
+        # revenue bases, causing TTM GM to understate current profitability.
+        gm_rev: float | None = None
+        gm_gross: float | None = None
 
-        for rec in reports[:4]:
+        for i, rec in enumerate(reports[:4]):
             rev = _safe_float(rec.get("totalRevenue"))
             # Use ebit if available, else operatingIncome
             op = _safe_float(rec.get("ebit")) or _safe_float(rec.get("operatingIncome"))
+            gp = _safe_float(rec.get("grossProfit"))
             if rev is not None:
                 ttm_rev += rev
                 count += 1
             if op is not None:
                 ttm_op += op
+            if i == 0:
+                # Capture most recent quarter gross profit and revenue.
+                gm_rev = rev
+                gm_gross = gp
+
+        # Compute most-recent-quarter gross margin, then apply an anomaly guard:
+        # if the current quarter's GM is >20pp BELOW the median of the 3 prior
+        # quarters, the provider likely has a data error (e.g. D&A mis-classified
+        # into COGS).  In that case fall back to the prior-quarter median — the
+        # same correction used by the F2 earnings service (SF2 anomaly guard).
+        def _gm_ratio(rec: dict[str, Any]) -> float | None:
+            rev_r = _safe_float(rec.get("totalRevenue"))
+            gp_r = _safe_float(rec.get("grossProfit"))
+            if rev_r is not None and rev_r > 0 and gp_r is not None:
+                return gp_r / rev_r
+            return None
+
+        gross_margin: float | None = None
+        if gm_rev is not None and gm_rev > 0 and gm_gross is not None:
+            gross_margin = gm_gross / gm_rev
+
+        if gross_margin is not None and len(reports) >= 4:
+            prior_gms = [_gm_ratio(reports[i]) for i in range(1, 4)]
+            prior_valid = sorted(x for x in prior_gms if x is not None)
+            if prior_valid:
+                prior_median = prior_valid[len(prior_valid) // 2]
+                if prior_median - gross_margin > 0.20:
+                    logger.warning(
+                        "F5 gross margin anomaly: Q1 GM %.1f%% is >20pp below "
+                        "prior-quarter median %.1f%% — using median as corrected value",
+                        gross_margin * 100,
+                        prior_median * 100,
+                    )
+                    gross_margin = prior_median
 
         return {
             "ttm_revenue": ttm_rev if count > 0 else None,
             "ttm_operating_income": ttm_op if count > 0 else None,
+            "gross_margin": gross_margin,
         }
 
     @staticmethod

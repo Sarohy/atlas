@@ -40,17 +40,17 @@ class TestScoreInsiderActivity:
         assert score == 70
         assert label == "NO_ACTIVITY"
 
-    def test_selling_only_returns_70_no_activity(self) -> None:
-        # Selling is disregarded — treated as no activity
+    def test_selling_only_returns_penalty_when_above_threshold(self) -> None:
+        # Multiple sales >= $1M total → MULTIPLE_SALES → 45 (recalibrated from 30)
         score, label = _score_insider_activity(0.0, 5_000_000, 3, 0.0)
-        assert score == 70
-        assert label == "NO_ACTIVITY"
+        assert score == 45
+        assert label == "MULTIPLE_SALES"
 
-    def test_ceo_mega_sale_disregarded(self) -> None:
-        # CEO/CFO mega-sale no longer penalised
+    def test_ceo_mega_sale_scores_20(self) -> None:
+        # CEO/CFO sale > $10M is now penalised → CEO_MEGA_SALE → 20
         score, label = _score_insider_activity(0.0, 60_000_000, 1, 60_000_000)
-        assert score == 70
-        assert label == "NO_ACTIVITY"
+        assert score == 20
+        assert label == "CEO_MEGA_SALE"
 
     def test_buying_plus_selling_returns_100(self) -> None:
         # Buying still scores 100 even when there is also selling
@@ -312,21 +312,21 @@ class TestBuildInsiderIndicatorFromYfData:
             {"value": 60_000_000.0, "transaction_type": "sale", "is_officer": True, "is_ceo_cfo": True},
         ]
         ind = svc._build_insider_indicator_from_yf_data(rows)
-        # Selling is disregarded — treated as no activity
-        assert ind.score == 70
-        assert ind.activity_label == "NO_ACTIVITY"
+        # CEO/CFO sale > $10M is penalised → CEO_MEGA_SALE → 20
+        assert ind.score == 20
+        assert ind.activity_label == "CEO_MEGA_SALE"
         assert ind.ceo_cfo_sell_value == pytest.approx(60_000_000.0)
 
-    def test_multiple_officer_sales_scores_30(self) -> None:
+    def test_multiple_officer_sales_scores_45(self) -> None:
         svc = self._make_service()
         rows = [
             {"value": 2_000_000.0, "transaction_type": "sale", "is_officer": True, "is_ceo_cfo": False},
             {"value": 3_000_000.0, "transaction_type": "sale", "is_officer": True, "is_ceo_cfo": False},
         ]
         ind = svc._build_insider_indicator_from_yf_data(rows)
-        # Selling disregarded — no activity
-        assert ind.score == 70
-        assert ind.activity_label == "NO_ACTIVITY"
+        # Multiple officer sales → MULTIPLE_SALES → 45 (recalibrated from 30)
+        assert ind.score == 45
+        assert ind.activity_label == "MULTIPLE_SALES"
 
     def test_no_transactions_scores_70(self) -> None:
         svc = self._make_service()

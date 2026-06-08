@@ -19,7 +19,8 @@ export function useEarnings(ticker: string) {
     queryKey: earningsKey(ticker),
     queryFn: () => fetchEarnings(ticker),
     enabled: ticker.trim().length >= MIN_TICKER_LENGTH,
-    staleTime: 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     retry: 1,
   });
 }

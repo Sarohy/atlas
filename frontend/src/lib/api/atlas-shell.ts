@@ -12,9 +12,10 @@ const LOGOUT_LABEL = 'Logout';
 /** Used by both the route-group layout and individual screen loaders. */
 export const ATLAS_APP_TITLE = APP_TITLE;
 
-/** Canonical nav items — Portfolio lives at /portfolio, not /. */
+/** Canonical nav items — Portfolio lives at /portfolio, not /.
+ *  Daily Briefing is intentionally hidden from navigation (its route/code is
+ *  retained under /daily-briefing — restore the entry below to re-enable). */
 export const ATLAS_NAV_ITEMS = [
-  { href: '/daily-briefing', label: 'Daily Briefing' },
   { href: '/portfolio', label: 'Portfolio' },
   { href: '/frameworks', label: 'Frameworks' },
   { href: '/clusters', label: 'Clusters' },

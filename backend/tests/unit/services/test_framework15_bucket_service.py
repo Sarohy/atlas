@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from atlas.services.framework15_service import (
+from atlas.services.framework15_bucket_service import (
     check_bucket1_add_conditions,
     check_bucket3_satellite_eligible,
     classify_position_bucket,
@@ -18,7 +18,6 @@ from atlas.services.framework15_service import (
     compute_bucket_weights,
     get_regime_floor_pct,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestClassifyPositionBucket
@@ -236,7 +235,7 @@ class TestComputeAggregateGtcExposure:
 
     def test_max_aggregate_formula_soft_caution(self) -> None:
         # SOFT_CAUTION floor = 0.15
-        # max = 50000 - (1.1 × 0.15 × 200000) = 50000 - 33000 = 17000
+        # max = 50000 - (1.1 x 0.15 x 200000) = 50000 - 33000 = 17000
         result = compute_aggregate_gtc_exposure(
             [], {}, cash_usd=50_000.0, total_nav=200_000.0, regime="SOFT_CAUTION"
         )
@@ -245,7 +244,7 @@ class TestComputeAggregateGtcExposure:
 
     def test_max_aggregate_formula_clear(self) -> None:
         # CLEAR floor = 0.08
-        # max = 50000 - (1.1 × 0.08 × 200000) = 50000 - 17600 = 32400
+        # max = 50000 - (1.1 x 0.08 x 200000) = 50000 - 17600 = 32400
         result = compute_aggregate_gtc_exposure(
             [], {}, cash_usd=50_000.0, total_nav=200_000.0, regime="CLEAR"
         )

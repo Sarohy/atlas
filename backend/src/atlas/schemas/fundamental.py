@@ -156,10 +156,11 @@ class FreeCashFlowIndicator(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     fcf_current: float | None = Field(
-        None, description="Most recent quarter Free Cash Flow (USD)."
+        None, description="Trailing-twelve-month Free Cash Flow (USD) — sum of the last 4 quarters."
     )
     fcf_prior: float | None = Field(
-        None, description="Prior quarter Free Cash Flow (USD) — used for trend."
+        None,
+        description="Preceding TTM Free Cash Flow (USD) — quarters 5-8, used for trend.",
     )
     fcf_trend: str = Field(
         default="UNKNOWN",

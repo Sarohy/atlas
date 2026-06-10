@@ -2397,6 +2397,16 @@
   align-self: auto;
 }
 
+/* Right-hand column beside Framework 1: stacks Extension Overlay on top of
+   Forward Growth. Takes the same ~half-width footprint as Framework 1. */
+.atlas-frameworks-side-stack {
+  flex: 1 1 calc(40% - 7px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
 .atlas-regime-panel {
   flex: 1 1 calc(60% - 7px);
   min-width: 0;

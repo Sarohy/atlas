@@ -45,6 +45,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from atlas.core.scoring import classify_tier
 from atlas.models.leaps import LeapsPosition
 from atlas.schemas.leaps import (
     EntryCondition,
@@ -58,7 +59,6 @@ from atlas.schemas.leaps import (
 from atlas.schemas.leaps import (
     LeapsPosition as LeapsPositionSchema,
 )
-from atlas.core.scoring import classify_tier
 
 logger = logging.getLogger(__name__)
 
@@ -600,10 +600,9 @@ def _compute_eligibility(
     if regime_clears is False:
         if not _bypass_macro_gate:
             block_reasons.append(f"Regime {regime_state} does not permit LEAPS.")
-    elif regime_clears is None:
-        if not _bypass_macro_gate:
-            has_unknown = True
-            warning_messages.append("Regime data unavailable — eligibility deferred.")
+    elif regime_clears is None and not _bypass_macro_gate:
+        has_unknown = True
+        warning_messages.append("Regime data unavailable — eligibility deferred.")
 
     # T1 and T2 require dark pool flow confirmation.
     if tier in ("T1", "T2"):
@@ -732,14 +731,32 @@ async def _fetch_iv_from_uw(
             return None, None
 
         data = response.json()
-        # UW returns something like {"data": {"iv_rank": 0.45, "iv": 0.32}}
-        inner = data.get("data", {}) if isinstance(data, dict) else {}
-        iv_current = inner.get("iv") or inner.get("iv_current")
-        iv_percentile = inner.get("iv_rank") or inner.get("iv_percentile")
+        # UW returns {"data": [{"date", "volatility", "iv_rank_1y", ...}, ...]}
+        # — a list of daily records ascending by date. The latest record holds
+        # the current IV (`volatility`, a decimal fraction e.g. 1.329 = 132.9%)
+        # and the 1-year IV rank (`iv_rank_1y`, a 0-100 value).
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return None, None
+        latest = rows[-1]
+        if not isinstance(latest, dict):
+            return None, None
+
+        # iv_current: decimal-fraction IV. Newer payloads use `volatility`;
+        # tolerate the older `iv` / `iv_current` keys too.
+        iv_current = latest.get("volatility") or latest.get("iv") or latest.get("iv_current")
+        # iv_percentile: contract is a 0-1 fraction. `iv_rank_1y` is on a 0-100
+        # scale, so divide; older `iv_rank`/`iv_percentile` were already 0-1.
+        iv_rank_1y = latest.get("iv_rank_1y")
+        if iv_rank_1y is not None:
+            iv_percentile: float | None = float(iv_rank_1y) / 100.0
+        else:
+            legacy = latest.get("iv_rank") or latest.get("iv_percentile")
+            iv_percentile = float(legacy) if legacy is not None else None
 
         return (
             float(iv_current) if iv_current is not None else None,
-            float(iv_percentile) if iv_percentile is not None else None,
+            iv_percentile,
         )
 
     except Exception as exc:

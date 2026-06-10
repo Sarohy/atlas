@@ -45,8 +45,6 @@ type FrameworkScorePanelProps = {
   ticker: string;
   /** Opens the detail-card overlay for the current framework selection. */
   onPreviewDetails: () => void;
-  /** Score delta from Framework 2 regime modifier (-10, -5, 0, +5). */
-  regimeModifier: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -63,7 +61,6 @@ type FrameworkScorePanelProps = {
 export function FrameworkScorePanel({
   ticker,
   onPreviewDetails,
-  regimeModifier,
 }: FrameworkScorePanelProps) {
   const { data: rawData, isLoading, isError, error } = useFrameworkScore(ticker);
   const { data: rawMomentum } = useMomentum(ticker);
@@ -160,11 +157,6 @@ export function FrameworkScorePanel({
     queryClient,
   ]);
 
-  // Gate the regime modifier on F8 having resolved so the headline reflects
-  // the buying bonus before we apply the regime modifier.
-  const f8Ready = framework8Data !== undefined;
-  const effectiveRegimeModifier = f8Ready ? regimeModifier : 0;
-
   // F5 display uses the raw score — no cap applied.
   const f5DisplayOverride = f5Score;
 
@@ -182,7 +174,6 @@ export function FrameworkScorePanel({
           f4: f4Score,
           f5: f5DisplayOverride,
         },
-        effectiveRegimeModifier,
       )
     : undefined;
 
@@ -237,7 +228,6 @@ export function FrameworkScorePanel({
         {!isLoading && !isError && displayData && (
           <FrameworkScoreContent
             data={displayData}
-            regimeModifier={effectiveRegimeModifier}
             f4GapBadge={data?.f4_data_gap_badge ?? null}
             f4GapMessage={data?.f4_data_gap_message ?? null}
           />
@@ -312,34 +302,29 @@ function DegradedBanner({
 
 function FrameworkScoreContent({
   data,
-  regimeModifier,
   f4GapBadge,
   f4GapMessage,
 }: {
   data: FrameworkScoreResponse;
-  regimeModifier: number;
   f4GapBadge: string | null;
   f4GapMessage: string | null;
 }) {
-  // Headline is always computed locally from the individual-hook-based
-  // `data.final_score` (raw_total + F8 bonus) + the regime delta. The backend
-  // regime endpoint's `adjusted_score` is intentionally NOT consumed here — it
-  // is derived from the aggregate framework-score endpoint's base, a separate
-  // computation that can diverge from the per-factor hook values shown in the
-  // table. Using the local computation guarantees the three numbers reconcile:
-  //   factor rows → raw_total (+F8) → pre-regime → headline.
-  // (This is why there is no `regimeAdjustedScore` prop — that path was removed
-  // deliberately; do not re-add it without resolving the divergence above.)
-  const adjustedScore = Math.max(0, Math.min(100, data.final_score + regimeModifier));
+  // The Framework 1 conviction score is the pure framework score (F1-F5 +
+  // F8 bonus). The Framework 2 regime modifier is NOT applied here — it is
+  // surfaced on its own Regime Modifier / guidance panels, so F1 stands alone
+  // and the score is never double-counted across panels. The headline is
+  // computed locally from the per-factor hook values so the factor rows, raw
+  // total, and headline always reconcile.
+  const displayScore = data.final_score;
   const setF1DisplayScore = useFrameworkStore((s) => s.setF1DisplayScore);
 
   // Publish the exact score the investor sees so F6, F7, and any other panel
   // consume the same value — no recomputation from a different data source.
   useEffect(() => {
-    setF1DisplayScore(adjustedScore);
-  }, [adjustedScore, setF1DisplayScore]);
+    setF1DisplayScore(displayScore);
+  }, [displayScore, setF1DisplayScore]);
   const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
-  const filledSegs = Math.round(adjustedScore / SCORE_BAR_SEGMENTS);
+  const filledSegs = Math.round(displayScore / SCORE_BAR_SEGMENTS);
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
@@ -347,7 +332,7 @@ function FrameworkScoreContent({
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
           <span className={cn('atlas-fws-score-number', toneCss)} data-testid="fws-score">
-            {adjustedScore}
+            {displayScore}
           </span>
           <span className="atlas-fws-score-denom">/100</span>
         </div>
@@ -359,13 +344,6 @@ function FrameworkScoreContent({
           >
             {data.action}
           </span>
-
-          <div className="atlas-fws-score-summary">
-            <span className="atlas-fws-score-summary-label">Pre-regime score</span>
-            <span className="atlas-fws-score-summary-value" data-testid="fws-base-score-summary">
-              {data.final_score}/100
-            </span>
-          </div>
 
           {data.f5_blocked && (
             <span
@@ -379,7 +357,7 @@ function FrameworkScoreContent({
       </div>
 
       {/* ── Score bar ── */}
-      <div className="atlas-fws-score-bar" aria-label={`Score: ${adjustedScore} out of 100`}>
+      <div className="atlas-fws-score-bar" aria-label={`Score: ${displayScore} out of 100`}>
         {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
           <span
             key={i}
@@ -433,18 +411,9 @@ function FrameworkScoreContent({
           </div>
         )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
-          <span className="atlas-fws-calc-label">Framework score before regime</span>
+          <span className="atlas-fws-calc-label">Framework score</span>
           <span className={cn('atlas-fws-calc-value', toneCss)} data-testid="fws-final-score-calc">
             {data.final_score}
-          </span>
-        </div>
-        <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
-          <span className="atlas-fws-calc-label">Displayed after regime modifier</span>
-          <span
-            className={cn('atlas-fws-calc-value', toneCss)}
-            data-testid="fws-regime-adjusted-score"
-          >
-            {adjustedScore}
           </span>
         </div>
       </div>
@@ -466,7 +435,6 @@ function FrameworkScoreContent({
 function buildDisplayFrameworkScore(
   data: FrameworkScoreResponse,
   scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
-  regimeModifier: number,
 ): FrameworkScoreResponse {
   const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
   const rawTotal = calculateRawTotal(factors);
@@ -474,12 +442,12 @@ function buildDisplayFrameworkScore(
   // before rounding/clamping (atlas/services/framework_score_service.py —
   // `_compute_final_score(raw_total + f8_buying_bonus)`). Without this the
   // "+N pts added to raw total" caption is shown but never reflected in the
-  // before-regime headline, leaving the panel internally inconsistent.
+  // headline, leaving the panel internally inconsistent.
   const finalScore = calculateFinalScore(rawTotal + (data.f8_buying_bonus ?? 0));
-  // F2 regime modifier RE-ENABLED — action label maps from regime-adjusted score
-  // so the pill matches the headline number.
-  const adjustedScore = Math.max(0, Math.min(100, finalScore + regimeModifier));
-  const [action, actionTone] = mapAction(adjustedScore);
+  // The Framework 2 regime modifier is intentionally NOT applied to the
+  // Framework 1 conviction score (it has its own panel); the action label maps
+  // directly from the pure framework score so the pill matches the headline.
+  const [action, actionTone] = mapAction(finalScore);
 
   // When the individual-hook F5 score is used as an override, keep f5_raw_score in sync.
   const f5Override = scoreOverrides['f5'];

@@ -1,14 +1,12 @@
 """Unit tests for WatchlistService and MarketDataService.sync_watchlist_items."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from atlas.schemas.watchlist import WatchlistItemCreate
-from atlas.services.watchlist_service import WatchlistService
 from atlas.services.market_data_service import MarketDataService
+from atlas.services.watchlist_service import WatchlistService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,7 +114,7 @@ class TestWatchlistService:
 
 
 class TestApplyWatchlistMarketData:
-    _NOW = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    _NOW = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
 
     def test_writes_snapshot_price_and_beta(self) -> None:
         item = _make_watchlist_item()
@@ -206,7 +204,7 @@ class TestSyncWatchlistItems:
         mock_result.scalars.return_value.all.return_value = [item]
         session.execute = AsyncMock(return_value=mock_result)
 
-        # Build 61-point agg series where ticker = 1.5× SPY return.
+        # Build 61-point agg series where ticker = 1.5x SPY return.
         spy_ret_seq = [0.01, -0.005, 0.02, -0.01, 0.015, -0.008] * 10
         spy_closes = [100.0]
         ticker_closes = [100.0]
@@ -242,7 +240,13 @@ class TestSyncWatchlistItems:
         client.get = mock_get
 
         svc = MarketDataService(api_key="key", session=session, client=client)
-        result = await svc.sync_watchlist_items()
+        # _fetch_yahoo_beta calls the live yfinance library directly (it does not
+        # go through the injected httpx client), so it must be stubbed or the test
+        # would fetch NVDA's real beta instead of exercising the Polygon OLS path.
+        with patch.object(
+            MarketDataService, "_fetch_yahoo_beta", new=AsyncMock(return_value=None)
+        ):
+            result = await svc.sync_watchlist_items()
 
         assert len(result) == 1
         i = result[0]

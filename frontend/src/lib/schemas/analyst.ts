@@ -51,10 +51,12 @@ export const recentUpgradesIndicatorSchema = z.object({
 
 export const ptUpsideIndicatorSchema = z.object({
   current_price: z.number().nullable(),
+  /** Highest individual analyst PT (Street-high). This is what upside_pct is computed against. */
+  highest_pt: z.number().nullable().optional(),
   consensus_pt: z.number().nullable(),
-  /** Percentage upside from current price to consensus PT. Negative = stock above target. */
+  /** Percentage upside from current price to the Street-high PT. Negative = stock above it. */
   upside_pct: z.number().nullable(),
-  /** (current_price - consensus_pt) / consensus_pt, rounded to 4 dp. */
+  /** (current_price - highest_pt) / highest_pt, rounded to 4 dp. */
   price_vs_target: z.number().nullable().optional(),
   /** Band label: '20%+ below target (+10)' | '10-20% below target (+5)' | etc. */
   price_vs_target_band: z.string().nullable().optional(),

@@ -28,6 +28,7 @@ from typing import Final
 
 import httpx
 
+from atlas.core.extension import f1_overbought_cap, pct_above_ma, pct_move
 from atlas.schemas.momentum import (
     F1Grade,
     MaAlignmentIndicator,
@@ -631,6 +632,27 @@ class MomentumService:
             perf_6m_raw=perf_6m_raw,
             sector_raw=sector_raw,
         )
+
+        # ---- Overbought / extension cap (ATLAS Extension Overlay) ----
+        # A vertical chart should not earn a perfect momentum score. Cap F1 when
+        # the name is extremely overbought (cap expressed on the raw 0-100 scale).
+        closes = [float(b["c"]) for b in ticker_bars if b.get("c") is not None]
+        move_14d = pct_move(closes, 14)
+        gap_today = None
+        if len(ticker_bars) >= 2:
+            today_open = ticker_bars[-1].get("o")
+            prev_close = ticker_bars[-2].get("c")
+            if today_open is not None and prev_close not in (None, 0):
+                gap_today = (float(today_open) - float(prev_close)) / float(prev_close) * 100.0
+        overbought_cap = f1_overbought_cap(
+            rsi14=rsi_value,
+            move14_pct=move_14d,
+            pct_above_50dma=pct_above_ma(closes[-1] if closes else 0.0, ma50 or None),
+            gap_today_pct=gap_today,
+        )
+        if overbought_cap is not None and f1_total > overbought_cap:
+            f1_total = overbought_cap
+            f1_grade = _grade_from_total(f1_total)
 
         # Weighted contribution scores for display (raw x weight = pts contributed)
         rsi_contrib = round(rsi_raw * _W_RSI)

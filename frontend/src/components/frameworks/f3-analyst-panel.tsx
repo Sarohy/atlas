@@ -372,7 +372,10 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
     <IndicatorCard label="PT Upside" modifier={pt.adjustment}>
       <dl className="atlas-f3-dl">
         <div className="atlas-f3-dl-row">
-          <dt>Upside</dt>
+          {/* Upside is computed vs the Street-high PT, so label it as such — it
+              must reconcile with the "Street-high PT" row below, NOT with the
+              consensus PT (the stock can sit above consensus yet below the high). */}
+          <dt>Upside vs high PT</dt>
           <dd className={upside_cls}>
             {pt.upside_pct !== null ? formatPct(pt.upside_pct) : 'No data found'}
           </dd>
@@ -389,10 +392,19 @@ function PtUpsideCard({ pt }: { pt: PtUpsideIndicator }) {
             <dd>{formatPrice(pt.current_price)}</dd>
           </div>
         )}
+        {pt.highest_pt != null && (
+          <div className="atlas-f3-dl-row">
+            <dt>Street-high PT</dt>
+            <dd>{formatPrice(pt.highest_pt)}</dd>
+          </div>
+        )}
         {pt.consensus_pt !== null && (
           <div className="atlas-f3-dl-row">
             <dt>Consensus PT</dt>
-            <dd>{formatPrice(pt.consensus_pt)}</dd>
+            <dd className={consensusToneCls(pt.current_price, pt.consensus_pt)}>
+              {formatPrice(pt.consensus_pt)}
+              {consensusUpside(pt.current_price, pt.consensus_pt)}
+            </dd>
           </div>
         )}
       </dl>
@@ -411,6 +423,18 @@ function formatPct(value: number): string {
 
 function formatPrice(value: number): string {
   return `$${value.toFixed(2)}`;
+}
+
+/** Consensus-based upside annotation, e.g. " (−3.4%)". Empty when data is missing. */
+function consensusUpside(price: number | null, consensusPt: number | null): string {
+  if (price == null || consensusPt == null || price <= 0) return '';
+  return ` (${formatPct(((consensusPt - price) / price) * 100)})`;
+}
+
+/** Amber when the stock trades ABOVE consensus PT (a caution), neutral otherwise. */
+function consensusToneCls(price: number | null, consensusPt: number | null): string {
+  if (price == null || consensusPt == null) return '';
+  return price > consensusPt ? 'atlas-f3-upside-amber' : 'atlas-f3-upside-neutral';
 }
 
 function consensusTone(label: string): string {

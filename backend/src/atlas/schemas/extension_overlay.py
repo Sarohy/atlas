@@ -41,6 +41,14 @@ class ExtensionOverlayResponse(BaseModel):
     pct_vs_vwap: float | None = Field(
         None, description="Distance of the latest close above/below the daily VWAP, percent."
     )
+    ath: float | None = Field(
+        None,
+        description="All-time high (max split-adjusted daily high over available history).",
+    )
+    ath_date: str | None = Field(None, description="ISO date the all-time high was set.")
+    pct_from_ath: float | None = Field(
+        None, description="Distance of the latest close from the ATH, percent (negative = below)."
+    )
     iv_rank: float | None = Field(
         None,
         description="IV rank on a 0-100 scale (Unusual Whales). Null when the UW key is "

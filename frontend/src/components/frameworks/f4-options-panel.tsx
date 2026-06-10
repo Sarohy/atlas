@@ -124,6 +124,14 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
   const sourceLabel = SOURCE_LABEL[data.data_source] ?? data.data_source;
   const contribution = Math.round((data.f4_score / 100) * F4_DISPLAY_MAX);
 
+  // Two independent readings — dark-pool (stock accumulation/distribution) and
+  // options flow — are blended into F4 and can legitimately disagree. Surface
+  // that split so the inconsistency is explained, not hidden in one number.
+  const dp = data.dark_pool_net_flow_usd;
+  const opt = data.options_net_flow_usd;
+  const diverges =
+    dp != null && opt != null && dp !== 0 && opt !== 0 && Math.sign(dp) !== Math.sign(opt);
+
   return (
     <div className="atlas-f4-content" data-testid="f4-content">
       {/* Score hero */}
@@ -199,6 +207,14 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           largestBuy={data.largest_options_buy_usd}
         />
       </div>
+
+      {diverges && (
+        <p className="atlas-f4-state-msg atlas-f4-state-msg--warn" data-testid="f4-divergence">
+          ⚠ Split reading — dark pool is {dp > 0 ? 'accumulating' : 'distributing'} while options
+          flow is {opt > 0 ? 'bullish' : 'bearish'}. F4 blends both, so the score sits between the
+          two signals.
+        </p>
+      )}
 
       {data.market_cap_usd !== null && (
         <p className="atlas-f4-state-msg" data-testid="f4-market-cap">

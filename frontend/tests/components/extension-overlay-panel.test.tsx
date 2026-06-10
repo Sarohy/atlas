@@ -41,6 +41,9 @@ function overlay(overrides: Record<string, unknown> = {}) {
     gap_today_pct: 1.2,
     vwap: 410.5,
     pct_vs_vwap: 3.1,
+    ath: 503.0,
+    ath_date: '2026-06-02',
+    pct_from_ath: -18.4,
     iv_rank: null,
     extension_risk_score: 9,
     extension_flag: 'EXTREME_RED',
@@ -71,6 +74,8 @@ describe('ExtensionOverlayPanel', () => {
     // Daily VWAP is surfaced; IV rank is a DATA GAP only when null.
     expect(screen.getByText('+3.1%')).toBeInTheDocument();
     expect(screen.getByText('DATA GAP')).toBeInTheDocument();
+    // ATH dip shown with the ATH price.
+    expect(screen.getByText('-18.4% ($503.00)')).toBeInTheDocument();
   });
 
   it('shows the IV rank value when available', async () => {

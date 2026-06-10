@@ -16,6 +16,9 @@ export const extensionOverlayResponseSchema = z.object({
   gap_today_pct: z.coerce.number().nullable().optional(),
   vwap: z.coerce.number().nullable().optional(),
   pct_vs_vwap: z.coerce.number().nullable().optional(),
+  ath: z.coerce.number().nullable().optional(),
+  ath_date: z.string().nullable().optional(),
+  pct_from_ath: z.coerce.number().nullable().optional(),
   iv_rank: z.coerce.number().nullable().optional(),
 
   // Overlay outputs.

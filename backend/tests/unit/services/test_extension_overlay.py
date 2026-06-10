@@ -264,6 +264,24 @@ class TestServiceResponse:
         assert resp.pct_vs_vwap is not None
         assert "VWAP" not in resp.data_gaps
 
+    def test_ath_dip_surfaced_when_supplied(self) -> None:
+        closes = [100.0 + math.sin(i / 4) for i in range(260)]  # latest close ≈ 100
+        # ATH 125 → roughly -20% below ATH.
+        resp = ExtensionOverlayService._build_response(
+            "aapl", _bars(closes), None, None, 125.0, "2024-07-10"
+        )
+        assert resp.ath == 125.0
+        assert resp.ath_date == "2024-07-10"
+        assert resp.pct_from_ath is not None and -25 < resp.pct_from_ath < -15
+        assert "ATH" not in resp.data_gaps
+
+    def test_ath_data_gap_when_missing(self) -> None:
+        closes = [100.0 + math.sin(i / 4) for i in range(260)]
+        resp = ExtensionOverlayService._build_response("aapl", _bars(closes), None)
+        assert resp.ath is None
+        assert resp.pct_from_ath is None
+        assert "ATH" in resp.data_gaps
+
 
 class _FakeResponse:
     def __init__(self, payload: object) -> None:

@@ -173,6 +173,14 @@ function OverlayContent({ data }: { data: ExtensionOverlayResponse }) {
         label="vs VWAP (daily)"
         value={data.pct_vs_vwap == null ? 'DATA GAP' : fmtPct(data.pct_vs_vwap)}
       />
+      <MetricRow
+        label="vs ATH"
+        value={
+          data.pct_from_ath == null
+            ? 'DATA GAP'
+            : `${fmtPct(data.pct_from_ath)}${data.ath != null ? ` ($${data.ath.toFixed(2)})` : ''}`
+        }
+      />
       <MetricRow label="IV rank" value={data.iv_rank == null ? 'DATA GAP' : fmtNum(data.iv_rank, 0)} />
 
       {/* Action */}

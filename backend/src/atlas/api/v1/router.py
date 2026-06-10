@@ -9,6 +9,8 @@ from atlas.api.v1 import (
     clusters,
     conviction_action,
     earnings,
+    extension_overlay,
+    forward_growth,
     framework7,
     framework8,
     framework9,
@@ -53,6 +55,8 @@ router.include_router(earnings.router)
 router.include_router(analyst.router)
 router.include_router(options_flow.router)
 router.include_router(fundamental.router)
+router.include_router(extension_overlay.router)
+router.include_router(forward_growth.router)
 router.include_router(framework_score.router)
 router.include_router(framework7.router)
 router.include_router(framework8.router)

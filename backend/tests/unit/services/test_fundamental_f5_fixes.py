@@ -451,10 +451,31 @@ class TestFcfRoutineDiversificationModifier:
         assert result.score == 20
         assert result.activity_label == "CEO_MEGA_SALE"
 
-    def test_no_modification_for_multiple_sales_label(self) -> None:
-        """MULTIPLE_SALES is not affected by this modifier (only CEO_MEGA_SALE)."""
-        ind = self._make_insider_indicator(score=45, label="MULTIPLE_SALES", ceo_cfo_sell=5_000_000.0)
-        result = _apply_fcf_routine_modifier(ind, 10_000_000_000.0)
+    def test_multiple_sales_upgraded_when_small_vs_ttm_fcf(self) -> None:
+        """AMAT pattern: 4 officer sales net $27.1M, TTM FCF $5.34B → 0.51% < 3%
+        → routine multi-officer diversification → ROUTINE_DIVERSIFICATION → 70."""
+        ind = self._make_insider_indicator(
+            score=45, label="MULTIPLE_SALES", ceo_cfo_sell=27_100_000.0
+        )
+        result = _apply_fcf_routine_modifier(ind, 5_340_000_000.0)
+        assert result.score == 70
+        assert result.activity_label == "ROUTINE_DIVERSIFICATION"
+
+    def test_multiple_sales_preserved_when_large_vs_ttm_fcf(self) -> None:
+        """MULTIPLE_SALES net $27.1M vs only $200M TTM FCF → 13.5% > 3% → stays 45."""
+        ind = self._make_insider_indicator(
+            score=45, label="MULTIPLE_SALES", ceo_cfo_sell=27_100_000.0
+        )
+        result = _apply_fcf_routine_modifier(ind, 200_000_000.0)
+        assert result.score == 45
+        assert result.activity_label == "MULTIPLE_SALES"
+
+    def test_multiple_sales_preserved_when_fcf_negative(self) -> None:
+        """Selling while burning cash (negative FCF) stays penalised even for MULTIPLE_SALES."""
+        ind = self._make_insider_indicator(
+            score=45, label="MULTIPLE_SALES", ceo_cfo_sell=5_000_000.0
+        )
+        result = _apply_fcf_routine_modifier(ind, -500_000_000.0)
         assert result.score == 45
         assert result.activity_label == "MULTIPLE_SALES"
 
@@ -491,3 +512,72 @@ class TestFcfRoutineDiversificationModifier:
         # max with ROUTINE_DIVERSIFICATION insider = 91 → 23/25 in framework
         # (client scored 24/25 by rounding generously for near-perfect fundamentals)
         assert round(f5_raw) == 91
+
+
+# ===========================================================================
+# Fix 6 — Free Cash Flow uses TTM-over-TTM, not single-quarter QoQ
+# ===========================================================================
+
+
+class TestCashFlowTtm:
+    """_extract_cash_flows must sum 4 quarters (TTM) and compare to the prior
+    TTM, so a single capex-heavy quarter cannot masquerade as a trend.
+
+    AMAT pattern: the most recent quarter FCF ($208M, capex spike) vs the prior
+    quarter ($1040M) reads as -80% QoQ, while the TTM ($5.34B vs $5.86B) is only
+    -9% — essentially flat.
+    """
+
+    @staticmethod
+    def _q(op: float, capex: float) -> dict[str, str]:
+        return {"operatingCashflow": str(op), "capitalExpenditures": str(capex)}
+
+    def test_ttm_sums_four_quarters(self) -> None:
+        # AMAT-like: 8 quarters of (op, capex). FCF = op - |capex|.
+        data = {
+            "quarterlyReports": [
+                self._q(843_000_000, 635_000_000),    # 208M
+                self._q(1_686_000_000, 646_000_000),  # 1040M
+                self._q(2_828_000_000, 785_000_000),  # 2043M
+                self._q(2_634_000_000, 584_000_000),  # 2050M
+                self._q(1_571_000_000, 510_000_000),  # 1061M
+                self._q(925_000_000, 381_000_000),    # 544M
+                self._q(2_575_000_000, 407_000_000),  # 2168M
+                self._q(2_385_000_000, 297_000_000),  # 2088M
+            ]
+        }
+        result = FundamentalService._extract_cash_flows(data)
+        # Current TTM = 208+1040+2043+2050 = 5341M; prior TTM = 1061+544+2168+2088 = 5861M
+        assert result["fcf_current"] == pytest.approx(5_341_000_000.0)
+        assert result["fcf_prior"] == pytest.approx(5_861_000_000.0)
+
+    def test_amat_ttm_scores_positive_flat_not_declining(self) -> None:
+        """The TTM trend (-9%) is POSITIVE_FLAT (80), not the QoQ POSITIVE_DECLINING (60)."""
+        cur, prior = 5_341_000_000.0, 5_861_000_000.0
+        score, trend = _score_fcf(cur, prior)
+        assert score == 80
+        assert trend == "POSITIVE_FLAT"
+
+    def test_prior_ttm_none_when_fewer_than_8_quarters(self) -> None:
+        data = {"quarterlyReports": [self._q(1_000_000, 100_000)] * 4}
+        result = FundamentalService._extract_cash_flows(data)
+        assert result["fcf_current"] == pytest.approx(3_600_000.0)  # (1.0M-0.1M)*4
+        assert result["fcf_prior"] is None
+
+    def test_current_ttm_none_when_fewer_than_4_quarters(self) -> None:
+        data = {"quarterlyReports": [self._q(1_000_000, 100_000)] * 3}
+        result = FundamentalService._extract_cash_flows(data)
+        assert result["fcf_current"] is None
+        assert result["fcf_prior"] is None
+
+    def test_ttm_none_when_a_quarter_is_missing_operating_cashflow(self) -> None:
+        data = {
+            "quarterlyReports": [
+                self._q(1_000_000, 100_000),
+                {"capitalExpenditures": "100000"},  # missing operatingCashflow
+                self._q(1_000_000, 100_000),
+                self._q(1_000_000, 100_000),
+            ]
+        }
+        result = FundamentalService._extract_cash_flows(data)
+        assert result["fcf_current"] is None

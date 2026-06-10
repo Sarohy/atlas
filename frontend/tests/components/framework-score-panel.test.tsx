@@ -126,10 +126,9 @@ describe('FrameworkScorePanel', () => {
   });
 
   it('renders factor rows from the same F1-F5 scores shown in the detailed cards', async () => {
-    render(
-      <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={0} />,
-      { wrapper: makeWrapper() },
-    );
+    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId('fws-content')).toBeInTheDocument();
@@ -145,33 +144,32 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-score')).toHaveTextContent('72');
   });
 
-  it('shows both the pre-regime framework score and the post-regime displayed score', async () => {
-    render(
-      <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={-5} />,
-      { wrapper: makeWrapper() },
-    );
+  it('does not apply the regime modifier — the score is the pure framework score', async () => {
+    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId('fws-content')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('fws-score')).toHaveTextContent('67');
+    // Headline equals the framework score; there is no regime-adjusted row.
+    expect(screen.getByTestId('fws-score')).toHaveTextContent('72');
     expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('72');
-    expect(screen.getByTestId('fws-regime-adjusted-score')).toHaveTextContent('67');
-    expect(screen.getByText('Framework score before regime')).toBeInTheDocument();
-    expect(screen.getByText('Displayed after regime modifier')).toBeInTheDocument();
+    expect(screen.getByText('Framework score')).toBeInTheDocument();
+    expect(screen.queryByTestId('fws-regime-adjusted-score')).not.toBeInTheDocument();
+    expect(screen.queryByText('Displayed after regime modifier')).not.toBeInTheDocument();
   });
 
-  it('folds the F8 insider-buying bonus into the before-regime score (matches backend)', async () => {
+  it('folds the F8 insider-buying bonus into the framework score (matches backend)', async () => {
     // raw_total from overrides = 71.6. With a +5 F8 bonus the backend computes
-    // round(71.6 + 5) = 77 before regime; the frontend must match rather than
-    // showing the advertised "+5" caption without applying it (round(71.6)=72).
+    // round(71.6 + 5) = 77; the frontend must match rather than showing the
+    // advertised "+5" caption without applying it (round(71.6)=72).
     mockState.f8BuyingBonus = 5;
 
-    render(
-      <FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} regimeModifier={-5} />,
-      { wrapper: makeWrapper() },
-    );
+    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId('fws-content')).toBeInTheDocument();
@@ -179,6 +177,6 @@ describe('FrameworkScorePanel', () => {
 
     expect(screen.getByTestId('fws-f8-bonus-note')).toHaveTextContent('+5');
     expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('77');
-    expect(screen.getByTestId('fws-regime-adjusted-score')).toHaveTextContent('72');
+    expect(screen.getByTestId('fws-score')).toHaveTextContent('77');
   });
 });

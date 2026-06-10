@@ -28,6 +28,7 @@ from atlas.services.leaps_service import (
     _evaluate_entry_condition1,
     _evaluate_entry_condition2,
     _evaluate_entry_condition3,
+    _fetch_iv_from_uw,
 )
 
 # ---------------------------------------------------------------------------
@@ -575,149 +576,6 @@ class TestCheckLeapsEligibilityProvidedScore:
         )
 
 
-# ---------------------------------------------------------------------------
-# check_leaps_eligibility — provided_score bypass
-# ---------------------------------------------------------------------------
-
-
-class TestCheckLeapsEligibilityProvidedScore:
-    """When a caller passes provided_score, the service must use it directly
-    instead of re-fetching from F7 + regime, so that Framework 10 mirrors
-    the exact score already displayed in Framework 1.
-    """
-
-    def test_provided_score_bypasses_resolve(self) -> None:
-        """_resolve_current_score must NOT be called when provided_score is given."""
-        import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        mock_session = MagicMock()
-
-        # Stub everything the service calls after score resolution.
-        with (
-            patch(
-                "atlas.services.leaps_service._resolve_current_score",
-                new_callable=AsyncMock,
-            ) as mock_resolve,
-            patch(
-                "atlas.services.leaps_service.is_excluded_ticker",
-                return_value=False,
-            ),
-            patch(
-                "atlas.services.leaps_service._cache_get",
-                return_value=(None, 0),
-            ),
-            patch(
-                "atlas.services.leaps_service._cache_set",
-            ),
-            patch(
-                "atlas.services.leaps_service._run_full_evaluation",
-                new_callable=AsyncMock,
-            ) as mock_eval,
-        ):
-            from atlas.schemas.leaps import LeapsEligibility
-            from atlas.services.leaps_service import IVAlert
-
-            mock_eval.return_value = LeapsEligibility(
-                ticker="AAPL",
-                leaps_eligible=False,
-                eligibility_undetermined=False,
-                score=61,
-                tier="T3",
-                flow_confirmed=None,
-                regime_state="CLEAR",
-                regime_clears_leaps=True,
-                gate_f7_active=False,
-                gate_f29_passed=True,
-                gate_f30_permits_leaps=True,
-                iv_current=None,
-                iv_percentile=None,
-                iv_blocked=None,
-                iv_alert=IVAlert.NONE,
-                iv_catalyst_wait_days_remaining=None,
-                gap_detected=None,
-                entry_conditions=[],
-                conditions_met=0,
-                conditions_required=1,
-                block_reasons=["Score 61 is below T2 minimum."],
-                warning_messages=[],
-                expiry_guidance=None,
-                data_age_minutes=0,
-                cache_hit=False,
-            )
-
-            from atlas.services.leaps_service import check_leaps_eligibility
-
-            result = asyncio.run(
-                check_leaps_eligibility(
-                    ticker="AAPL",
-                    session=mock_session,
-                    provided_score=61,
-                )
-            )
-
-            # provided_score=61 was given — _resolve_current_score must be skipped.
-            mock_resolve.assert_not_called()
-            assert result.score == 61
-
-
-# ---------------------------------------------------------------------------
-# check_leaps_eligibility — provided_score bypass
-# ---------------------------------------------------------------------------
-
-
-class TestCheckLeapsEligibilityProvidedScore:
-    """When a caller passes provided_score, the service must use it directly
-    instead of re-fetching from F7 + regime, so that Framework 10 mirrors
-    the exact score already displayed in Framework 1.
-    """
-
-    def test_provided_score_is_used_directly(self) -> None:
-        """_resolve_current_score must be bypassed when provided_score is given."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        import pytest
-
-        # Build the minimal mock objects needed to reach _compute_eligibility.
-        mock_f9_result = MagicMock()
-        mock_f9_result.flow_in_millions = 600.0
-        mock_f9_result.significant = True
-        mock_f9_result.signal = "BULLISH"
-
-        mock_f29_status = MagicMock()
-        mock_f29_status.gate_open = True
-
-        mock_f30_status = MagicMock()
-        mock_f30_status.leaps_permitted = True
-
-        mock_f7_result = MagicMock()
-        mock_f7_result.gate_active = False
-
-        mock_session = MagicMock()
-
-        with (
-            patch(
-                "atlas.services.leaps_service._resolve_current_score",
-                new_callable=AsyncMock,
-            ) as mock_resolve,
-            patch(
-                "atlas.services.leaps_service.check_leaps_eligibility",
-                wraps=None,
-            ),
-        ):
-            # When provided_score is supplied, _resolve_current_score must NOT be called.
-            # We verify this by asserting the mock is never invoked.
-            from atlas.services.leaps_service import _determine_tier
-
-            provided_score = 61
-            expected_tier = _determine_tier(provided_score)
-
-            # Direct test: _resolve_current_score skipped when provided_score given.
-            # We call _determine_tier to confirm the tier for the provided score.
-            assert expected_tier == "T3"  # 61 is T3 (50–69)
-
-            # The mock was never awaited — confirms bypass path expectation.
-
 
 # ---------------------------------------------------------------------------
 # _determine_entry_type — pure function
@@ -900,27 +758,27 @@ class TestDetermineEntryType:
 
 def _make_clear_eligibility_kwargs(ticker: str = "NVDA", score: int = 82) -> dict:
     """Minimal kwargs for a fully-eligible DISCRETIONARY scenario."""
-    return dict(
-        ticker=ticker,
-        score=score,
-        tier="T1",
-        flow_confirmed=True,
-        regime_state="CLEAR",
-        gate_f7_active=False,
-        gate_f29_passed=True,
-        gate_f30_permits_leaps=True,
-        gate_f11_blocks=False,
-        gate_f15_blocks=False,
-        iv_current=0.50,
-        iv_percentile=0.45,
-        entry_conditions=[
+    return {
+        "ticker": ticker,
+        "score": score,
+        "tier": "T1",
+        "flow_confirmed": True,
+        "regime_state": "CLEAR",
+        "gate_f7_active": False,
+        "gate_f29_passed": True,
+        "gate_f30_permits_leaps": True,
+        "gate_f11_blocks": False,
+        "gate_f15_blocks": False,
+        "iv_current": 0.50,
+        "iv_percentile": 0.45,
+        "entry_conditions": [
             _evaluate_entry_condition1(True),
             _evaluate_entry_condition2("CLEAR"),
             _evaluate_entry_condition3(score),
         ],
-        data_age_minutes=0,
-        gap_detected=False,
-    )
+        "data_age_minutes": 0,
+        "gap_detected": False,
+    }
 
 
 class TestComputeEligibilityEntryTypeBypass:
@@ -1036,3 +894,60 @@ class TestComputeEligibilityEntryTypeBypass:
         kwargs = _make_clear_eligibility_kwargs()
         result = _compute_eligibility(**kwargs)
         assert result.entry_type is None
+
+
+# ---------------------------------------------------------------------------
+# _fetch_iv_from_uw — UW iv-rank response-shape parsing
+# ---------------------------------------------------------------------------
+
+
+class _FakeIvResponse:
+    def __init__(self, payload: object, status: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _FakeIvClient:
+    def __init__(self, payload: object, status: int = 200) -> None:
+        self._payload = payload
+        self._status = status
+
+    async def get(self, *_args: object, **_kwargs: object) -> _FakeIvResponse:
+        return _FakeIvResponse(self._payload, self._status)
+
+
+class TestFetchIvFromUw:
+    """Locks the live UW iv-rank shape: data is a LIST of daily records;
+    `volatility` is the decimal-fraction IV and `iv_rank_1y` is on a 0-100 scale.
+    """
+
+    async def test_parses_latest_record(self) -> None:
+        payload = {
+            "data": [
+                {"date": "2026-06-04", "volatility": "1.078", "iv_rank_1y": "60.0"},
+                {"date": "2026-06-05", "volatility": "1.080", "iv_rank_1y": "82.79"},
+            ]
+        }
+        iv_current, iv_pct = await _fetch_iv_from_uw("SNDK", "uw", _FakeIvClient(payload))  # type: ignore[arg-type]
+        assert iv_current == 1.08  # decimal fraction (108% IV)
+        assert iv_pct is not None and round(iv_pct, 4) == 0.8279  # 0-100 rescaled to 0-1
+
+    async def test_dict_shape_degrades_to_none(self) -> None:
+        # The previous (broken) assumption was data-as-dict; must not crash.
+        result = await _fetch_iv_from_uw(
+            "X", "uw", _FakeIvClient({"data": {"iv": 0.3, "iv_rank": 0.5}})  # type: ignore[arg-type]
+        )
+        assert result == (None, None)
+
+    async def test_legacy_fraction_fields_still_supported(self) -> None:
+        payload = {"data": [{"iv": "0.32", "iv_rank": "0.45"}]}
+        iv_current, iv_pct = await _fetch_iv_from_uw("X", "uw", _FakeIvClient(payload))  # type: ignore[arg-type]
+        assert iv_current == 0.32
+        assert iv_pct == 0.45
+
+    async def test_no_key_returns_none(self) -> None:
+        result = await _fetch_iv_from_uw("X", "", _FakeIvClient({"data": []}))  # type: ignore[arg-type]
+        assert result == (None, None)

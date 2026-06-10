@@ -13,6 +13,8 @@ import { F4OptionsPanel } from './f4-options-panel';
 import { F5FundamentalPanel } from './f5-fundamental-panel';
 import { RegimeGuidancePanel } from './regime-guidance-panel';
 import { FrameworkScorePanel } from './framework-score-panel';
+import { ExtensionOverlayPanel } from './extension-overlay-panel';
+import { ForwardGrowthPanel } from './forward-growth-panel';
 import { RegimeModifierPanel } from './regime-modifier-panel';
 import { TrancheSizingPanel } from './tranche-sizing-panel';
 import { CashFloorPanel } from './cash-floor-panel';
@@ -161,9 +163,16 @@ export function FrameworksPanelsSection() {
         <FrameworkScorePanel
           ticker={activeTicker}
           onPreviewDetails={() => setDetailsOverlayOpen(true)}
-          regimeModifier={regimeForActive?.modifier ?? 0}
         />
 
+        {/* Stacked beside Framework 1: Extension Overlay on top of Forward Growth. */}
+        <div className="atlas-frameworks-side-stack">
+          <ExtensionOverlayPanel ticker={activeTicker} atlasScore={f1DisplayScore} />
+          <ForwardGrowthPanel ticker={activeTicker} atlasScore={f1DisplayScore} />
+        </div>
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
         <RegimeModifierPanel
           ticker={activeTicker}
           geopoliticalState={geopoliticalState}

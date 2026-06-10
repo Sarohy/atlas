@@ -167,27 +167,36 @@ def _apply_fcf_routine_modifier(
     indicator: "InsiderActivityIndicator",
     fcf_current: float | None,
 ) -> "InsiderActivityIndicator":
-    """Moderate CEO_MEGA_SALE penalty when the sell is trivially small vs FCF.
+    """Moderate insider-selling penalties when the selling is trivially small
+    relative to trailing-twelve-month FCF.
 
-    At large-cap companies with strong positive FCF, a CEO selling an absolute
-    "mega" amount can still be routine diversification when it represents < 3%
-    of annual free cash flow — no meaningful conviction-loss signal.
+    At large-cap companies with strong positive FCF, both a single CEO "mega"
+    sale and a cluster of routine multi-officer 10b5-1 diversification sales can
+    each represent < 3% of annual FCF — no meaningful conviction-loss signal.
 
-    Conditions for upgrade to ROUTINE_DIVERSIFICATION (score 70):
-      1. indicator.activity_label == "CEO_MEGA_SALE"
-      2. fcf_current > 0 (positive FCF — selling while burning cash stays penalised)
-      3. indicator.ceo_cfo_sell_value is not None
-      4. ceo_cfo_sell_value / fcf_current < _INSIDER_FCF_ROUTINE_RATIO (3%)
+    Upgrades to ROUTINE_DIVERSIFICATION (score 70) when FCF is positive and the
+    sell total that *triggered* the penalty is < _INSIDER_FCF_ROUTINE_RATIO (3%)
+    of TTM FCF:
+      * CEO_MEGA_SALE  → gated on ceo_cfo_sell_value (the CEO/CFO mega total)
+      * MULTIPLE_SALES → gated on net_sell_value (the total that triggered it)
 
-    All other labels are returned unchanged.
+    Selling while burning cash (FCF <= 0) is always kept penalised, and all
+    other labels are returned unchanged.
     """
-    if indicator.activity_label != "CEO_MEGA_SALE":
-        return indicator
     if fcf_current is None or fcf_current <= 0:
         return indicator
-    if indicator.ceo_cfo_sell_value is None:
+
+    label = indicator.activity_label
+    if label == "CEO_MEGA_SALE":
+        sell_total = indicator.ceo_cfo_sell_value
+    elif label == "MULTIPLE_SALES":
+        sell_total = indicator.net_sell_value
+    else:
         return indicator
-    if indicator.ceo_cfo_sell_value / fcf_current >= _INSIDER_FCF_ROUTINE_RATIO:
+
+    if sell_total is None:
+        return indicator
+    if sell_total / fcf_current >= _INSIDER_FCF_ROUTINE_RATIO:
         return indicator
     return indicator.model_copy(
         update={
@@ -1123,7 +1132,15 @@ class FundamentalService:
 
     @staticmethod
     def _extract_cash_flows(data: dict[str, Any]) -> dict[str, float | None]:
-        """Extract FCF for the two most recent quarters."""
+        """Extract trailing-twelve-month FCF and the preceding TTM (for trend).
+
+        Single-quarter FCF is far too noisy for cyclical / lumpy-capex names: a
+        single capex-heavy quarter can read as an 80% "decline" while the TTM is
+        essentially flat (e.g. AMAT — one quarter showed $208M FCF vs a $5.34B
+        TTM). We therefore sum four quarters for the current TTM and the four
+        quarters before it for the prior TTM, mirroring how the trend is
+        intended to be assessed.
+        """
         reports: list[dict[str, Any]] = data.get("quarterlyReports", [])
 
         def _fcf(rec: dict[str, Any]) -> float | None:
@@ -1136,8 +1153,15 @@ class FundamentalService:
             capex_abs = abs(capex) if capex is not None else 0.0
             return op - capex_abs
 
-        fcf_cur = _fcf(reports[0]) if len(reports) > 0 else None
-        fcf_pri = _fcf(reports[1]) if len(reports) > 1 else None
+        def _ttm(window: list[dict[str, Any]]) -> float | None:
+            """Sum FCF over a 4-quarter window; None if any quarter is missing."""
+            values = [_fcf(rec) for rec in window]
+            if not values or any(v is None for v in values):
+                return None
+            return sum(v for v in values if v is not None)
+
+        fcf_cur = _ttm(reports[0:4]) if len(reports) >= 4 else None
+        fcf_pri = _ttm(reports[4:8]) if len(reports) >= 8 else None
 
         return {"fcf_current": fcf_cur, "fcf_prior": fcf_pri}
 

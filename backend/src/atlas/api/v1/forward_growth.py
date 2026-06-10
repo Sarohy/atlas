@@ -54,7 +54,10 @@ async def get_forward_growth(
     ):
         _validate_score(value, name)
 
-    service = ForwardGrowthService(alphavantage_key=settings.alphavantage_api_key)
+    service = ForwardGrowthService(
+        alphavantage_key=settings.alphavantage_api_key,
+        transcript_api_key=settings.earnings_transcript_api_key or "",
+    )
     return await service.compute_forward_growth(
         normalised,
         f5_score=f5_score,

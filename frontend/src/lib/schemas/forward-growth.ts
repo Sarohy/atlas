@@ -23,6 +23,12 @@ export const forwardGrowthResponseSchema = z.object({
     status: z.string(),
   }),
 
+  // Exact figures from free EDGAR (when disclosed).
+  backlog_usd: z.coerce.number().nullable().optional(),
+  customer_concentration_pct: z.coerce.number().nullable().optional(),
+  customers_over_10pct: z.number().int().nullable().optional(),
+  customer_concentration_summary: z.string().nullable().optional(),
+
   f5_score: z.number().int().nullable().optional(),
   f4_score: z.number().int().nullable().optional(),
   atlas_score: z.number().int().nullable().optional(),

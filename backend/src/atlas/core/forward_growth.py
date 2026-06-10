@@ -21,6 +21,7 @@ All functions here are pure (no I/O); the service owns the Alpha Vantage fetch.
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 # ---------------------------------------------------------------------------
@@ -152,6 +153,142 @@ _TICKER_WAVE: Final[dict[str, str]] = {
     # GPU
     "NVDA": "GPU", "AMD": "GPU",
 }
+
+
+# ---------------------------------------------------------------------------
+# Transcript signal extraction (G2 backlog, G3 customer quality, G4 ramp)
+# ---------------------------------------------------------------------------
+#
+# Heuristic keyword/regex scoring over the earnings-call transcript we already
+# fetch from FMP. These are coarse proxies — the `source` is reported as
+# "transcript" so callers know the score is heuristic, not a clean field. Each
+# returns a 0-100 score, or None when no relevant signal is present (→ DATA_GAP,
+# so absence of mention is treated as unknown, never as a penalty).
+
+_RAMP_GROWTH_WORDS: Final[tuple[str, ...]] = (
+    "grew", "growing", "increased", "increasing", "expand", "building",
+    "design win", "design-win", "bookings", "record",
+)
+_BACKLOG_STRONG: Final[tuple[str, ...]] = (
+    "sold out", "sold-out", "fully booked", "record backlog", "multi-year agreement",
+)
+_BACKLOG_MODERATE: Final[tuple[str, ...]] = (
+    "backlog", "bookings", "design win", "design-win", "order book",
+    "committed capacity", "contractual minimum", "purchase commitment",
+)
+# "$1.2 billion backlog" / "backlog of $324 million" etc.
+_DOLLAR_BACKLOG_RE: Final[re.Pattern[str]] = re.compile(
+    r"(\$\s?\d[\d.,]*\s?(?:billion|million|bn|m|b)?[^.\n]{0,40}\b(?:backlog|orders|bookings)\b"
+    r"|\b(?:backlog|bookings|orders)\b[^.\n]{0,25}\$\s?\d)",
+    re.IGNORECASE,
+)
+
+_HYPERSCALER_TERMS: Final[tuple[str, ...]] = ("hyperscaler", "hyperscale")
+_NAMED_CUSTOMERS: Final[tuple[str, ...]] = (
+    "nvidia", "microsoft", "azure", "amazon", "aws", "google", "alphabet",
+    "meta", "tesla", "apple", "broadcom", "oracle", "openai", "tsmc",
+)
+_CONCENTRATION_TERMS: Final[tuple[str, ...]] = (
+    "10% customer", "largest customer", "customer concentration", "top customer",
+)
+
+_RAMP_INFLECTION: Final[tuple[str, ...]] = (
+    "inflection", "volume ramp", "production ramp", "significantly larger ramp",
+    "accelerating ramp", "steep ramp",
+)
+_NEXTGEN_PRODUCTS: Final[tuple[str, ...]] = (
+    "1.6t", "800g", "cpo", "co-packaged", "hbm4", "hbm3e", "cowos",
+    "2nm", "gaa", "blackwell", "rubin", "400g",
+)
+
+
+def _any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(t in text for t in terms)
+
+
+def score_backlog_signal(transcript: str) -> int | None:
+    """G2 — backlog / bookings / sold-out language from the transcript."""
+    if not transcript:
+        return None
+    t = transcript.lower()
+    if _any(t, _BACKLOG_STRONG) or _DOLLAR_BACKLOG_RE.search(transcript):
+        return 90
+    if "backlog" in t and _any(t, _RAMP_GROWTH_WORDS):
+        return 78
+    if _any(t, _BACKLOG_MODERATE):
+        return 65
+    return None
+
+
+def score_customer_quality_signal(transcript: str) -> int | None:
+    """G3 — named hyperscaler / blue-chip customer quality from the transcript."""
+    if not transcript:
+        return None
+    t = transcript.lower()
+    quality = sum(1 for n in _NAMED_CUSTOMERS if n in t) + (1 if _any(t, _HYPERSCALER_TERMS) else 0)
+    if quality >= 2:
+        return 90
+    if quality == 1:
+        return 78
+    if _any(t, _CONCENTRATION_TERMS):
+        return 62  # concentration acknowledged, but no named-quality signal
+    return None
+
+
+def score_product_ramp_signal(transcript: str) -> int | None:
+    """G4 — product ramp / inflection language from the transcript."""
+    if not transcript:
+        return None
+    t = transcript.lower()
+    has_ramp = "ramp" in t
+    has_nextgen = _any(t, _NEXTGEN_PRODUCTS)
+    if _any(t, _RAMP_INFLECTION) or (has_ramp and has_nextgen):
+        return 90
+    if has_ramp:
+        return 78
+    if has_nextgen:
+        return 65
+    return None
+
+
+def score_backlog_from_rpo(rpo_usd: float | None, ttm_revenue: float | None) -> int | None:
+    """Score G2 from an exact remaining-performance-obligation (backlog) figure.
+
+    Scored on backlog *coverage* — RPO as a multiple of trailing revenue:
+      >= 1.0x revenue → 95   (more than a year of contracted demand booked)
+      0.5-1.0x        → 85
+      0.25-0.5x       → 75
+      < 0.25x         → 60
+    Returns None when either input is missing/zero (caller falls back).
+    """
+    if rpo_usd is None or rpo_usd <= 0 or ttm_revenue is None or ttm_revenue <= 0:
+        return None
+    coverage = rpo_usd / ttm_revenue
+    if coverage >= 1.0:
+        return 95
+    if coverage >= 0.5:
+        return 85
+    if coverage >= 0.25:
+        return 75
+    return 60
+
+
+def concentration_quality_cap(largest_customer_pct: float | None) -> int | None:
+    """Cap G3 customer quality when a single customer dominates revenue.
+
+    A named blue-chip customer is a quality positive, but extreme single-customer
+    dependence is a fragility risk that should bound the quality score:
+      >= 50% one customer → cap 60
+      40-50%              → cap 72
+    Returns None (no cap) below 40% or when unknown.
+    """
+    if largest_customer_pct is None:
+        return None
+    if largest_customer_pct >= 50.0:
+        return 60
+    if largest_customer_pct >= 40.0:
+        return 72
+    return None
 
 
 def lookup_tam_bottleneck(ticker: str) -> tuple[int, str, str]:

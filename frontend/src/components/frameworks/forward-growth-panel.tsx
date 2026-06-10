@@ -43,6 +43,20 @@ function fmtPct(value: number | null | undefined): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
+function fmtBigUsd(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `$${(value / 1e6).toFixed(0)}M`;
+  return `$${value.toFixed(0)}`;
+}
+
+/** Exact largest-customer %, else a ">10% customer" count, from EDGAR. */
+function fmtConcentration(pct: number | null | undefined, count: number | null | undefined): string {
+  if (pct != null) return ` · top cust ${pct.toFixed(0)}%`;
+  if (count != null) return ` · ${count} cust >10%`;
+  return '';
+}
+
 // ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
@@ -136,7 +150,9 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: stri
 
 function FgsContent({ data }: { data: ForwardGrowthResponse }) {
   const ra = data.revenue_acceleration;
-  const gap = (source: string) => (source === 'DATA_GAP' ? ' (gap)' : '');
+  // Annotate provenance: DATA_GAP → "(gap)", transcript heuristic → "(est)".
+  const gap = (source: string) =>
+    source === 'DATA_GAP' ? ' (gap)' : source === 'transcript' ? ' (est)' : '';
   return (
     <div data-testid="fgs-content">
       {/* FGS headline + confidence */}
@@ -160,8 +176,19 @@ function FgsContent({ data }: { data: ForwardGrowthResponse }) {
           ra.accelerating == null ? '' : ra.accelerating ? ' ↑' : ' ↓'
         }`}
       />
-      <Row label="Backlog / bookings" value={`${data.backlog_bookings.score}${gap(data.backlog_bookings.source)}`} />
-      <Row label="Customer quality" value={`${data.customer_quality.score}${gap(data.customer_quality.source)}`} />
+      <Row
+        label="Backlog / bookings"
+        value={`${data.backlog_bookings.score}${gap(data.backlog_bookings.source)}${
+          data.backlog_usd != null ? ` · ${fmtBigUsd(data.backlog_usd)} RPO` : ''
+        }`}
+      />
+      <Row
+        label="Customer quality"
+        value={`${data.customer_quality.score}${gap(data.customer_quality.source)}${fmtConcentration(
+          data.customer_concentration_pct,
+          data.customers_over_10pct,
+        )}`}
+      />
       <Row label="Product ramp" value={`${data.product_ramp.score}${gap(data.product_ramp.source)}`} />
       <Row
         label="TAM / bottleneck"

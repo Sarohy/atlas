@@ -70,4 +70,29 @@ describe('ForwardGrowthPanel', () => {
     expect(screen.getByTestId('fgs-bucket')).toHaveTextContent('—');
     expect(screen.queryByTestId('fgs-action')).not.toBeInTheDocument();
   });
+
+  it('surfaces EDGAR backlog $ and customer concentration', async () => {
+    mocks.data = fgs({
+      backlog_bookings: { score: 95, source: 'edgar' },
+      backlog_usd: 1_500_000_000,
+      customer_quality: { score: 78, source: 'transcript' },
+      customer_concentration_pct: null,
+      customers_over_10pct: 2,
+    });
+    render(<ForwardGrowthPanel ticker="AAOI" atlasScore={74} />, { wrapper: makeWrapper() });
+    await waitFor(() => expect(screen.getByTestId('fgs-content')).toBeInTheDocument());
+    expect(screen.getByText(/\$1\.5B RPO/)).toBeInTheDocument();
+    expect(screen.getByText(/2 cust >10%/)).toBeInTheDocument();
+  });
+
+  it('shows exact top-customer % when EDGAR discloses it', async () => {
+    mocks.data = fgs({
+      customer_quality: { score: 72, source: 'transcript' },
+      customer_concentration_pct: 42,
+      customers_over_10pct: 1,
+    });
+    render(<ForwardGrowthPanel ticker="XYZ" atlasScore={70} />, { wrapper: makeWrapper() });
+    await waitFor(() => expect(screen.getByTestId('fgs-content')).toBeInTheDocument());
+    expect(screen.getByText(/top cust 42%/)).toBeInTheDocument();
+  });
 });

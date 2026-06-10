@@ -57,6 +57,20 @@ class ForwardGrowthResponse(BaseModel):
     product_ramp: FgsSubFactor
     tam_bottleneck: TamBottleneckSubFactor
 
+    # --- Exact figures from free EDGAR (when the filer discloses them) ---
+    backlog_usd: float | None = Field(
+        None, description="Remaining performance obligation (backlog) in USD from XBRL, if tagged."
+    )
+    customer_concentration_pct: float | None = Field(
+        None, description="Largest single-customer share of revenue, percent (from the 10-K)."
+    )
+    customers_over_10pct: int | None = Field(
+        None, description="Count of customers each accounting for >10% of revenue (from the 10-K)."
+    )
+    customer_concentration_summary: str | None = Field(
+        None, description="Short verbatim snippet of the 10-K concentration disclosure."
+    )
+
     # --- Action matrix (populated when f5_score supplied) ---
     f5_score: int | None = Field(None, description="F5 survivability score used for the matrix.")
     f4_score: int | None = Field(None, description="F4 options-flow score used for the matrix.")

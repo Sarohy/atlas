@@ -21,6 +21,9 @@ from atlas.schemas.extension_overlay import ExtensionOverlayResponse
 # 380 calendar days ≈ 265 trading sessions — enough for the 200-day MA plus the
 # trailing windows even accounting for holidays.
 _LOOKBACK_DAYS: Final[int] = 380
+# Long window for the all-time-high lookup — ~25 years, capped by whatever history
+# the Polygon plan returns. The ATH is the max split-adjusted high over that range.
+_ATH_LOOKBACK_DAYS: Final[int] = 9200
 _POLYGON_AGGS_URL: Final[str] = (
     "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
 )
@@ -47,32 +50,75 @@ class ExtensionOverlayService:
     async def compute_overlay(
         self, ticker: str, atlas_score: int | None = None
     ) -> ExtensionOverlayResponse:
-        """Fetch bars + IV rank and assemble the Extension Overlay response."""
+        """Fetch bars + IV rank + ATH and assemble the Extension Overlay response."""
         if self._client is not None:
-            bars, iv_rank = await self._fetch_inputs(self._client, ticker)
+            bars, iv_rank, ath, ath_date = await self._fetch_inputs(self._client, ticker)
         else:
             async with httpx.AsyncClient() as client:
-                bars, iv_rank = await self._fetch_inputs(client, ticker)
+                bars, iv_rank, ath, ath_date = await self._fetch_inputs(client, ticker)
 
-        return self._build_response(ticker, bars, atlas_score, iv_rank)
+        return self._build_response(ticker, bars, atlas_score, iv_rank, ath, ath_date)
 
     async def _fetch_inputs(
         self, client: httpx.AsyncClient, ticker: str
-    ) -> tuple[list[dict[str, Any]], float | None]:
-        """Fetch Polygon bars and (when a UW key is set) IV rank concurrently.
+    ) -> tuple[list[dict[str, Any]], float | None, float | None, str | None]:
+        """Fetch Polygon bars, the all-time high, and (with a UW key) IV rank.
 
-        IV rank comes from Unusual Whales as a 0-1 fraction (shared with the
-        LEAPS module); it is rescaled to the 0-100 convention the extension
-        engine expects.  Returns ``(bars, iv_rank_0_100_or_None)``.
+        All fetches run concurrently. IV rank comes from Unusual Whales already
+        on a 0-100 scale. Returns ``(bars, iv_rank, ath_high, ath_date)``.
         """
-        if not self._uw_api_key:
-            return await self._fetch_bars(client, ticker), None
+        bars_task = self._fetch_bars(client, ticker)
+        ath_task = self._fetch_ath(client, ticker)
+        if self._uw_api_key:
+            bars, iv_rank, (ath, ath_date) = await asyncio.gather(
+                bars_task, self._fetch_iv_rank(client, ticker), ath_task
+            )
+            return bars, iv_rank, ath, ath_date
+        bars, (ath, ath_date) = await asyncio.gather(bars_task, ath_task)
+        return bars, None, ath, ath_date
 
-        bars, iv_rank = await asyncio.gather(
-            self._fetch_bars(client, ticker),
-            self._fetch_iv_rank(client, ticker),
+    async def _fetch_ath(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> tuple[float | None, str | None]:
+        """Return ``(all_time_high, ath_date)`` from the max split-adjusted daily
+        high over the long window (best-effort, capped by available history)."""
+        to_date = date.today()
+        from_date = to_date - timedelta(days=_ATH_LOOKBACK_DAYS)
+        url = _POLYGON_AGGS_URL.format(
+            ticker=ticker,
+            from_date=from_date.isoformat(),
+            to_date=to_date.isoformat(),
         )
-        return bars, iv_rank
+        try:
+            resp = await client.get(
+                url,
+                params={
+                    "adjusted": "true",
+                    "sort": "asc",
+                    "limit": "50000",
+                    "apiKey": self._api_key,
+                },
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return None, None
+
+        payload: dict[str, Any] = resp.json()
+        results = payload.get("results", []) or []
+        best_high: float | None = None
+        best_ts: int | None = None
+        for bar in results:
+            high = bar.get("h")
+            if high is None:
+                continue
+            high = float(high)
+            if best_high is None or high > best_high:
+                best_high, best_ts = high, bar.get("t")
+        if best_high is None:
+            return None, None
+        ath_date = date.fromtimestamp(best_ts / 1000).isoformat() if best_ts else None
+        return best_high, ath_date
 
     async def _fetch_iv_rank(
         self, client: httpx.AsyncClient, ticker: str
@@ -143,22 +189,30 @@ class ExtensionOverlayService:
         bars: list[dict[str, Any]],
         atlas_score: int | None,
         iv_rank: float | None = None,
+        ath: float | None = None,
+        ath_date: str | None = None,
     ) -> ExtensionOverlayResponse:
         symbol = ticker.upper()
         data_gaps: list[str] = []
         if iv_rank is None:
             data_gaps.append("IV_RANK")
+        if ath is None:
+            data_gaps.append("ATH")
 
         # All metrics default to None and are filled in when enough bars exist.
         rsi14 = rsi7 = move14 = move21 = None
         above20 = above50 = above200 = gap = week52 = None
-        vwap = vs_vwap = None
+        vwap = vs_vwap = pct_from_ath = None
 
         closes = [float(b["c"]) for b in bars if b.get("c") is not None]
         if not closes:
             data_gaps.append("PRICE_BARS")
         else:
             price = closes[-1]
+
+            # Distance from the all-time high (negative = below ATH = dipped).
+            if ath is not None and ath > 0:
+                pct_from_ath = (price - ath) / ath * 100.0
             rsi14 = ext.compute_rsi(closes, 14)
             rsi7 = ext.compute_rsi(closes, 7)
             move14 = ext.pct_move(closes, 14)
@@ -224,6 +278,9 @@ class ExtensionOverlayService:
             gap_today_pct=_round(gap),
             vwap=_round(vwap),
             pct_vs_vwap=_round(vs_vwap),
+            ath=_round(ath),
+            ath_date=ath_date,
+            pct_from_ath=_round(pct_from_ath),
             iv_rank=_round(iv_rank),
             extension_risk_score=risk,
             extension_flag=flag,

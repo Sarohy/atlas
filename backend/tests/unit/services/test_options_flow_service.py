@@ -225,7 +225,7 @@ def test_build_response_v2_applies_strategy_adjustment_when_overwrite_leg_is_one
     assert response.f4_grade == "NEUTRAL"
 
 
-def test_build_response_v2_boosts_clean_dark_pool_accumulation_when_options_neutral() -> None:
+def test_build_response_v2_dark_pool_does_not_enter_f4_score() -> None:
     response = _build_response_v2(
         ticker="NBIS",
         market_cap=60_000_000_000.0,
@@ -298,8 +298,10 @@ def test_build_response_v2_boosts_clean_dark_pool_accumulation_when_options_neut
     assert response.dark_pool_net_flow_usd == 11_000_000.0
     assert response.dark_pool_large_buy_count == 5
     assert response.options_net_flow_usd == 0.0
-    assert response.dark_pool_score >= 60
-    assert response.f4_score >= 55
+    # F4 is options-only now: strong dark-pool accumulation does NOT lift the score
+    # (it surfaces via the chip/clearance instead). Options neutral -> F4 == 50.
+    assert response.f4_score == 50
+    assert response.data_source == "OPTIONS_ONLY"
 
 
 def test_build_response_v2_does_not_boost_when_settlement_is_too_high() -> None:
@@ -449,3 +451,103 @@ def test_apply_dark_pool_quality_boost_applies_only_when_all_gates_pass() -> Non
 
     assert boosted == 68
     assert not_boosted == 58
+
+
+# ---------------------------------------------------------------------------
+# Dark-pool fetch pagination (older_than cursor until 5 sessions covered)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _PagedClient:
+    """Returns a queued payload per GET, recording the params of each call."""
+
+    def __init__(self, pages: list[object]) -> None:
+        self._pages = pages
+        self.calls: list[dict] = []
+
+    async def get(self, _url: str, params: dict | None = None, headers: dict | None = None):
+        self.calls.append(params or {})
+        idx = len(self.calls) - 1
+        return _FakeResp(self._pages[idx] if idx < len(self._pages) else {"data": []})
+
+
+def _dp(day: str) -> dict:
+    return {"executed_at": f"{day}T15:00:00Z", "price": 10.0, "premium": 1000.0}
+
+
+async def test_dark_pool_fetch_paginates_until_five_sessions() -> None:
+    from atlas.services.options_flow_service import _fetch_dark_pool_prints
+
+    pages = [
+        {"data": [_dp("2026-06-12"), _dp("2026-06-11")]},  # 2 distinct days
+        {"data": [_dp("2026-06-10"), _dp("2026-06-09")]},  # 4 cumulative
+        {"data": [_dp("2026-06-08")]},  # 5 cumulative -> stop
+    ]
+    client = _PagedClient(pages)
+    prints = await _fetch_dark_pool_prints(client, "MU", {})  # type: ignore[arg-type]
+
+    assert prints is not None and len(prints) == 5
+    assert len(client.calls) == 3  # paginated across three pages
+    # Pages 2 and 3 carry the older_than cursor from the prior page's last record.
+    assert client.calls[1]["older_than"] == "2026-06-11T15:00:00Z"
+    assert client.calls[2]["older_than"] == "2026-06-09T15:00:00Z"
+
+
+async def test_dark_pool_fetch_stops_after_one_page_when_window_covered() -> None:
+    from atlas.services.options_flow_service import _fetch_dark_pool_prints
+
+    one_page = {
+        "data": [_dp(f"2026-06-{d:02d}") for d in (12, 11, 10, 9, 8)]  # 5 distinct days at once
+    }
+    client = _PagedClient([one_page])
+    prints = await _fetch_dark_pool_prints(client, "MU", {})  # type: ignore[arg-type]
+
+    assert prints is not None and len(prints) == 5
+    assert len(client.calls) == 1  # no pagination needed
+    assert "older_than" not in client.calls[0]
+
+
+def _dp_print(day: str, price: float = 10.0) -> dict:
+    return {
+        "executed_at": f"{day}T15:00:00Z",
+        "price": price,
+        "nbbo_bid": 9.9,
+        "nbbo_ask": 10.1,
+        "premium": 1000.0,
+        "size": 100,
+    }
+
+
+def test_build_response_v2_flags_dark_pool_truncation_on_high_volume() -> None:
+    from atlas.services.options_flow_service import _UW_DARK_POOL_MAX_PAGES, _UW_FETCH_LIMIT
+
+    # Full page-cap of prints all on a single session -> truncation.
+    n = _UW_DARK_POOL_MAX_PAGES * _UW_FETCH_LIMIT
+    dp_prints = [_dp_print("2026-06-11") for _ in range(n)]
+    resp = _build_response_v2(
+        ticker="NVDA", market_cap=3_000_000_000_000.0, dp_prints=dp_prints, opt_trades=None
+    )
+    assert resp.dark_pool_truncated is True
+    assert resp.dark_pool_sessions_covered == 1
+    assert resp.data_gap_reason is not None
+    assert "high-volume truncation" in resp.data_gap_reason
+
+
+def test_build_response_v2_no_truncation_when_window_fully_covered() -> None:
+    dp_prints = [_dp_print(f"2026-06-{d:02d}") for d in (11, 10, 9, 8, 5)]  # 5 distinct days
+    resp = _build_response_v2(
+        ticker="ACME", market_cap=8_000_000_000.0, dp_prints=dp_prints, opt_trades=None
+    )
+    assert resp.dark_pool_truncated is False
+    assert resp.dark_pool_sessions_covered == 5

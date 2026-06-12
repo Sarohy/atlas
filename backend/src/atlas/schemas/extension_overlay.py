@@ -55,6 +55,55 @@ class ExtensionOverlayResponse(BaseModel):
         "unset or UW returns no data (DATA_GAP).",
     )
 
+    # --- Deterministic technical sell / exhaustion signals ---
+    td_setup: int | None = Field(
+        None, description="DeMark TD setup count (1-9); null when no active setup."
+    )
+    td_setup_direction: str | None = Field(
+        None, description="TD setup direction: SELL | BUY | null."
+    )
+    td_countdown: int | None = Field(
+        None, description="DeMark TD sell countdown progress (1-13); null when not counting."
+    )
+    td_signal: str | None = Field(
+        None,
+        description="SELL_SETUP_9 | SELL_COUNTDOWN_13 | BUY_SETUP_9 | null (headline TD signal).",
+    )
+    rsi_bearish_divergence: bool = Field(
+        default=False, description="Price higher-high while RSI makes a lower-high."
+    )
+    macd_bearish_cross: bool = Field(
+        default=False, description="Fresh MACD line cross below its signal line."
+    )
+
+    # --- Rule-based Elliott Wave + Gann (contextual; NOT in the risk score) ---
+    elliott_wave: str | None = Field(
+        None, description="Current Elliott impulse wave (count of completed legs, 1-5)."
+    )
+    elliott_direction: str | None = Field(None, description="Impulse direction: UP | DOWN | null.")
+    elliott_signal: str | None = Field(
+        None,
+        description="IMPULSE_TOP_SELL | IMPULSE_BOTTOM_BUY | null (rule-valid completed impulse).",
+    )
+    elliott_confidence: int | None = Field(
+        None, description="Fibonacci-guideline adherence of the impulse (0-100)."
+    )
+    gann_signal: str | None = Field(
+        None, description="BELOW_1X1_BEARISH | AT_GANN_RESISTANCE | TIME_TURN_DUE | null."
+    )
+    gann_below_1x1: bool = Field(
+        default=False, description="Price below the 1x1 support angle from the last swing low."
+    )
+    gann_time_cycle_due: bool = Field(
+        default=False, description="Near a 90/144/180/360-bar Gann time count from the last pivot."
+    )
+    gann_nearest_support: float | None = Field(
+        None, description="Nearest Square-of-9 support level below price."
+    )
+    gann_nearest_resistance: float | None = Field(
+        None, description="Nearest Square-of-9 resistance level above price."
+    )
+
     # --- Overlay outputs ---
     extension_risk_score: int = Field(
         ge=0, description="Summed Extension Risk Score from the points table (0-N)."

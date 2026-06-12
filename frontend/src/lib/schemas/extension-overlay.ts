@@ -21,6 +21,25 @@ export const extensionOverlayResponseSchema = z.object({
   pct_from_ath: z.coerce.number().nullable().optional(),
   iv_rank: z.coerce.number().nullable().optional(),
 
+  // Deterministic technical sell / exhaustion signals.
+  td_setup: z.number().int().nullable().optional(),
+  td_setup_direction: z.string().nullable().optional(),
+  td_countdown: z.number().int().nullable().optional(),
+  td_signal: z.string().nullable().optional(),
+  rsi_bearish_divergence: z.boolean().default(false),
+  macd_bearish_cross: z.boolean().default(false),
+
+  // Rule-based Elliott Wave + Gann (contextual).
+  elliott_wave: z.string().nullable().optional(),
+  elliott_direction: z.string().nullable().optional(),
+  elliott_signal: z.string().nullable().optional(),
+  elliott_confidence: z.number().int().nullable().optional(),
+  gann_signal: z.string().nullable().optional(),
+  gann_below_1x1: z.boolean().default(false),
+  gann_time_cycle_due: z.boolean().default(false),
+  gann_nearest_support: z.coerce.number().nullable().optional(),
+  gann_nearest_resistance: z.coerce.number().nullable().optional(),
+
   // Overlay outputs.
   extension_risk_score: z.number().int().min(0),
   extension_flag: z.enum(['GREEN', 'YELLOW', 'RED', 'EXTREME_RED']),

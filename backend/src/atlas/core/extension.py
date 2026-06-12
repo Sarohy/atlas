@@ -23,6 +23,7 @@ Polygon as a reference, but the intraday running VWAP would need a new data path
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Final
 
 # ---------------------------------------------------------------------------
@@ -148,6 +149,164 @@ def gap_pct(today_open: float | None, prev_close: float | None) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Technical sell / exhaustion signals (deterministic, price-only)
+# ---------------------------------------------------------------------------
+#
+# DeMark TD Sequential, RSI bearish divergence, and a fresh MACD bearish cross —
+# all computed from the daily bars. Elliott Wave / Gann are intentionally NOT
+# here: they are interpretive (no objective algorithm) and would be vibes dressed
+# as math. These three are objective exhaustion reads that reinforce the
+# "extended — don't chase" timing signal.
+
+
+@dataclass(frozen=True)
+class TdSequential:
+    """DeMark TD Sequential state at the latest bar (simplified — standard
+    9-count setup + a 13-count sell countdown, without the esoteric
+    deferral/qualifier rules)."""
+
+    setup_count: int  # current consecutive setup count, capped at 9
+    setup_direction: str | None  # "SELL" | "BUY" | None
+    sell_countdown: int  # 0-13 sell countdown progress since the last setup-9
+    signal: str | None  # "SELL_SETUP_9" | "SELL_COUNTDOWN_13" | "BUY_SETUP_9" | None
+
+
+def td_sequential(highs: list[float], closes: list[float]) -> TdSequential:
+    """Compute DeMark TD Sequential (setup + sell countdown) from daily bars.
+
+    TD setup: a bar is a *sell* setup bar when close > close 4 bars earlier
+    (a *buy* setup bar when close < close 4 bars earlier); 9 consecutive
+    completes a setup. TD sell countdown: after a completed sell setup, count
+    bars where close >= the high 2 bars earlier, up to 13.
+    """
+    n = len(closes)
+    if n < 5:
+        return TdSequential(0, None, 0, None)
+
+    sell_run = 0
+    buy_run = 0
+    sell_complete_idx: list[int] = []
+    for i in range(4, n):
+        if closes[i] > closes[i - 4]:
+            sell_run, buy_run = sell_run + 1, 0
+        elif closes[i] < closes[i - 4]:
+            buy_run, sell_run = buy_run + 1, 0
+        else:
+            sell_run = buy_run = 0
+        if sell_run == 9:
+            sell_complete_idx.append(i)
+
+    if sell_run > 0:
+        count, direction = min(sell_run, 9), "SELL"
+    elif buy_run > 0:
+        count, direction = min(buy_run, 9), "BUY"
+    else:
+        count, direction = 0, None
+
+    countdown = 0
+    if sell_complete_idx:
+        start = sell_complete_idx[-1]
+        for i in range(start + 1, n):
+            if i >= 2 and closes[i] >= highs[i - 2]:
+                countdown += 1
+                if countdown >= 13:
+                    break
+
+    signal: str | None = None
+    if countdown >= 13:
+        signal = "SELL_COUNTDOWN_13"
+    elif direction == "SELL" and count >= 9:
+        signal = "SELL_SETUP_9"
+    elif direction == "BUY" and count >= 9:
+        signal = "BUY_SETUP_9"
+
+    return TdSequential(count, direction, min(countdown, 13), signal)
+
+
+def rsi_series(closes: list[float], period: int) -> list[float | None]:
+    """Wilder RSI value at each bar (None for the first ``period`` bars)."""
+    out: list[float | None] = [None] * len(closes)
+    if len(closes) < period + 1:
+        return out
+    changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(0.0, c) for c in changes]
+    losses = [max(0.0, -c) for c in changes]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    def _rsi(g: float, ls: float) -> float:
+        if ls == 0:
+            return 100.0 if g > 0 else 50.0
+        return 100.0 - 100.0 / (1.0 + g / ls)
+
+    out[period] = _rsi(avg_gain, avg_loss)
+    for i in range(period, len(changes)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        out[i + 1] = _rsi(avg_gain, avg_loss)
+    return out
+
+
+def detect_rsi_bearish_divergence(
+    closes: list[float],
+    rsi_vals: list[float | None],
+    *,
+    window: int = 40,
+    pivot_k: int = 3,
+) -> bool:
+    """True when the two most recent price pivot-highs make a higher high while
+    RSI makes a lower high (classic bearish divergence)."""
+    if len(closes) != len(rsi_vals) or len(closes) < pivot_k * 2 + 2:
+        return False
+    start = max(pivot_k, len(closes) - window)
+    pivots = [
+        i
+        for i in range(start, len(closes) - pivot_k)
+        if rsi_vals[i] is not None and closes[i] == max(closes[i - pivot_k : i + pivot_k + 1])
+    ]
+    if len(pivots) < 2:
+        return False
+    p_prev, p_last = pivots[-2], pivots[-1]
+    r_prev, r_last = rsi_vals[p_prev], rsi_vals[p_last]
+    if r_prev is None or r_last is None:
+        return False
+    return closes[p_last] > closes[p_prev] and r_last < r_prev
+
+
+def _ema(values: list[float], period: int) -> list[float]:
+    if not values:
+        return []
+    k = 2.0 / (period + 1)
+    out = [values[0]]
+    for v in values[1:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
+
+
+def macd_bearish_cross(
+    closes: list[float], *, fast: int = 12, slow: int = 26, signal: int = 9, recent: int = 5
+) -> bool:
+    """True when the MACD line crossed below its signal within the last ``recent``
+    sessions (a fresh bearish cross within the past week — still actionable)."""
+    if len(closes) < slow + signal + 1:
+        return False
+    fast_e = _ema(closes, fast)
+    slow_e = _ema(closes, slow)
+    macd_line = [f - s for f, s in zip(fast_e[slow - 1 :], slow_e[slow - 1 :], strict=True)]
+    if len(macd_line) < 2:
+        return False
+    sig = _ema(macd_line, signal)
+    macd_aligned = macd_line[-len(sig) :]
+    if len(macd_aligned) < 2 or len(sig) < 2:
+        return False
+    span = min(recent, len(sig) - 1)
+    return any(
+        macd_aligned[-i] < sig[-i] and macd_aligned[-i - 1] >= sig[-i - 1]
+        for i in range(1, span + 1)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Extension Risk Score
 # ---------------------------------------------------------------------------
 
@@ -163,12 +322,19 @@ def extension_risk_score(
     pct_above_200dma: float | None,
     gap_today_pct: float | None,
     iv_rank: float | None,
+    td_sell_signal: str | None = None,
+    rsi_bearish_divergence: bool = False,
+    macd_bearish_cross: bool = False,
 ) -> int:
     """Sum the Extension Risk Score points table.
 
     Each metric only contributes when present (a missing/None metric scores 0
     rather than penalising the name).  RSI-14 and the 14-day move are graduated:
     the extreme tier replaces the lower tier (it does not stack).
+
+    Deterministic technical sell/exhaustion signals add modest points on top:
+    a DeMark sell countdown (13) > sell setup (9), an RSI bearish divergence,
+    and a fresh MACD bearish cross — they reinforce "extended, don't chase".
     """
     points = 0
 
@@ -205,6 +371,16 @@ def extension_risk_score(
     if iv_rank is not None and iv_rank > _IV_RANK_EXPENSIVE:
         points += 1
 
+    # Technical sell / exhaustion signals.
+    if td_sell_signal == "SELL_COUNTDOWN_13":
+        points += 3
+    elif td_sell_signal == "SELL_SETUP_9":
+        points += 2
+    if rsi_bearish_divergence:
+        points += 2
+    if macd_bearish_cross:
+        points += 1
+
     return points
 
 
@@ -232,9 +408,15 @@ _HIGH_CONVICTION_ACTIONS: Final[dict[str, tuple[str, str]]] = {
         OverlayAction.BUY_ON_PULLBACK,
         "Good name; add only on a pullback / VWAP hold, size-controlled.",
     ),
+    # High-conviction name that is technically extended. This is a "wait for a
+    # better entry" signal, NOT a sell — for a core compounder like MU, "trim"
+    # is a position-sizing instruction (rebalance only if overweight), never a
+    # bearish call on the name.
     ExtensionFlag.RED: (
         OverlayAction.HOLD_TRIM,
-        "Great company, bad entry — hold / trim strength; do not chase.",
+        "Great company, extended entry. Do not chase fresh adds. Hold core "
+        "position; trim only into strength if position size is above target. "
+        "Add on pullback, VWAP reset, or post-event confirmation.",
     ),
     ExtensionFlag.EXTREME_RED: (
         OverlayAction.TRIM_HEDGE,

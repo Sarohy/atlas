@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
 
@@ -52,10 +53,19 @@ _POLYGON_BASE_URL: Final[str] = "https://api.polygon.io"
 _F4_CACHE_TTL: Final[timedelta] = timedelta(minutes=5)
 _f4_cache: dict[str, tuple[datetime, OptionsFlowResponse]] = {}
 
-# UW pagination cap. 5 sessions x ~200 prints/day ~= 1000 prints for very
-# liquid names; a single 500-print batch covers most cases and accepts a
-# small chance of truncation for the busiest tickers.
+# UW per-page size. 5 sessions x ~200 prints/day ~= 1000 prints for very liquid
+# names; both dark-pool and flow-alert fetches paginate backward via the
+# `older_than` cursor until 5 distinct session days are covered, so a busy
+# mega-cap is no longer truncated at a single batch.
 _UW_FETCH_LIMIT: Final[int] = 500
+# Max dark-pool pages per call. The UW tape returns ~1 session per 500-print
+# batch, so covering the 5-session window needs ~5 pages for normal names and
+# up to ~7 for heavily-traded large-caps (e.g. VRT, which sits in the linear
+# score range where full coverage actually changes the score). 8 gives margin;
+# ultra-liquid mega-caps (NVDA/MU) still cap out but their net flow saturates
+# the tier anchor anyway and the partial coverage is surfaced (dark_pool_truncated).
+# Pagination stops early as soon as 5 distinct sessions are collected.
+_UW_DARK_POOL_MAX_PAGES: Final[int] = 8
 
 # Rolling window length: F4 v2 always evaluates the last 5 trading sessions.
 _F4_LOOKBACK_SESSIONS: Final[int] = 5
@@ -179,25 +189,61 @@ async def _fetch_dark_pool_prints(
 
     Returns a list of dict records (each with `price`, `nbbo_bid`,
     `nbbo_ask`, `sale_cond_codes`, `executed_at`, `size`, `premium`).
-    Returns None when the API call fails — caller treats None as
-    "dark-pool data unavailable" (DARK_POOL_ONLY / DATA_GAP partial).
+
+    Paginates backward via the ``older_than`` cursor (the oldest record's
+    ``executed_at``) until 5 distinct session days are covered or
+    _UW_DARK_POOL_MAX_PAGES pages are exhausted — so the busiest large-caps are
+    no longer truncated at a single 500-print batch.
+
+    Returns None when the first API call fails with nothing collected (caller
+    treats None as "dark-pool data unavailable"); returns whatever was gathered
+    on a partial/later-page error.
     """
-    try:
-        resp = await client.get(
-            f"{_UW_BASE_URL}/api/darkpool/{ticker}",
-            params={"limit": _UW_FETCH_LIMIT},
-            headers=headers,
+    all_prints: list[dict[str, Any]] = []
+    params: dict[str, Any] = {"limit": _UW_FETCH_LIMIT}
+
+    for _ in range(_UW_DARK_POOL_MAX_PAGES):
+        try:
+            resp = await client.get(
+                f"{_UW_BASE_URL}/api/darkpool/{ticker}",
+                params=params,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            payload: Any = resp.json()
+        except (httpx.HTTPError, ValueError, TypeError):
+            return all_prints if all_prints else None
+
+        raw: list[Any]
+        if isinstance(payload, list):
+            raw = payload
+        elif isinstance(payload, dict):
+            data = payload.get("data", payload.get("darkpool", []))
+            raw = data if isinstance(data, list) else []
+        else:
+            raw = []
+        if not raw:
+            break
+
+        all_prints.extend(
+            rec for rec in raw if isinstance(rec, dict) and not rec.get("canceled")
         )
-        resp.raise_for_status()
-        payload: Any = resp.json()
-        raw: list[Any] = (
-            payload
-            if isinstance(payload, list)
-            else payload.get("data", payload.get("darkpool", []))
-        )
-        return [rec for rec in raw if isinstance(rec, dict) and not rec.get("canceled")]
-    except (httpx.HTTPError, ValueError, TypeError):
-        return None
+
+        # Stop once the collected prints span at least 5 distinct session days.
+        distinct_days = {
+            str(r.get("executed_at", ""))[:10] for r in all_prints if r.get("executed_at")
+        }
+        if len(distinct_days) >= _F4_LOOKBACK_SESSIONS:
+            break
+
+        # Paginate: request prints older than the oldest record in this batch.
+        last = raw[-1]
+        oldest_ts = last.get("executed_at") if isinstance(last, dict) else None
+        if not oldest_ts:
+            break
+        params = {"limit": _UW_FETCH_LIMIT, "older_than": oldest_ts}
+
+    return all_prints if all_prints else None
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +469,138 @@ def _aggregate_flow_alerts(
     net_flow = _apply_strategy_aware_adjustment(alerts, net_flow)
 
     return net_flow, (largest_bull if largest_bull > 0 else None)
+
+
+# ---------------------------------------------------------------------------
+# Layer 1 — F4 score: options-only, time-decayed ("fading memory")
+# ---------------------------------------------------------------------------
+#
+# F4 is the slow 5-session OPTIONS-flow score (the "resume"). Each session is
+# weighted so today counts most and four days ago counts least, so fresh
+# conviction moves it within a day while one odd day can't whipsaw it. Weights
+# are scaled to sum to the session count, preserving the existing options anchor
+# calibration (a flat-weighted 5-session sum and this decay sum share scale).
+# Dark-pool/stock-tape data does NOT enter this score — it drives the chips
+# (Layer 2) instead.
+_F4_DECAY_PCT: Final[tuple[int, ...]] = (40, 25, 15, 10, 10)  # today -> 4 days ago
+
+
+def _group_by_session(
+    records: list[dict[str, Any]], timestamp_key: str
+) -> list[list[dict[str, Any]]]:
+    """Bucket records into session-day groups, newest day first."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for rec in records:
+        ts = rec.get(timestamp_key)
+        if isinstance(ts, str) and len(ts) >= 10:
+            groups[ts[:10]].append(rec)
+    return [groups[day] for day in sorted(groups, reverse=True)]
+
+
+def _options_net_raw(alerts: list[dict[str, Any]]) -> tuple[float, float | None]:
+    """Raw options net flow for one session: sum(call ask) - sum(put ask)."""
+    net = 0.0
+    largest = 0.0
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        total = _safe_float(rec.get("total_premium")) or 0.0
+        if opt_type == "call":
+            net += ask
+            largest = max(largest, total)
+        elif opt_type == "put":
+            net -= ask
+    return net, (largest if largest > 0 else None)
+
+
+def _decay_weighted_options(
+    windowed_opts: list[dict[str, Any]],
+) -> tuple[float, float | None]:
+    """Time-decay-weighted options net flow over the 5-session window.
+
+    Returns (weighted_net_flow_usd, largest_single_alert_premium_usd).
+    """
+    sessions = _group_by_session(windowed_opts, "created_at")[:_F4_LOOKBACK_SESSIONS]
+    if not sessions:
+        return 0.0, None
+    daily = [_options_net_raw(day) for day in sessions]  # newest first
+    nets = [d[0] for d in daily]
+    largest = max((d[1] for d in daily if d[1] is not None), default=None)
+    n = len(nets)
+    weights = _F4_DECAY_PCT[:n]
+    total_w = sum(weights)
+    weighted = sum(net * (w / total_w * n) for net, w in zip(nets, weights, strict=True))
+    return weighted, largest
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — stock tape: per-session state ("chips"), not a score
+# ---------------------------------------------------------------------------
+
+_DP_FRESH: Final[str] = "FRESH_ACCUMULATION"
+_DP_PERSISTENT: Final[str] = "PERSISTENT_ACCUMULATION"
+_DP_NEUTRAL: Final[str] = "NEUTRAL_MIXED"
+_DP_FADING: Final[str] = "FADING"
+_DP_DISTRIBUTION: Final[str] = "ACTIVE_DISTRIBUTION"
+_DP_UNKNOWN: Final[str] = "UNKNOWN"
+
+
+def _dark_pool_daily_nets(windowed_dp: list[dict[str, Any]]) -> list[float]:
+    """Per-session dark-pool net flow (BUY $ - SELL $), newest session first."""
+    sessions = _group_by_session(windowed_dp, "executed_at")[:_F4_LOOKBACK_SESSIONS]
+    return [_aggregate_dark_pool(day)[0] for day in sessions]
+
+
+def classify_dark_pool_state(daily_nets_newest_first: list[float]) -> tuple[str, str]:
+    """Classify the stock-tape trajectory into one of the five chips.
+
+    Input is per-session net dark-pool flow, newest session first. Pure.
+    """
+    d = daily_nets_newest_first
+    n = len(d)
+    if n == 0:
+        return _DP_UNKNOWN, "No dark-pool prints in the window."
+    total = sum(d)
+    buys = sum(1 for x in d if x > 0)
+
+    # Active Distribution: 2+ recent sessions of net selling, window selling-led.
+    if n >= 2 and d[0] < 0 and d[1] < 0 and total < 0:
+        return _DP_DISTRIBUTION, "Net selling across recent sessions — institutions distributing."
+    # Fading: earlier accumulation, now flipping to fresh selling.
+    if d[0] < 0 and sum(d[1:]) > 0:
+        return _DP_FADING, "Earlier accumulation fading into fresh selling."
+    # Persistent Accumulation: net buying sustained across (almost) the whole week.
+    if n >= 4 and buys >= 4 and total > 0:
+        return _DP_PERSISTENT, "Net buying sustained across the week — conviction-grade."
+    # Fresh Accumulation: buying started in the last 1-2 sessions and accelerating.
+    if n >= 2 and d[0] > 0 and d[1] > 0 and d[0] >= d[1] and sum(d[2:]) <= 0:
+        return _DP_FRESH, "Buying started in the last 1-2 sessions and accelerating."
+    return _DP_NEUTRAL, "No clear edge in the stock tape."
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — clearance: the entry decision (resume x this-week behaviour)
+# ---------------------------------------------------------------------------
+
+_CLEARANCE_CLEARED: Final[str] = "CLEARED"
+_CLEARANCE_WATCH: Final[str] = "WATCH"
+_CLEARANCE_REVOKED: Final[str] = "REVOKED"
+_CLEARANCE_F4_MIN: Final[int] = 60  # options flow must be at least BUY-grade to clear
+_CLEARANCE_F4_WEAK: Final[int] = 40
+
+
+def clearance_state(chip: str, f4_score: int) -> tuple[str, str]:
+    """Combine the F4 options score (resume) with the stock-tape chip (this week)
+    into an entry decision. Pure function."""
+    if chip == _DP_DISTRIBUTION:
+        return _CLEARANCE_REVOKED, "Active distribution — institutions selling; adds blocked."
+    if chip == _DP_FADING:
+        return _CLEARANCE_WATCH, "Accumulation fading — no fresh adds; wait for a reset."
+    if chip in (_DP_FRESH, _DP_PERSISTENT) and f4_score >= _CLEARANCE_F4_MIN:
+        return _CLEARANCE_CLEARED, "Accumulation confirmed and options flow supportive."
+    if f4_score < _CLEARANCE_F4_WEAK:
+        return _CLEARANCE_WATCH, "Options flow weak/bearish — no fresh adds."
+    return _CLEARANCE_WATCH, "No clear edge — hold; no fresh adds."
 
 
 def _alert_dte_days(rec: dict[str, Any]) -> int | None:
@@ -676,6 +854,8 @@ def _build_response_v2(
     dp_large_buys = 0
     largest_dp_buy: float | None = None
     windowed_dp: list[dict[str, Any]] = []
+    dp_sessions_covered: int | None = None
+    dp_truncated = False
     if dp_prints is None:
         dp_score = None
         dp_net_flow = None
@@ -683,8 +863,17 @@ def _build_response_v2(
         windowed_dp = _filter_to_recent_sessions(dp_prints)
         dp_net_flow, dp_count, dp_large_buys, largest_dp_buy = _aggregate_dark_pool(windowed_dp)
         dp_score = _map_net_flow_to_score(dp_net_flow, tier)
+        dp_sessions_covered = len(
+            {str(p.get("executed_at", ""))[:10] for p in windowed_dp if p.get("executed_at")}
+        )
+        # Truncation = we pulled the full page-cap of prints yet still span fewer
+        # than the lookback window (a very high-volume name). Surfaced, never silent.
+        dp_truncated = (
+            len(dp_prints) >= _UW_DARK_POOL_MAX_PAGES * _UW_FETCH_LIMIT
+            and dp_sessions_covered < _F4_LOOKBACK_SESSIONS
+        )
 
-    # Options branch ------------------------------------------------------
+    # Options branch (Layer 1 — the F4 score, options-only + fading memory) -----
     opt_score: int | None
     opt_net_flow: float | None
     largest_opt_buy: float | None = None
@@ -693,42 +882,45 @@ def _build_response_v2(
         opt_net_flow = None
     else:
         windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
-        opt_net_flow, largest_opt_buy = _aggregate_flow_alerts(windowed_opts)
+        opt_net_flow, largest_opt_buy = _decay_weighted_options(windowed_opts)
+        # Protective-structure relief (covered-call / put-spread) still applies to
+        # the weighted net — this is legitimate net-flow handling, distinct from
+        # the removed (broken) covered-call display tag.
+        opt_net_flow = _apply_strategy_aware_adjustment(windowed_opts, opt_net_flow)
         opt_score = _map_net_flow_to_score(opt_net_flow, tier)
 
-    dp_score = _apply_dark_pool_quality_boost(
-        dp_score=dp_score,
-        dp_net_flow=dp_net_flow,
-        dp_large_buys=dp_large_buys,
-        dp_prints=windowed_dp,
-        opt_net_flow=opt_net_flow,
-    )
+    # F4 is now OPTIONS-ONLY. Dark-pool no longer enters the 0-100 (it drives the
+    # chips/clearance below). data_source reflects the score's single source.
+    if opt_score is None:
+        f4_raw, source = _F4_NEUTRAL_SCORE, _F4_SOURCE_DATA_GAP
+    else:
+        f4_raw, source = opt_score, _F4_SOURCE_OPT_ONLY
+    direction = _derive_flow_direction(None, opt_net_flow)
 
-    f4_raw, source = _combine_f4_scores(dp_score, opt_score)
-    direction = _derive_flow_direction(dp_net_flow, opt_net_flow)
+    # Layer 2 — stock-tape state ("chips") from per-session dark-pool flow.
+    dp_daily = _dark_pool_daily_nets(windowed_dp) if windowed_dp else []
+    dp_state, dp_state_reason = classify_dark_pool_state(dp_daily)
+
+    # Layer 3 — clearance: resume (F4) x this-week behaviour (chip).
+    clr_state, clr_reason = clearance_state(dp_state, f4_raw)
 
     gap_reason: str | None = None
     if source == _F4_SOURCE_DATA_GAP:
-        gap_reason = "Both dark-pool and options data unavailable."
-    elif source == _F4_SOURCE_DP_ONLY:
-        gap_reason = "Options trades unavailable — score based on dark-pool only."
-    elif source == _F4_SOURCE_OPT_ONLY:
-        gap_reason = "Dark-pool data unavailable — score based on options only."
+        gap_reason = "Options flow unavailable — F4 score withheld (DATA_GAP)."
+    if dp_truncated:
+        note = (
+            f"Dark-pool covers {dp_sessions_covered} of {_F4_LOOKBACK_SESSIONS} sessions "
+            "(high-volume truncation); the chip understates the full window."
+        )
+        gap_reason = f"{gap_reason} {note}" if gap_reason else note
 
-    # Settlement ratio — computed from the same windowed set used for scoring.
+    # Settlement ratio — computed from the same windowed set used for the chips.
     dp_settlement_ratio: float | None = (
         _dark_pool_settlement_ratio(windowed_dp) if windowed_dp else None
     )
 
-    # Options strategy type — detect covered-call posture in windowed alerts.
-    strategy_type: str | None = None
-    if opt_trades is not None:
-        windowed_opts_for_strategy = _filter_to_recent_sessions(
-            opt_trades, timestamp_key="created_at"
-        )
-        if _detect_covered_call_posture(windowed_opts_for_strategy):
-            strategy_type = _F4_STRATEGY_COVERED_CALL_POSTURE
-
+    # NOTE: dark_pool_score is retained for transparency only — it is NOT blended
+    # into f4_score. The broken covered-call "sentiment tag" has been removed.
     return OptionsFlowResponse(
         ticker=ticker,
         f4_score=f4_raw,
@@ -744,11 +936,17 @@ def _build_response_v2(
         data_gap_reason=gap_reason,
         lookback_sessions=_F4_LOOKBACK_SESSIONS,
         dark_pool_prints_count=dp_count,
+        dark_pool_sessions_covered=dp_sessions_covered,
+        dark_pool_truncated=dp_truncated,
         dark_pool_large_buy_count=dp_large_buys,
         largest_dark_pool_buy_usd=largest_dp_buy,
         largest_options_buy_usd=largest_opt_buy,
         dark_pool_settlement_ratio=dp_settlement_ratio,
-        options_strategy_type=strategy_type,
+        options_strategy_type=None,
+        dark_pool_state=dp_state,
+        dark_pool_state_reason=dp_state_reason,
+        clearance=clr_state,
+        clearance_reason=clr_reason,
     )
 
 

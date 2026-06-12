@@ -1,15 +1,13 @@
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// F4 v2 — Options Flow response schema.
+// F4 — Options Flow response schema.
 //
-// F4 v2 scores a ticker on signed net flows over the trailing 5 trading
-// sessions, mapped to 0-100 via a market-cap-tiered anchor table.
-// Combination:
-//   BOTH           → (dark_pool_score + options_flow_score) / 2
-//   DARK_POOL_ONLY → dark_pool_score
-//   OPTIONS_ONLY   → options_flow_score
-//   DATA_GAP       → 50 (neutral)
+// Three layers:
+//   1. f4_score — OPTIONS-ONLY, time-decayed over 5 sessions (today weighted
+//      most). Dark pool no longer enters the score.
+//   2. dark_pool_state — the stock-tape "chip" (a state, not a score).
+//   3. clearance — the entry decision combining f4_score + the chip.
 // ---------------------------------------------------------------------------
 
 export const optionsFlowResponseSchema = z.object({
@@ -44,6 +42,21 @@ export const optionsFlowResponseSchema = z.object({
   dark_pool_large_buy_count: z.number().int().min(0),
   largest_dark_pool_buy_usd: z.number().nullable(),
   largest_options_buy_usd: z.number().nullable(),
+
+  // Layer 2 — stock-tape state ("chip"); Layer 3 — clearance (entry decision).
+  dark_pool_state: z
+    .enum([
+      'FRESH_ACCUMULATION',
+      'PERSISTENT_ACCUMULATION',
+      'NEUTRAL_MIXED',
+      'FADING',
+      'ACTIVE_DISTRIBUTION',
+      'UNKNOWN',
+    ])
+    .default('UNKNOWN'),
+  dark_pool_state_reason: z.string().nullable().optional(),
+  clearance: z.enum(['CLEARED', 'WATCH', 'REVOKED']).default('WATCH'),
+  clearance_reason: z.string().nullable().optional(),
 });
 
 export type OptionsFlowResponse = z.infer<typeof optionsFlowResponseSchema>;

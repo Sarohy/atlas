@@ -15,7 +15,9 @@ from typing import Any, Final
 
 import httpx
 
+from atlas.core import elliott as ell
 from atlas.core import extension as ext
+from atlas.core import gann
 from atlas.schemas.extension_overlay import ExtensionOverlayResponse
 
 # 380 calendar days ≈ 265 trading sessions — enough for the 200-day MA plus the
@@ -203,12 +205,32 @@ class ExtensionOverlayService:
         rsi14 = rsi7 = move14 = move21 = None
         above20 = above50 = above200 = gap = week52 = None
         vwap = vs_vwap = pct_from_ath = None
+        td = ext.TdSequential(0, None, 0, None)
+        rsi_divergence = macd_cross = False
+        elliott = ell.ElliottResult(None, None, False, False, None, 0, 0)
+        gann_res = gann.GannResult(None, None, False, False, None, None, None)
 
-        closes = [float(b["c"]) for b in bars if b.get("c") is not None]
+        ohlc = [
+            b
+            for b in bars
+            if b.get("c") is not None and b.get("h") is not None and b.get("l") is not None
+        ]
+        closes = [float(b["c"]) for b in ohlc]
+        highs = [float(b["h"]) for b in ohlc]
+        lows = [float(b["l"]) for b in ohlc]
         if not closes:
             data_gaps.append("PRICE_BARS")
         else:
             price = closes[-1]
+
+            # Deterministic technical sell/exhaustion signals.
+            td = ext.td_sequential(highs, closes)
+            rsi_divergence = ext.detect_rsi_bearish_divergence(closes, ext.rsi_series(closes, 14))
+            macd_cross = ext.macd_bearish_cross(closes)
+            # Rule-based Elliott Wave + Gann (informational/contextual — these do
+            # NOT feed the calibrated extension risk score).
+            elliott = ell.label_impulse(highs, lows)
+            gann_res = gann.analyze_gann(highs, lows, closes)
 
             # Distance from the all-time high (negative = below ATH = dipped).
             if ath is not None and ath > 0:
@@ -258,6 +280,9 @@ class ExtensionOverlayService:
             pct_above_200dma=above200,
             gap_today_pct=gap,
             iv_rank=iv_rank,
+            td_sell_signal=td.signal,
+            rsi_bearish_divergence=rsi_divergence,
+            macd_bearish_cross=macd_cross,
         )
         flag = ext.classify_extension_flag(risk)
         action, detail = ext.recommend_action(atlas_score, flag)
@@ -282,6 +307,21 @@ class ExtensionOverlayService:
             ath_date=ath_date,
             pct_from_ath=_round(pct_from_ath),
             iv_rank=_round(iv_rank),
+            td_setup=td.setup_count or None,
+            td_setup_direction=td.setup_direction,
+            td_countdown=td.sell_countdown or None,
+            td_signal=td.signal,
+            rsi_bearish_divergence=rsi_divergence,
+            macd_bearish_cross=macd_cross,
+            elliott_wave=elliott.current_wave,
+            elliott_direction=elliott.direction,
+            elliott_signal=elliott.signal,
+            elliott_confidence=elliott.confidence or None,
+            gann_signal=gann_res.signal,
+            gann_below_1x1=gann_res.below_1x1,
+            gann_time_cycle_due=gann_res.time_cycle_due,
+            gann_nearest_support=gann_res.nearest_support,
+            gann_nearest_resistance=gann_res.nearest_resistance,
             extension_risk_score=risk,
             extension_flag=flag,
             atlas_score=atlas_score,

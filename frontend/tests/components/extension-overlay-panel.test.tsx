@@ -45,6 +45,21 @@ function overlay(overrides: Record<string, unknown> = {}) {
     ath_date: '2026-06-02',
     pct_from_ath: -18.4,
     iv_rank: null,
+    td_setup: 9,
+    td_setup_direction: 'SELL',
+    td_countdown: 13,
+    td_signal: 'SELL_COUNTDOWN_13',
+    rsi_bearish_divergence: true,
+    macd_bearish_cross: true,
+    elliott_wave: '5',
+    elliott_direction: 'UP',
+    elliott_signal: 'IMPULSE_TOP_SELL',
+    elliott_confidence: 75,
+    gann_signal: 'BELOW_1X1_BEARISH',
+    gann_below_1x1: true,
+    gann_time_cycle_due: false,
+    gann_nearest_support: 480,
+    gann_nearest_resistance: 520,
     extension_risk_score: 9,
     extension_flag: 'EXTREME_RED',
     atlas_score: 89,
@@ -76,6 +91,12 @@ describe('ExtensionOverlayPanel', () => {
     expect(screen.getByText('DATA GAP')).toBeInTheDocument();
     // ATH dip shown with the ATH price.
     expect(screen.getByText('-18.4% ($503.00)')).toBeInTheDocument();
+    // Technical sell signals surfaced.
+    expect(screen.getByText('Sell countdown 13 ⚠')).toBeInTheDocument();
+    expect(screen.getAllByText('Bearish ⚠')).toHaveLength(2); // RSI divergence + MACD cross
+    // Elliott Wave + Gann surfaced.
+    expect(screen.getByText('Impulse top — sell ⚠ (75%)')).toBeInTheDocument();
+    expect(screen.getByText('Below 1×1 ⚠ · S/R 480–520')).toBeInTheDocument();
   });
 
   it('shows the IV rank value when available', async () => {

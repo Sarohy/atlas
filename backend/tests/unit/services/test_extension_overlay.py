@@ -223,14 +223,16 @@ def _bars(closes: list[float]) -> list[dict]:
 
 class TestServiceResponse:
     def test_calm_range_is_green_with_metrics(self) -> None:
-        # Oscillating, trendless series → mid-range RSI, no extension → GREEN.
-        closes = [100.0 + math.sin(i / 4) for i in range(260)]
+        # Perfectly flat series → no extension and no technical signals → GREEN.
+        closes = [100.0] * 260
         resp = ExtensionOverlayService._build_response("aapl", _bars(closes), atlas_score=90)
         assert resp.ticker == "AAPL"
         assert resp.rsi_14 is not None
         assert resp.pct_above_50dma is not None
         assert resp.extension_flag == ExtensionFlag.GREEN
         assert resp.action == OverlayAction.ADD
+        assert resp.td_signal is None
+        assert resp.rsi_bearish_divergence is False
         assert "IV_RANK" in resp.data_gaps
 
     def test_parabolic_run_flags_and_blocks_chase(self) -> None:
@@ -327,3 +329,95 @@ class TestIvRankFetch:
         resp = ExtensionOverlayService._build_response("aapl", _bars(closes), atlas_score=None)
         for value in (resp.rsi_14, resp.move_14d_pct, resp.pct_above_50dma):
             assert value is None or math.isfinite(value)
+
+
+# ---------------------------------------------------------------------------
+# Technical sell / exhaustion signals (DeMark, RSI divergence, MACD cross)
+# ---------------------------------------------------------------------------
+
+
+class TestTdSequential:
+    def test_sell_setup_9_on_up_streak(self) -> None:
+        closes = [float(c) for c in range(100, 114)]  # strictly rising, 14 bars
+        td = ext.td_sequential(closes, closes)
+        assert td.setup_direction == "SELL"
+        assert td.setup_count == 9
+        assert td.signal == "SELL_SETUP_9"
+
+    def test_sell_countdown_13_on_long_up_run(self) -> None:
+        closes = [float(c) for c in range(100, 130)]  # long rising run
+        td = ext.td_sequential(closes, closes)
+        assert td.sell_countdown == 13
+        assert td.signal == "SELL_COUNTDOWN_13"
+
+    def test_buy_setup_9_on_down_streak(self) -> None:
+        closes = [float(c) for c in range(130, 116, -1)]  # strictly falling, 14 bars
+        td = ext.td_sequential(closes, closes)
+        assert td.setup_direction == "BUY"
+        assert td.signal == "BUY_SETUP_9"
+
+    def test_no_signal_on_flat(self) -> None:
+        closes = [100.0] * 20
+        td = ext.td_sequential(closes, closes)
+        assert td.signal is None
+        assert td.setup_count == 0
+
+
+# Two price pivot-highs at idx 5 (20) and idx 15 (22) — a higher price high.
+_DIV_CLOSES = [
+    10.0, 11, 12, 13, 14, 20, 14, 13, 12, 11,
+    10, 11, 12, 13, 14, 22, 14, 13, 12, 11, 10,
+]
+
+
+class TestRsiDivergence:
+    def test_bearish_divergence_true(self) -> None:
+        rsi = [50.0] * len(_DIV_CLOSES)
+        rsi[5], rsi[15] = 75.0, 65.0  # RSI lower high vs higher price high
+        assert ext.detect_rsi_bearish_divergence(_DIV_CLOSES, rsi) is True
+
+    def test_no_divergence_when_rsi_confirms(self) -> None:
+        rsi = [50.0] * len(_DIV_CLOSES)
+        rsi[5], rsi[15] = 70.0, 80.0  # RSI higher high → confirms, no divergence
+        assert ext.detect_rsi_bearish_divergence(_DIV_CLOSES, rsi) is False
+
+    def test_monotonic_has_no_pivots(self) -> None:
+        closes = [float(c) for c in range(100, 140)]
+        assert ext.detect_rsi_bearish_divergence(closes, ext.rsi_series(closes, 14)) is False
+
+
+class TestMacdBearishCross:
+    def test_fresh_cross_on_rally_then_drop(self) -> None:
+        closes = [float(c) for c in range(100, 145)] + [142.0, 137, 130, 122, 113]
+        assert ext.macd_bearish_cross(closes) is True
+
+    def test_no_cross_on_steady_rally(self) -> None:
+        closes = [float(c) for c in range(100, 160)]
+        assert ext.macd_bearish_cross(closes) is False
+
+
+_NEUTRAL_RISK_INPUTS = {
+    "rsi14": 50, "rsi7": 50, "move14_pct": 0, "move21_pct": 0, "pct_above_20dma": 0,
+    "pct_above_50dma": 0, "pct_above_200dma": 0, "gap_today_pct": 0, "iv_rank": 0,
+}
+
+
+class TestRiskScoreTechnicalSignals:
+    def test_signals_add_points(self) -> None:
+        base = ext.extension_risk_score(**_NEUTRAL_RISK_INPUTS)
+        assert base == 0
+        setup9 = ext.extension_risk_score(**_NEUTRAL_RISK_INPUTS, td_sell_signal="SELL_SETUP_9")
+        cd13 = ext.extension_risk_score(**_NEUTRAL_RISK_INPUTS, td_sell_signal="SELL_COUNTDOWN_13")
+        assert setup9 == 2
+        assert cd13 == 3
+        assert ext.extension_risk_score(**_NEUTRAL_RISK_INPUTS, rsi_bearish_divergence=True) == 2
+        assert ext.extension_risk_score(**_NEUTRAL_RISK_INPUTS, macd_bearish_cross=True) == 1
+
+    def test_signals_stack(self) -> None:
+        score = ext.extension_risk_score(
+            **_NEUTRAL_RISK_INPUTS,
+            td_sell_signal="SELL_COUNTDOWN_13",
+            rsi_bearish_divergence=True,
+            macd_bearish_cross=True,
+        )
+        assert score == 6  # 3 + 2 + 1

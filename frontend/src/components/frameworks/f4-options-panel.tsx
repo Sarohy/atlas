@@ -37,8 +37,33 @@ const TIER_TONE: Record<string, string> = {
 const SOURCE_LABEL: Record<string, string> = {
   BOTH: 'Dark pool + options',
   DARK_POOL_ONLY: 'Dark pool only',
-  OPTIONS_ONLY: 'Options only',
+  OPTIONS_ONLY: 'Options flow',
   DATA_GAP: 'Data gap',
+};
+
+// Layer 2 — stock-tape state ("chip"). A state, not a score.
+const CHIP_LABEL: Record<string, string> = {
+  FRESH_ACCUMULATION: 'Fresh Accumulation',
+  PERSISTENT_ACCUMULATION: 'Persistent Accumulation',
+  NEUTRAL_MIXED: 'Neutral / Mixed',
+  FADING: 'Fading',
+  ACTIVE_DISTRIBUTION: 'Active Distribution',
+  UNKNOWN: 'No tape data',
+};
+const CHIP_TONE: Record<string, string> = {
+  FRESH_ACCUMULATION: 'is-green',
+  PERSISTENT_ACCUMULATION: 'is-green',
+  NEUTRAL_MIXED: 'is-muted',
+  FADING: 'is-orange',
+  ACTIVE_DISTRIBUTION: 'is-red',
+  UNKNOWN: 'is-muted',
+};
+
+// Layer 3 — clearance (the entry decision).
+const CLEARANCE_TONE: Record<string, string> = {
+  CLEARED: 'is-green',
+  WATCH: 'is-yellow',
+  REVOKED: 'is-red',
 };
 
 // ---------------------------------------------------------------------------
@@ -123,18 +148,13 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
   const tierTone = TIER_TONE[data.market_cap_tier] ?? 'is-muted';
   const sourceLabel = SOURCE_LABEL[data.data_source] ?? data.data_source;
   const contribution = Math.round((data.f4_score / 100) * F4_DISPLAY_MAX);
-
-  // Two independent readings — dark-pool (stock accumulation/distribution) and
-  // options flow — are blended into F4 and can legitimately disagree. Surface
-  // that split so the inconsistency is explained, not hidden in one number.
-  const dp = data.dark_pool_net_flow_usd;
-  const opt = data.options_net_flow_usd;
-  const diverges =
-    dp != null && opt != null && dp !== 0 && opt !== 0 && Math.sign(dp) !== Math.sign(opt);
+  const chipTone = CHIP_TONE[data.dark_pool_state] ?? 'is-muted';
+  const chipLabel = CHIP_LABEL[data.dark_pool_state] ?? data.dark_pool_state;
+  const clearanceTone = CLEARANCE_TONE[data.clearance] ?? 'is-yellow';
 
   return (
     <div className="atlas-f4-content" data-testid="f4-content">
-      {/* Score hero */}
+      {/* Score hero — F4 is the options-flow score (resume) */}
       <div className="atlas-f4-score-hero">
         <div className="atlas-f4-score-ring">
           <span className={cn('atlas-f4-score-number', gradeTone)} data-testid="f4-score">
@@ -149,11 +169,30 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           >
             {data.f4_grade}
           </span>
-          <span className="atlas-f4-label-sub" data-testid="f4-contribution">
-            {contribution}/{F4_DISPLAY_MAX} to F1
-          </span>
+          <span className="atlas-f4-label-sub">options flow · {contribution}/{F4_DISPLAY_MAX} to F1</span>
         </div>
       </div>
+
+      {/* Clearance (the entry decision) + stock-tape chip (this week) */}
+      <div className="atlas-f4-signal-row">
+        <span
+          className={cn('atlas-frameworks-pill atlas-f4-grade-pill', clearanceTone)}
+          data-testid="f4-clearance"
+        >
+          {data.clearance}
+        </span>
+        <span
+          className={cn('atlas-frameworks-pill atlas-f4-tier-pill', chipTone)}
+          data-testid="f4-dark-pool-state"
+        >
+          {chipLabel}
+        </span>
+      </div>
+      {data.clearance_reason && (
+        <p className="atlas-f4-state-msg" data-testid="f4-clearance-reason">
+          {data.clearance_reason}
+        </p>
+      )}
 
       {/* Direction + tier + source row */}
       <div className="atlas-f4-signal-row">
@@ -208,11 +247,9 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
         />
       </div>
 
-      {diverges && (
-        <p className="atlas-f4-state-msg atlas-f4-state-msg--warn" data-testid="f4-divergence">
-          ⚠ Split reading — dark pool is {dp > 0 ? 'accumulating' : 'distributing'} while options
-          flow is {opt > 0 ? 'bullish' : 'bearish'}. F4 blends both, so the score sits between the
-          two signals.
+      {data.dark_pool_state_reason && (
+        <p className="atlas-f4-state-msg" data-testid="f4-dark-pool-state-reason">
+          Stock tape: {data.dark_pool_state_reason}
         </p>
       )}
 

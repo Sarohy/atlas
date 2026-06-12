@@ -92,6 +92,22 @@ class OptionsFlowResponse(BaseModel):
     dark_pool_prints_count: int = Field(
         default=0, description="Count of classified BUY+SELL dark-pool prints in window."
     )
+    dark_pool_sessions_covered: int | None = Field(
+        default=None,
+        description=(
+            "Distinct trading sessions the dark-pool net flow actually spans. "
+            "Less than lookback_sessions means the pagination cap was hit on a very "
+            "high-volume name (partial coverage) — the net flow understates the full "
+            "window, though the LARGE-tier score typically already saturates."
+        ),
+    )
+    dark_pool_truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the dark-pool fetch hit the page cap without covering the full "
+            "lookback window (high-volume truncation). Never silently dropped."
+        ),
+    )
     dark_pool_large_buy_count: int = Field(
         default=0,
         description=(
@@ -116,9 +132,28 @@ class OptionsFlowResponse(BaseModel):
     )
     options_strategy_type: str | None = Field(
         default=None,
+        description="Deprecated/disabled — the covered-call posture tag was removed (always None).",
+    )
+
+    # ---- Layer 2: stock-tape state ("chips") + Layer 3: clearance ---------
+    dark_pool_state: str = Field(
+        default="UNKNOWN",
         description=(
-            "Detected options strategy posture: COVERED_CALL_POSTURE when protective puts + "
-            "near-dated covered-call overwriting + LEAP accumulation are all present; "
-            "None otherwise."
+            "Stock-tape state from per-session dark-pool flow: FRESH_ACCUMULATION | "
+            "PERSISTENT_ACCUMULATION | NEUTRAL_MIXED | FADING | ACTIVE_DISTRIBUTION | UNKNOWN. "
+            "A state, not a score — kept separate from f4_score."
         ),
+    )
+    dark_pool_state_reason: str | None = Field(
+        default=None, description="Plain-English reason for the dark_pool_state chip."
+    )
+    clearance: str = Field(
+        default="WATCH",
+        description=(
+            "Entry decision combining the F4 options score (resume) with the stock-tape chip "
+            "(this week): CLEARED | WATCH | REVOKED. ACTIVE_DISTRIBUTION forces REVOKED."
+        ),
+    )
+    clearance_reason: str | None = Field(
+        default=None, description="Plain-English reason for the clearance decision."
     )

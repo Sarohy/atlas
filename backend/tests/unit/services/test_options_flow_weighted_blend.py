@@ -14,14 +14,11 @@ All tests below fail against the current code.
 
 from __future__ import annotations
 
-import pytest
-
 from atlas.services.options_flow_service import (
     _build_response_v2,
     _combine_f4_scores,
     _detect_covered_call_posture,  # does not yet exist → ImportError
 )
-
 
 # ---------------------------------------------------------------------------
 # _combine_f4_scores — weighted blend when DP is strong and options neutral
@@ -269,8 +266,8 @@ def test_response_settlement_ratio_is_none_when_no_dp_prints() -> None:
     assert response.dark_pool_settlement_ratio is None
 
 
-def test_response_exposes_options_strategy_type_as_covered_call_posture() -> None:
-    """Three-leg covered-call posture in options → strategy_type=COVERED_CALL_POSTURE."""
+def test_response_options_strategy_tag_is_removed() -> None:
+    """The broken covered-call display tag was removed → options_strategy_type is always None."""
     response = _build_response_v2(
         ticker="NBIS",
         market_cap=60_000_000_000.0,
@@ -310,7 +307,7 @@ def test_response_exposes_options_strategy_type_as_covered_call_posture() -> Non
             },
         ],
     )
-    assert response.options_strategy_type == "COVERED_CALL_POSTURE"
+    assert response.options_strategy_type is None
 
 
 def test_response_options_strategy_type_is_none_for_directional_flow() -> None:
@@ -345,15 +342,12 @@ def test_response_options_strategy_type_is_none_when_no_opt_trades() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration — NBIS-pattern: strong DP + neutral options → weighted f4_score
+# Integration — F4 is options-only; dark pool drives the chip, not the score
 # ---------------------------------------------------------------------------
 
-# Named constant: minimum expected F4 score for NBIS-pattern (dp=100, opt=50 weighted)
-EXPECTED_NBIS_PATTERN_MIN_SCORE = 76
 
-
-def test_build_response_v2_nbis_pattern_scores_above_50_50_result() -> None:
-    """Strong DP (~$100M net, LARGE) + balanced options → f4_score > 75 (50/50 result)."""
+def test_build_response_v2_dark_pool_excluded_from_options_only_f4() -> None:
+    """Strong dark-pool buying no longer lifts F4 — F4 is options-only (neutral here)."""
     response = _build_response_v2(
         ticker="NBIS",
         market_cap=60_000_000_000.0,
@@ -406,11 +400,9 @@ def test_build_response_v2_nbis_pattern_scores_above_50_50_result() -> None:
             },
         ],
     )
-    # dp_net_flow = $100M → dp_score = 100 (LARGE anchor ceiling)
-    # opt_net_flow = $0 → opt_score = 50 (neutral band)
-    # Weighted (65/35): round(100*0.65 + 50*0.35) = round(82.5) = 83
-    assert response.f4_score >= EXPECTED_NBIS_PATTERN_MIN_SCORE, (
-        f"expected f4_score >= {EXPECTED_NBIS_PATTERN_MIN_SCORE}, got {response.f4_score}"
-    )
-    assert response.dark_pool_score == 100
+    # dp_net_flow = $100M → dp_score = 100, but dark pool is NOT in F4 anymore.
+    # opt_net_flow = $0 → opt_score = 50 (neutral band) → F4 = 50 (options-only).
+    assert response.f4_score == 50
+    assert response.data_source == "OPTIONS_ONLY"
+    assert response.dark_pool_score == 100  # still computed, informational only
     assert response.options_flow_score == 50

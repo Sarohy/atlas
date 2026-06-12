@@ -29,7 +29,7 @@ const FLAG_LABEL: Record<ExtensionFlag, string> = {
 const ACTION_LABEL: Record<OverlayAction, string> = {
   ADD: 'ADD',
   BUY_ON_PULLBACK: 'BUY ON PULLBACK',
-  HOLD_TRIM: 'HOLD / TRIM',
+  HOLD_TRIM: 'CORE HOLD / TRIM IF OVERWEIGHT',
   TRIM_HEDGE: 'TRIM / HEDGE',
   AVOID: 'AVOID',
 };
@@ -37,7 +37,8 @@ const ACTION_LABEL: Record<OverlayAction, string> = {
 const ACTION_TONE: Record<OverlayAction, string> = {
   ADD: 'is-green',
   BUY_ON_PULLBACK: 'is-yellow',
-  HOLD_TRIM: 'is-red',
+  // Amber, not red — "core hold / don't chase" is a wait-for-entry, not a sell.
+  HOLD_TRIM: 'is-yellow',
   TRIM_HEDGE: 'is-red',
   AVOID: 'is-red',
 };
@@ -55,6 +56,49 @@ function fmtPct(value: number | null | undefined, decimals = 1): string {
 function fmtNum(value: number | null | undefined, decimals = 1): string {
   if (value == null) return '—';
   return value.toFixed(decimals);
+}
+
+const TD_SIGNAL_LABEL: Record<string, string> = {
+  SELL_SETUP_9: 'Sell setup 9 ⚠',
+  SELL_COUNTDOWN_13: 'Sell countdown 13 ⚠',
+  BUY_SETUP_9: 'Buy setup 9',
+};
+
+/** DeMark TD Sequential summary: headline signal, else the running setup/countdown. */
+function fmtTd(data: ExtensionOverlayResponse): string {
+  if (data.td_signal) return TD_SIGNAL_LABEL[data.td_signal] ?? data.td_signal;
+  if (data.td_setup && data.td_setup_direction) {
+    const cd = data.td_countdown ? ` · cd ${data.td_countdown}/13` : '';
+    return `${data.td_setup_direction.toLowerCase()} setup ${data.td_setup}/9${cd}`;
+  }
+  return 'none';
+}
+
+/** Elliott Wave: completed-impulse signal, else the current wave/direction. */
+function fmtElliott(data: ExtensionOverlayResponse): string {
+  if (data.elliott_signal === 'IMPULSE_TOP_SELL')
+    return `Impulse top — sell ⚠ (${data.elliott_confidence ?? 0}%)`;
+  if (data.elliott_signal === 'IMPULSE_BOTTOM_BUY')
+    return `Impulse bottom — buy (${data.elliott_confidence ?? 0}%)`;
+  if (data.elliott_wave && data.elliott_direction)
+    return `Wave ${data.elliott_wave} (${data.elliott_direction.toLowerCase()})`;
+  return 'none';
+}
+
+const GANN_SIGNAL_LABEL: Record<string, string> = {
+  BELOW_1X1_BEARISH: 'Below 1×1 ⚠',
+  AT_GANN_RESISTANCE: 'At resistance ⚠',
+  TIME_TURN_DUE: 'Time turn due',
+};
+
+/** Gann: headline signal + nearest Square-of-9 support/resistance band. */
+function fmtGann(data: ExtensionOverlayResponse): string {
+  const sig = data.gann_signal ? GANN_SIGNAL_LABEL[data.gann_signal] ?? data.gann_signal : 'none';
+  const band =
+    data.gann_nearest_support != null && data.gann_nearest_resistance != null
+      ? ` · S/R ${data.gann_nearest_support.toFixed(0)}–${data.gann_nearest_resistance.toFixed(0)}`
+      : '';
+  return `${sig}${band}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +226,17 @@ function OverlayContent({ data }: { data: ExtensionOverlayResponse }) {
         }
       />
       <MetricRow label="IV rank" value={data.iv_rank == null ? 'DATA GAP' : fmtNum(data.iv_rank, 0)} />
+
+      {/* Technical sell / exhaustion signals (DeMark, RSI divergence, MACD cross) */}
+      <div className="atlas-fws-breakdown-divider" />
+      <MetricRow label="DeMark TD" value={fmtTd(data)} />
+      <MetricRow
+        label="RSI divergence"
+        value={data.rsi_bearish_divergence ? 'Bearish ⚠' : 'None'}
+      />
+      <MetricRow label="MACD cross" value={data.macd_bearish_cross ? 'Bearish ⚠' : 'None'} />
+      <MetricRow label="Elliott Wave" value={fmtElliott(data)} />
+      <MetricRow label="Gann" value={fmtGann(data)} />
 
       {/* Action */}
       <div className="atlas-fws-breakdown-divider" />

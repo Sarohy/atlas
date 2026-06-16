@@ -19,6 +19,7 @@ from atlas.core import elliott as ell
 from atlas.core import extension as ext
 from atlas.core import gann
 from atlas.schemas.extension_overlay import ExtensionOverlayResponse
+from atlas.services.provider_response_cache import fetch_polygon_daily_bars_cached
 
 # 380 calendar days ≈ 265 trading sessions — enough for the 200-day MA plus the
 # trailing windows even accounting for holidays.
@@ -160,30 +161,16 @@ class ExtensionOverlayService:
     async def _fetch_bars(
         self, client: httpx.AsyncClient, ticker: str
     ) -> list[dict[str, Any]]:
-        """Return ascending daily OHLCV bars from Polygon; [] on any error."""
+        """Return ascending daily OHLCV bars from Polygon; [] on any error.
+
+        Uses the shared provider cache so F1 / Washout / Extension all reuse a
+        single daily-bar fetch per ticker.
+        """
         to_date = date.today()
         from_date = to_date - timedelta(days=_LOOKBACK_DAYS)
-        url = _POLYGON_AGGS_URL.format(
-            ticker=ticker,
-            from_date=from_date.isoformat(),
-            to_date=to_date.isoformat(),
+        return await fetch_polygon_daily_bars_cached(
+            client, ticker=ticker, api_key=self._api_key, from_date=from_date, to_date=to_date
         )
-        try:
-            resp = await client.get(
-                url,
-                params={
-                    "adjusted": "true",
-                    "sort": "asc",
-                    "limit": "500",
-                    "apiKey": self._api_key,
-                },
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return []
-        payload: dict[str, Any] = resp.json()
-        return payload.get("results", []) or []
 
     @staticmethod
     def _build_response(

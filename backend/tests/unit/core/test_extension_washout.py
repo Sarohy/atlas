@@ -256,3 +256,24 @@ class TestElasticitySpacing:
         # Low name (active line compressed to 50) is ACTIVE at +55, where Extreme is still ARM.
         r = resolve_overlay(_inp(dist_50d=55, at_or_above_target=True), cfg)
         assert r.state == OverlayState.ACTIVE_PROTECTION
+
+
+# ---------------------------------------------------------------------------
+# 50d handoff (SPEC v2.2 lock) — Extension/Washout only above the 50-day
+# ---------------------------------------------------------------------------
+
+
+class TestFiftyDayHandoff:
+    def test_below_50d_stands_down_to_wait(self) -> None:
+        # Even with a trim trigger, below the 50-day hands off to Dip-Recovery.
+        legs = ConfirmationLegs(flow_distribution=True, vwap_lost=True)
+        r = resolve_overlay(_inp(dist_50d=-5, at_or_above_target=True, confirmation=legs))
+        assert r.state == OverlayState.WAIT
+        assert "Dip-Recovery" in r.reason
+
+    def test_below_50d_still_allows_book_level_hedge(self) -> None:
+        r = resolve_overlay(_inp(dist_50d=-8, breadth=BreadthLevel.HEDGE))
+        assert r.state == OverlayState.BOOK_LEVEL_HEDGE
+
+    def test_above_50d_unchanged(self) -> None:
+        assert resolve_overlay(_inp(dist_50d=45)).state == OverlayState.ARM_PROTECTION

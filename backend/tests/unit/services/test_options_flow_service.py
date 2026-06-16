@@ -360,7 +360,10 @@ def test_build_response_v2_does_not_boost_when_settlement_is_too_high() -> None:
 
     assert response.dark_pool_net_flow_usd == 4_100_000.0
     assert response.dark_pool_large_buy_count == 2
-    assert response.dark_pool_score <= 50
+    # $4.1M net on a $60B LARGE-tier name maps to 57. The builder does not apply
+    # the +10 quality boost (it is informational only; F4 is options-only), so
+    # the dark-pool score stays at the un-boosted base — never 67.
+    assert response.dark_pool_score == 57
 
 
 def test_alert_dte_days_handles_missing_and_invalid_expiry() -> None:

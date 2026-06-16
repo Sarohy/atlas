@@ -154,6 +154,10 @@ _WFE_NAMES: Final[tuple[str, ...]] = (
     "AMAT", "LRCX", "KLAC", "ASML", "TER", "ONTO", "UCTT", "ICHR", "AEHR", "COHU", "ACLS",
 )
 
+# Per-name treatment is a DAILY LIVE-FLOW SNAPSHOT, not permanent (SPEC v2.2 lock):
+# the live elasticity score (rv/beta/momentum) drives the tier when inputs exist;
+# these entries are seeds/overrides re-checked each recompute. Calibration-excluded
+# names (exclude_recalibration=True) are held out of automated recalibration only.
 _NAME_ELASTICITY: Final[dict[str, NameElasticity]] = {
     # Hard override: NBIS is a Sharp-Faller; +40 = trim/hedge line.
     "NBIS": NameElasticity(
@@ -171,6 +175,13 @@ _NAME_ELASTICITY: Final[dict[str, NameElasticity]] = {
         provisional=True,
         watch_promote=True,
         note="n=3; historical peaks hotter than tier — watch-promote",
+    ),
+    # SNDK: calibration-excluded pending corporate-action reconciliation (SPEC v2.2
+    # lock). Tier still resolves from live/peak; just not used for auto-recalibration.
+    "SNDK": NameElasticity(
+        override_tier=None,
+        exclude_recalibration=True,
+        note="calibration-excluded pending corporate-action reconciliation (v2.2)",
     ),
     **{n: NameElasticity(ElasticityTier.NEVER_CROSS, note="WFE cohort (A4)") for n in _WFE_NAMES},
 }

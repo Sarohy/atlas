@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import date
 from time import monotonic
 from typing import Any
 
@@ -182,3 +184,114 @@ def clear_provider_response_cache() -> None:
     """Clear in-memory provider cache (used by tests)."""
     _av_cache.clear()
     _av_locks.clear()
+    _generic_cache.clear()
+    _generic_locks.clear()
+
+
+# ---------------------------------------------------------------------------
+# Generic single-flight TTL memoizer (any provider / any shape)
+# ---------------------------------------------------------------------------
+#
+# Lets one upstream call on a page load be reused by every other component
+# instead of each re-hitting the vendor. Collapses concurrent callers with the
+# same cache_key into a single in-flight fetch (single-flight), serves the
+# result for `ttl` seconds, and falls back to stale on factory failure. Only
+# results passing `cache_if` are stored (default truthy) so a transient empty /
+# None error is never cached.
+
+_GENERIC_TTL_SECONDS = 300.0
+_GENERIC_STALE_TTL_SECONDS = 1800.0
+_POLYGON_AGGS_URL = (
+    "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+)
+
+
+@dataclass(slots=True)
+class _GenericEntry:
+    payload: Any
+    fresh_until: float
+    stale_until: float
+
+
+_generic_cache: dict[str, _GenericEntry] = {}
+_generic_locks: dict[str, asyncio.Lock] = {}
+
+
+def _generic_lock(key: str) -> asyncio.Lock:
+    lock = _generic_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _generic_locks[key] = lock
+    return lock
+
+
+async def cached_call(
+    *,
+    cache_key: str,
+    factory: Callable[[], Awaitable[Any]],
+    ttl: float = _GENERIC_TTL_SECONDS,
+    stale_ttl: float = _GENERIC_STALE_TTL_SECONDS,
+    cache_if: Callable[[Any], bool] = bool,
+) -> Any:
+    """Single-flight, TTL-cached memoizer for any async upstream fetch."""
+    now = _now()
+    entry = _generic_cache.get(cache_key)
+    if entry is not None and entry.fresh_until >= now:
+        return entry.payload
+
+    lock = _generic_lock(cache_key)
+    async with lock:
+        entry = _generic_cache.get(cache_key)
+        if entry is not None and entry.fresh_until >= _now():
+            return entry.payload
+        try:
+            payload = await factory()
+        except Exception:
+            entry = _generic_cache.get(cache_key)
+            if entry is not None and entry.stale_until >= _now():
+                logger.debug("cached_call %s failed; serving stale", cache_key)
+                return entry.payload
+            raise
+        if cache_if(payload):
+            ts = _now()
+            _generic_cache[cache_key] = _GenericEntry(payload, ts + ttl, ts + stale_ttl)
+        return payload
+
+
+async def fetch_polygon_daily_bars_cached(
+    client: httpx.AsyncClient,
+    *,
+    ticker: str,
+    api_key: str,
+    from_date: date,
+    to_date: date,
+    limit: str = "500",
+    timeout: float = 15.0,
+) -> list[dict[str, Any]]:
+    """Shared Polygon daily-bar fetch. One call per (ticker, window) serves F1,
+    the Extension Overlay, the Washout Overlay, etc. (and ETF bars across names).
+    Returns [] on error/empty (and does not cache empty, so it retries)."""
+    if not api_key:
+        return []
+    window = f"{from_date.isoformat()}:{to_date.isoformat()}:{limit}"
+    cache_key = f"polygon:bars:{ticker.upper()}:{window}"
+
+    async def _factory() -> list[dict[str, Any]]:
+        url = _POLYGON_AGGS_URL.format(
+            ticker=ticker, from_date=from_date.isoformat(), to_date=to_date.isoformat()
+        )
+        try:
+            resp = await client.get(
+                url,
+                params={"adjusted": "true", "sort": "asc", "limit": str(limit), "apiKey": api_key},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            payload: Any = resp.json()
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TypeError):
+            return []
+        results = payload.get("results") if isinstance(payload, dict) else None
+        return results if isinstance(results, list) else []
+
+    result: list[dict[str, Any]] = await cached_call(cache_key=cache_key, factory=_factory)
+    return result

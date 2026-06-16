@@ -93,7 +93,7 @@ export function F4OptionsPanel({ ticker }: F4OptionsPanelProps) {
   return (
     <section className="atlas-frameworks-panel atlas-f4-panel" data-testid="f4-options-panel">
       <header className="atlas-frameworks-panel-header atlas-f4-panel-header">
-        <h2 className="atlas-frameworks-panel-title">F4 Options Flow</h2>
+        <h2 className="atlas-frameworks-panel-title">F4 Options Flow Persistence</h2>
       </header>
 
       <div className="atlas-f4-panel-body">
@@ -247,9 +247,14 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
         />
       </div>
 
+      <p className="atlas-f4-state-msg" data-testid="f4-firewall-note">
+        F4 scores options flow only (F4b). Dark pool / equity accumulation (F4a) is
+        overlay &amp; confirmation — it does not feed the score (SPEC v2.2).
+      </p>
+
       {data.dark_pool_state_reason && (
         <p className="atlas-f4-state-msg" data-testid="f4-dark-pool-state-reason">
-          Stock tape: {data.dark_pool_state_reason}
+          Stock tape (overlay): {data.dark_pool_state_reason}
         </p>
       )}
 
@@ -294,18 +299,30 @@ type SubCardShellProps = {
   label: string;
   testIdSlug: string;
   score: number | null;
+  /** True only for the SCORED stream (options/F4b). The overlay stream (F4a)
+   *  shows an "overlay · not scored" tag instead of a /100 — the v2.2 firewall. */
+  scored: boolean;
   children: React.ReactNode;
 };
 
-function SubCardShell({ label, testIdSlug, score, children }: SubCardShellProps) {
+function SubCardShell({ label, testIdSlug, score, scored, children }: SubCardShellProps) {
   return (
     <article className="atlas-f4-indicator" data-testid={`f4-indicator-${testIdSlug}`}>
       <header className="atlas-f4-indicator-header">
         <span className="atlas-f4-indicator-label">{label}</span>
-        <span className="atlas-f4-indicator-score">
-          {score !== null ? score : '—'}
-          <span className="atlas-f4-indicator-max">/100</span>
-        </span>
+        {scored ? (
+          <span className="atlas-f4-indicator-score">
+            {score !== null ? score : '—'}
+            <span className="atlas-f4-indicator-max">/100</span>
+          </span>
+        ) : (
+          <span
+            className="atlas-frameworks-pill atlas-f4-tier-pill is-muted"
+            data-testid={`f4-indicator-${testIdSlug}-overlay-tag`}
+          >
+            overlay · not scored
+          </span>
+        )}
       </header>
       <div className="atlas-f4-indicator-body">{children}</div>
     </article>
@@ -328,7 +345,7 @@ function DarkPoolFlowCard({
   largestBuy,
 }: DarkPoolFlowCardProps) {
   return (
-    <SubCardShell label="Dark Pool Net Flow" testIdSlug="dark-pool" score={score}>
+    <SubCardShell label="Dark Pool · Equity Accum (F4a)" testIdSlug="dark-pool" score={score} scored={false}>
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
           <dt>Net Flow</dt>
@@ -363,7 +380,7 @@ type OptionsFlowCardProps = {
 
 function OptionsFlowCard({ score, netFlow, largestBuy }: OptionsFlowCardProps) {
   return (
-    <SubCardShell label="Options Net Flow" testIdSlug="options" score={score}>
+    <SubCardShell label="Options Flow (F4b · scored)" testIdSlug="options" score={score} scored={true}>
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
           <dt>Net Flow</dt>

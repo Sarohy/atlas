@@ -2380,7 +2380,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  align-items: stretch;
+  /* Top-align so Framework 1 sizes to its own content instead of stretching to
+     match the taller right column (Extension Overlay + Forward Growth stacked). */
+  align-items: flex-start;
 }
 
 .atlas-frameworks-secondary-row {

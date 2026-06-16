@@ -45,16 +45,18 @@ class OverlayState:
 
 
 # §9 precedence, highest first. Used to resolve when several states fire.
+# L0-L8 PRECEDENCE STACK — FROZEN (SPEC v2.2 lock). Executes in order; do not
+# reorder, insert, or remove states (no new action states per the lock page).
 _STATE_PRECEDENCE: Final[tuple[str, ...]] = (
-    OverlayState.BOOK_LEVEL_HEDGE,
-    OverlayState.FORCED_DE_RISK_REVIEW,
-    OverlayState.TRIM,
-    OverlayState.HEDGE,
-    OverlayState.ACTIVE_PROTECTION,
-    OverlayState.ARM_PROTECTION,
-    OverlayState.STOP_ADD,
-    OverlayState.TRIM_WATCH,
-    OverlayState.WAIT,
+    OverlayState.BOOK_LEVEL_HEDGE,  # L0
+    OverlayState.FORCED_DE_RISK_REVIEW,  # L1
+    OverlayState.TRIM,  # L2
+    OverlayState.HEDGE,  # L3
+    OverlayState.ACTIVE_PROTECTION,  # L4
+    OverlayState.ARM_PROTECTION,  # L5
+    OverlayState.STOP_ADD,  # L6
+    OverlayState.TRIM_WATCH,  # L7
+    OverlayState.WAIT,  # L8
 )
 
 
@@ -431,6 +433,36 @@ def resolve_overlay(inp: WashoutInputs, cfg: WashoutConfig = DEFAULT_CONFIG) -> 
         )
 
     dist = inp.dist_50d
+
+    # 50d HANDOFF (SPEC v2.2 lock — FROZEN): above the 50-day is the
+    # Extension/Washout regime; below the 50-day is the Dip-Recovery regime. The
+    # two overlays do NOT co-fire. Below the 50d this overlay stands down (WAIT),
+    # deferring to Dip-Recovery — except a book-level breadth hedge, which is
+    # book-wide and independent of any single name's 50d position.
+    if dist < 0:
+        below_state = (
+            OverlayState.BOOK_LEVEL_HEDGE
+            if inp.breadth == BreadthLevel.HEDGE
+            else OverlayState.WAIT
+        )
+        return WashoutResult(
+            state=below_state,
+            track=meta.track,
+            overshoot=meta.overshoot,
+            rung="No action",
+            trim_authorized=False,
+            confirmation_count=inp.confirmation.count(),
+            confirmation_present=inp.confirmation.present(),
+            metric_legs=legs,
+            breadth=inp.breadth,
+            low_confidence=meta.low_confidence,
+            size_relabeled=False,
+            reason=(
+                "Below the 50-day — Dip-Recovery regime governs; "
+                "Extension/Washout stands down (50d handoff, no co-fire)."
+            ),
+        )
+
     rung = ladder_rung(dist, meta.overshoot, cfg)
     authorized = trim_authorized(
         legs=inp.confirmation,

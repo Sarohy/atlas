@@ -39,6 +39,7 @@ from atlas.schemas.momentum import (
     SectorMomentumIndicator,
     Week52PositionIndicator,
 )
+from atlas.services.provider_response_cache import fetch_polygon_daily_bars_cached
 
 # ---------------------------------------------------------------------------
 # Named constants — scoring thresholds
@@ -755,29 +756,17 @@ class MomentumService:
 
         Returns an empty list on any HTTP error.
         """
-        url = _POLYGON_AGGS_URL.format(
+        # Shared cache: F1, the Extension Overlay, and the Washout Overlay all
+        # pull the same daily bars for a ticker — one upstream call serves all
+        # (and one sector-ETF fetch is reused across every name). See
+        # provider_response_cache.fetch_polygon_daily_bars_cached.
+        return await fetch_polygon_daily_bars_cached(
+            self._client,
             ticker=ticker,
-            from_date=from_date.isoformat(),
-            to_date=to_date.isoformat(),
+            api_key=self._api_key,
+            from_date=from_date,
+            to_date=to_date,
         )
-        try:
-            response = await self._client.get(
-                url,
-                params={
-                    "adjusted": "true",
-                    "sort": "asc",
-                    "limit": "500",
-                    "apiKey": self._api_key,
-                },
-                timeout=15.0,
-            )
-            response.raise_for_status()
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return []
-
-        payload: dict = response.json()  # type: ignore[type-arg]
-        results: list[dict] = payload.get("results", [])  # type: ignore[type-arg]
-        return results
 
     @staticmethod
     def _perf_6m(bars: list[dict]) -> float:  # type: ignore[type-arg]

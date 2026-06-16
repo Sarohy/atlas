@@ -14,6 +14,8 @@ import { F5FundamentalPanel } from './f5-fundamental-panel';
 import { RegimeGuidancePanel } from './regime-guidance-panel';
 import { FrameworkScorePanel } from './framework-score-panel';
 import { ExtensionOverlayPanel } from './extension-overlay-panel';
+import { ExtensionWashoutPanel } from './extension-washout-panel';
+import { WashoutReferencePanel } from './washout-reference-panel';
 import { ForwardGrowthPanel } from './forward-growth-panel';
 import { RegimeModifierPanel } from './regime-modifier-panel';
 import { TrancheSizingPanel } from './tranche-sizing-panel';
@@ -73,6 +75,17 @@ export function FrameworksPanelsSection() {
   // ticker so panels are populated automatically on first load.
   const activeTicker =
     selectedTicker !== EMPTY_TICKER ? selectedTicker : (tickers[0] ?? EMPTY_TICKER);
+
+  // Live position weight (% NAV) for the washout overlay's §3.1 size gate.
+  // Derived from position values; null when unsynced so the gate degrades safely.
+  const totalNav = (tickerList ?? []).reduce((sum, t) => sum + (t.position_value ?? 0), 0);
+  const activeEntry = (tickerList ?? []).find(
+    (t) => t.ticker.toUpperCase() === activeTicker.trim().toUpperCase(),
+  );
+  const activeWeightPct =
+    totalNav > 0 && activeEntry?.position_value != null
+      ? (activeEntry.position_value / totalNav) * 100
+      : null;
 
   // Hoist the Framework 1 score so Framework 3 can consume the same value.
   // We gate F3 on f1DisplayScore (the regime-adjusted score the investor sees)
@@ -160,16 +173,29 @@ export function FrameworksPanelsSection() {
       </div>
 
       <div className="atlas-regime-panels-row">
-        <FrameworkScorePanel
-          ticker={activeTicker}
-          onPreviewDetails={() => setDetailsOverlayOpen(true)}
-        />
+        {/* Left column: Framework 1 with Extension & Washout directly beneath it
+            (no dead gap — the two columns balance in height). */}
+        <div className="atlas-frameworks-side-stack">
+          <FrameworkScorePanel
+            ticker={activeTicker}
+            onPreviewDetails={() => setDetailsOverlayOpen(true)}
+          />
+          <ExtensionWashoutPanel
+            ticker={activeTicker}
+            positionWeightPct={activeWeightPct}
+            beta={activeEntry?.beta ?? null}
+          />
+        </div>
 
-        {/* Stacked beside Framework 1: Extension Overlay on top of Forward Growth. */}
+        {/* Right column: Extension Overlay on top of Forward Growth. */}
         <div className="atlas-frameworks-side-stack">
           <ExtensionOverlayPanel ticker={activeTicker} atlasScore={f1DisplayScore} />
           <ForwardGrowthPanel ticker={activeTicker} atlasScore={f1DisplayScore} />
         </div>
+      </div>
+
+      <div className="atlas-frameworks-secondary-row">
+        <WashoutReferencePanel />
       </div>
 
       <div className="atlas-frameworks-secondary-row">

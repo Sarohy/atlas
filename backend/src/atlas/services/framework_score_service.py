@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 _W_F1: Final[float] = 0.20  # Momentum
 _W_F2: Final[float] = 0.25  # Earnings Quality
 _W_F3: Final[float] = 0.15  # Analyst Sentiment
-_W_F4: Final[float] = 0.15  # Options Flow
+_W_F4: Final[float] = 0.15  # Options Flow Persistence (SPEC v2.2 rename; math unchanged)
 _W_F5: Final[float] = 0.25  # Fundamental Quality
 
 # Neutral fallback score when a factor service is unavailable.
@@ -179,7 +179,7 @@ class FrameworkScoreService:
             f3_result, "f3_score", "f3_grade", "F3 Analyst Sentiment", flags
         )
         f4_score, f4_grade, f4_ok = self._extract_factor(
-            f4_result, "f4_score", "f4_grade", "F4 Options Flow", flags
+            f4_result, "f4_score", "f4_grade", "F4 Options Flow Persistence", flags
         )
         f5_score, f5_grade, f5_ok = self._extract_factor(
             f5_result, "f5_score", "f5_grade", "F5 Fundamental Quality", flags
@@ -216,7 +216,7 @@ class FrameworkScoreService:
             ("f1", "Momentum", f1_score, _W_F1, f1_grade, f1_ok),
             ("f2", "Earnings Quality", f2_score, _W_F2, f2_grade, f2_ok and f2_data_ok),
             ("f3", "Analyst Sentiment", f3_score, _W_F3, f3_grade, f3_ok),
-            ("f4", "Options Flow", f4_score, _W_F4, f4_grade, f4_ok),
+            ("f4", "Options Flow Persistence", f4_score, _W_F4, f4_grade, f4_ok),
             ("f5", "Fundamental Quality", f5_score, _W_F5, f5_grade, f5_ok and f5_data_ok),
         ]
         factors = [

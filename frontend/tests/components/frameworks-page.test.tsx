@@ -83,7 +83,7 @@ describe('Frameworks page', () => {
     expect(overlayContent.getByText('F1 Momentum')).toBeInTheDocument();
     expect(overlayContent.getByText('F2 Earnings Quality')).toBeInTheDocument();
     expect(overlayContent.getByText('F3 Analyst Conviction')).toBeInTheDocument();
-    expect(overlayContent.getByText('F4 Options Flow')).toBeInTheDocument();
+    expect(overlayContent.getByText('F4 Options Flow Persistence')).toBeInTheDocument();
     expect(overlayContent.getByText('F5 Fundamental Quality')).toBeInTheDocument();
   });
 
@@ -107,7 +107,7 @@ describe('Frameworks page', () => {
     expect(overlayContent.getByText('F1 Momentum')).toBeInTheDocument();
     expect(overlayContent.getByText('F2 Earnings Quality')).toBeInTheDocument();
     expect(overlayContent.getByText('F3 Analyst Conviction')).toBeInTheDocument();
-    expect(overlayContent.getByText('F4 Options Flow')).toBeInTheDocument();
+    expect(overlayContent.getByText('F4 Options Flow Persistence')).toBeInTheDocument();
     expect(overlayContent.getByText('F5 Fundamental Quality')).toBeInTheDocument();
   });
 });

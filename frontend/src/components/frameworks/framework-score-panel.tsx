@@ -179,7 +179,7 @@ export function FrameworkScorePanel({
 
   return (
     <section
-      className="atlas-frameworks-panel atlas-fws-panel atlas-fws-panel--half-width"
+      className="atlas-frameworks-panel atlas-fws-panel"
       data-testid="framework-score-panel"
     >
       <div className="atlas-fws-hover-overlay" data-testid="framework-score-hover-overlay">

@@ -33,11 +33,12 @@ from atlas.schemas.extension_washout import (
 )
 from atlas.services.options_flow_service import (
     _classify_dark_pool_print,
-    _fetch_dark_pool_prints,
+    _fetch_dark_pool_prints_cached,
     _group_by_session,
     _print_premium_usd,
     _safe_float,
 )
+from atlas.services.provider_response_cache import fetch_polygon_daily_bars_cached
 
 _TIMEOUT: Final[float] = 15.0
 _LOOKBACK_DAYS: Final[int] = 380
@@ -131,22 +132,12 @@ class ExtensionWashoutService:
     # ------------------------------------------------------------------
 
     async def _fetch_bars(self, client: httpx.AsyncClient, ticker: str) -> list[dict[str, Any]]:
+        # Shared cache: reuses F1 / Extension Overlay's daily-bar fetch.
         to_date = date.today()
         from_date = to_date - timedelta(days=_LOOKBACK_DAYS)
-        url = _POLYGON_AGGS_URL.format(
-            ticker=ticker, from_date=from_date.isoformat(), to_date=to_date.isoformat()
+        return await fetch_polygon_daily_bars_cached(
+            client, ticker=ticker, api_key=self._api_key, from_date=from_date, to_date=to_date
         )
-        try:
-            resp = await client.get(
-                url,
-                params={"adjusted": "true", "sort": "asc", "limit": "500", "apiKey": self._api_key},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return []
-        payload: dict[str, Any] = resp.json()
-        return payload.get("results", []) or []
 
     async def _fetch_dark_pool(
         self, client: httpx.AsyncClient, ticker: str
@@ -154,7 +145,9 @@ class ExtensionWashoutService:
         if not self._uw_api_key:
             return None
         headers = {"Authorization": f"Bearer {self._uw_api_key}", "Accept": "application/json"}
-        return await _fetch_dark_pool_prints(client, ticker, headers)
+        # Shared cache: F4 and this overlay both need the dark-pool tape —
+        # one paginated fetch per ticker serves both.
+        return await _fetch_dark_pool_prints_cached(client, ticker, headers)
 
     async def _breadth_counts(self, client: httpx.AsyncClient) -> tuple[int, int, int]:
         """Return (watch_count, hedge_count, universe_size) for the complex (§5).

@@ -2,8 +2,18 @@
 
 Data sources:
   1. Unusual Whales — GET /api/darkpool/{ticker}                (dark-pool prints)
-  2. Unusual Whales — GET /api/option-trades/flow-alerts        (options flow alerts)
-  3. Polygon.io     — GET /v3/reference/tickers/{ticker}         (market cap)
+  2. Unusual Whales — GET /api/option-trades/flow-alerts        (options flow — PRIMARY)
+  3. Unusual Whales — GET /api/stock/{ticker}/flow-recent       (raw tape — fallback only)
+  4. Polygon.io     — GET /v3/reference/tickers/{ticker}         (market cap)
+
+F4 score source: the flow-ALERTS feed (source 2) — aggregated sweep/block/
+repeated-hit events whose premiums sit at the anchor-table scale, giving
+differentiated, calibrated scores. The original "DATA_GAP on most tickers + flat
+50" was a labeling bug: a successful-but-EMPTY feed (a quiet name with no
+significant flow) was collapsed to None and mislabeled DATA_GAP. An empty feed
+is now a genuine neutral (50, OPTIONS_ONLY), and DATA_GAP is reserved for a true
+fetch failure. The raw per-trade tape (source 3) is undersampled per call and
+not anchor-calibrated, so it is only a fallback when the alerts feed errors.
 
 Pipeline (per ticker):
   1. Excluded-ticker check (10 OTC/ADR symbols → DATA_GAP, no API calls).
@@ -30,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
@@ -37,6 +48,7 @@ from typing import Any, Final, Literal
 import httpx
 
 from atlas.schemas.options_flow import OptionsFlowResponse
+from atlas.services.provider_response_cache import cached_call
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +258,23 @@ async def _fetch_dark_pool_prints(
     return all_prints if all_prints else None
 
 
+async def _fetch_dark_pool_prints_cached(
+    client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
+) -> list[dict[str, Any]] | None:
+    """Cached, single-flight dark-pool fetch shared by F4 and the Washout Overlay.
+
+    One paginated tape fetch per ticker serves both endpoints on a page load
+    (and collapses concurrent requests). None/empty results are not cached, so a
+    transient failure retries on the next call.
+    """
+    result: list[dict[str, Any]] | None = await cached_call(
+        cache_key=f"uw:darkpool:{ticker.upper()}",
+        factory=lambda: _fetch_dark_pool_prints(client, ticker, headers),
+        cache_if=lambda r: bool(r),
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Network I/O — UW flow alerts (replaces the old flow-recent endpoint)
 # ---------------------------------------------------------------------------
@@ -253,6 +282,175 @@ async def _fetch_dark_pool_prints(
 # Maximum pages to fetch per call. 4 pages x 200 = 800 alerts - enough to
 # cover 5 sessions of even the most active large-cap names.
 _UW_FLOW_ALERTS_MAX_PAGES: Final[int] = 4
+
+
+# ---------------------------------------------------------------------------
+# Network I/O — UW fuller per-ticker options tape (primary F4 source)
+# ---------------------------------------------------------------------------
+#
+# The flow-ALERTS feed below only fires on UW-flagged *unusual* activity, so a
+# normal liquid name on a quiet week returns zero alerts → the old code mapped
+# that to a DATA_GAP and a flat 50.  This tape is the broad per-ticker options
+# feed: every name with any options flow produces a real net-flow reading, so
+# quiet names get a genuine (often still ~50, but *earned*) score rather than a
+# false gap.  The alerts feed is kept only as a fallback when this tape errors.
+#
+# NOTE: endpoint/field shapes vary by UW plan. The fetch is intentionally
+# tolerant (multiple batch keys; timestamp/side/premium normalization) and the
+# path is a single constant so it can be swapped against a live sample. If this
+# tape hard-errors the service degrades gracefully to the flow-alerts fallback.
+_UW_OPTION_TAPE_PATH_TMPL: Final[str] = _UW_BASE_URL + "/api/stock/{ticker}/flow-recent"
+_UW_OPTION_TAPE_MAX_PAGES: Final[int] = 6
+_UW_OPTION_TAPE_LIMIT: Final[int] = 200
+# OCC option symbol: TICKER + YYMMDD + [C|P] + 8-digit strike. The C/P letter
+# immediately precedes the trailing 8-digit strike — used to read call/put off
+# UW flow-recent records, which omit an explicit `type` field.
+_OCC_TYPE_RE: Final[re.Pattern[str]] = re.compile(r"([CP])\d{8}$")
+# Options contract multiplier — used only when a record lacks an explicit
+# `premium` dollar figure and we must reconstruct it from price * size.
+_OPTION_CONTRACT_MULTIPLIER: Final[float] = 100.0
+
+
+def _extract_tape_batch(payload: Any) -> list[Any]:
+    """Pull the record list out of a tape payload across known UW shapes."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("data", "flow", "trades", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _normalize_tape_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a UW ``flow-recent`` per-trade record for the aggregator.
+
+    The flow-recent tape does NOT carry explicit ``type``/``side`` fields. It
+    encodes them as:
+      - call/put → the ``[CP]`` letter in the OCC symbol (``option_chain_id`` /
+        ``option_chain``), e.g. ``NVDA260617P00202500`` → put;
+      - buy/sell side → the ``tags`` list (``"ask_side"`` / ``"bid_side"``),
+        with an NBBO-vs-price fallback when tags are absent.
+
+    Populates ``option_type``, ``side``, ``executed_at`` and (if missing) a
+    dollar ``premium`` so ``_classify_options_print`` / ``_aggregate_options``
+    can read it. Mutates and returns the record (fresh from JSON decoding).
+    """
+    ts = rec.get("executed_at") or rec.get("created_at") or rec.get("tape_time")
+    if isinstance(ts, str):
+        rec["executed_at"] = ts
+
+    # option_type (call/put) — explicit field, else the OCC chain symbol's C/P.
+    if not (rec.get("option_type") or rec.get("type")):
+        chain = (
+            rec.get("option_chain")
+            or rec.get("option_chain_id")
+            or rec.get("option_symbol")
+        )
+        if isinstance(chain, str):
+            m = _OCC_TYPE_RE.search(chain)
+            if m:
+                rec["option_type"] = "call" if m.group(1) == "C" else "put"
+
+    # side (ASK/BID) — explicit field, else UW tags, else NBBO-vs-price.
+    if not rec.get("side"):
+        tags = rec.get("tags")
+        if isinstance(tags, (list, tuple)):
+            tagset = {str(t).lower() for t in tags}
+            if "ask_side" in tagset:
+                rec["side"] = _UW_SIDE_ASK
+            elif "bid_side" in tagset:
+                rec["side"] = _UW_SIDE_BID
+    if not rec.get("side"):
+        price = _safe_float(rec.get("price"))
+        ask_raw = rec.get("nbbo_ask") if rec.get("nbbo_ask") is not None else rec.get("ask")
+        bid_raw = rec.get("nbbo_bid") if rec.get("nbbo_bid") is not None else rec.get("bid")
+        ask = _safe_float(ask_raw)
+        bid = _safe_float(bid_raw)
+        if price is not None and ask is not None and bid is not None:
+            if price >= ask * _F4_AT_OR_ABOVE_ASK_FACTOR:
+                rec["side"] = _UW_SIDE_ASK
+            elif price <= bid * _F4_AT_OR_BELOW_BID_FACTOR:
+                rec["side"] = _UW_SIDE_BID
+
+    if _safe_float(rec.get("premium")) is None:
+        size = _safe_float(rec.get("size"))
+        price = _safe_float(rec.get("price"))
+        if size is not None and price is not None:
+            rec["premium"] = size * price * _OPTION_CONTRACT_MULTIPLIER
+
+    return rec
+
+
+async def _fetch_option_trades_tape(
+    client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
+) -> list[dict[str, Any]] | None:
+    """Fetch the fuller per-ticker options trade tape from Unusual Whales.
+
+    Paginates backward via the ``older_than`` cursor until 5 distinct session
+    days are covered or _UW_OPTION_TAPE_MAX_PAGES pages are exhausted.
+
+    Returns:
+      - a list of normalized per-trade records (possibly **empty**) on any
+        successful HTTP response — an empty list means "no options flow / no
+        edge", which is a genuine neutral reading, NOT a data gap;
+      - ``None`` only on a hard transport/HTTP error before any successful page,
+        so the caller can fall back to the flow-alerts feed.
+    """
+    all_trades: list[dict[str, Any]] = []
+    params: dict[str, Any] = {"limit": _UW_OPTION_TAPE_LIMIT}
+    saw_response = False
+    url = _UW_OPTION_TAPE_PATH_TMPL.format(ticker=ticker)
+
+    for _ in range(_UW_OPTION_TAPE_MAX_PAGES):
+        try:
+            resp = await client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            payload: Any = resp.json()
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Hard error: None only if we never saw a good page (true gap).
+            return all_trades if saw_response else None
+
+        saw_response = True
+        batch = _extract_tape_batch(payload)
+        if not batch:
+            break
+
+        all_trades.extend(
+            _normalize_tape_record(rec) for rec in batch if isinstance(rec, dict)
+        )
+
+        distinct_days = {
+            str(r.get("executed_at", ""))[:10] for r in all_trades if r.get("executed_at")
+        }
+        if len(distinct_days) >= _F4_LOOKBACK_SESSIONS:
+            break
+
+        last = batch[-1] if isinstance(batch[-1], dict) else {}
+        oldest_ts = last.get("executed_at") or last.get("created_at")
+        if not oldest_ts:
+            break
+        params = {"limit": _UW_OPTION_TAPE_LIMIT, "older_than": oldest_ts}
+
+    return all_trades  # may be [] on a successful-but-empty fetch (real neutral)
+
+
+async def _fetch_option_trades_tape_cached(
+    client: httpx.AsyncClient, ticker: str, headers: dict[str, str]
+) -> list[dict[str, Any]] | None:
+    """Cached, single-flight options-tape fetch (one fetch per ticker per load).
+
+    Caches successful results *including the empty list* (a real "no flow"
+    reading) so quiet names don't re-hit the API; only hard errors (None) are
+    left uncached so they retry.
+    """
+    result: list[dict[str, Any]] | None = await cached_call(
+        cache_key=f"uw:opttape:{ticker.upper()}",
+        factory=lambda: _fetch_option_trades_tape(client, ticker, headers),
+        cache_if=lambda r: r is not None,
+    )
+    return result
 
 
 async def _fetch_option_flow_alerts(
@@ -268,10 +466,15 @@ async def _fetch_option_flow_alerts(
     Paginates backwards via the ``older_than`` cursor until 5 distinct session
     days are covered or _UW_FLOW_ALERTS_MAX_PAGES pages are exhausted.
 
-    Returns None on API error; returns whatever was collected on partial errors.
+    Returns:
+      - a list of alert records (possibly **empty**) on any successful HTTP
+        response — an empty list means "no significant options flow this week",
+        a genuine neutral reading, NOT a data gap;
+      - ``None`` only on a hard transport/HTTP error before any successful page.
     """
     all_alerts: list[dict[str, Any]] = []
     params: dict[str, Any] = {"ticker_symbol": ticker, "limit": 200}
+    saw_response = False
 
     for _ in range(_UW_FLOW_ALERTS_MAX_PAGES):
         try:
@@ -283,9 +486,10 @@ async def _fetch_option_flow_alerts(
             resp.raise_for_status()
             payload: Any = resp.json()
         except (httpx.HTTPError, ValueError, TypeError):
-            # Return whatever we have so far; None only if we have nothing.
-            return all_alerts if all_alerts else None
+            # Hard error: None only if we never saw a good page (true gap).
+            return all_alerts if saw_response else None
 
+        saw_response = True
         if not isinstance(payload, dict):
             break
         batch: list[Any] = payload.get("data", [])
@@ -305,7 +509,7 @@ async def _fetch_option_flow_alerts(
             break
         params = {"ticker_symbol": ticker, "limit": 200, "older_than": oldest_ts}
 
-    return all_alerts if all_alerts else None
+    return all_alerts  # may be [] on a successful-but-empty fetch (real neutral)
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +728,31 @@ def _decay_weighted_options(
     if not sessions:
         return 0.0, None
     daily = [_options_net_raw(day) for day in sessions]  # newest first
+    nets = [d[0] for d in daily]
+    largest = max((d[1] for d in daily if d[1] is not None), default=None)
+    n = len(nets)
+    weights = _F4_DECAY_PCT[:n]
+    total_w = sum(weights)
+    weighted = sum(net * (w / total_w * n) for net, w in zip(nets, weights, strict=True))
+    return weighted, largest
+
+
+def _decay_weighted_tape(
+    windowed_trades: list[dict[str, Any]],
+) -> tuple[float, float | None]:
+    """Time-decay-weighted net flow over the per-trade options tape.
+
+    Same fading-memory weighting as the alerts path, but aggregates the fuller
+    per-trade tape via the per-trade classifier (``_aggregate_options``): each
+    session's net = sum(new-bull + put-sell premiums) - sum(new-bear premiums),
+    with profit-taking and spread crosses stripped. Newest session weighted most.
+
+    Returns (weighted_net_flow_usd, largest_single_bullish_premium_usd).
+    """
+    sessions = _group_by_session(windowed_trades, "executed_at")[:_F4_LOOKBACK_SESSIONS]
+    if not sessions:
+        return 0.0, None
+    daily = [_aggregate_options(day) for day in sessions]  # newest first
     nets = [d[0] for d in daily]
     largest = max((d[1] for d in daily if d[1] is not None), default=None)
     n = len(nets)
@@ -838,12 +1067,24 @@ def _build_response_v2(
     ticker: str,
     market_cap: float | None,
     dp_prints: list[dict[str, Any]] | None,
-    opt_trades: list[dict[str, Any]] | None,
+    opt_trades: list[dict[str, Any]] | None = None,
+    opt_tape: list[dict[str, Any]] | None = None,
 ) -> OptionsFlowResponse:
     """Build the F4 v2 response from raw fetched data.
 
-    None for dp_prints / opt_trades signals "data source unavailable" and
-    propagates into the data_source label + sub-score nullification.
+    Options-score source priority (F4 is options-only):
+      1. ``opt_trades`` — the flow-alerts feed (PRIMARY). These are aggregated
+         sweep/block/repeated-hit events whose premiums sit at the anchor-table
+         scale, so they give differentiated, calibrated scores. A non-None value
+         *including an empty list* is a real reading: empty = no significant flow
+         = a genuine neutral 50, NOT a data gap.
+      2. ``opt_tape`` — the raw per-trade tape (fallback only, when alerts
+         hard-error). It is undersampled per call and not anchor-calibrated, so
+         it is a last resort rather than the primary signal.
+      3. Neither available (both None) → DATA_GAP, score withheld at 50.
+
+    ``None`` for ``dp_prints`` signals "dark-pool unavailable" and nullifies the
+    (informational-only) dark-pool sub-score and chips.
     """
     tier = _pick_tier(market_cap)
 
@@ -874,20 +1115,31 @@ def _build_response_v2(
         )
 
     # Options branch (Layer 1 — the F4 score, options-only + fading memory) -----
+    # Primary source is the flow-alerts feed (calibrated to the anchor scale);
+    # the raw per-trade tape is a fallback only. An empty primary feed
+    # (opt_trades == []) is a REAL neutral reading, not a gap — only "no source
+    # at all" (both None) is a DATA_GAP.
     opt_score: int | None
     opt_net_flow: float | None
     largest_opt_buy: float | None = None
-    if opt_trades is None:
-        opt_score = None
-        opt_net_flow = None
-    else:
+    opt_window_empty = False
+    if opt_trades is not None:
         windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
+        opt_window_empty = not windowed_opts
         opt_net_flow, largest_opt_buy = _decay_weighted_options(windowed_opts)
         # Protective-structure relief (covered-call / put-spread) still applies to
         # the weighted net — this is legitimate net-flow handling, distinct from
         # the removed (broken) covered-call display tag.
         opt_net_flow = _apply_strategy_aware_adjustment(windowed_opts, opt_net_flow)
         opt_score = _map_net_flow_to_score(opt_net_flow, tier)
+    elif opt_tape is not None:
+        windowed_tape = _filter_to_recent_sessions(opt_tape, timestamp_key="executed_at")
+        opt_window_empty = not windowed_tape
+        opt_net_flow, largest_opt_buy = _decay_weighted_tape(windowed_tape)
+        opt_score = _map_net_flow_to_score(opt_net_flow, tier)
+    else:
+        opt_score = None
+        opt_net_flow = None
 
     # F4 is now OPTIONS-ONLY. Dark-pool no longer enters the 0-100 (it drives the
     # chips/clearance below). data_source reflects the score's single source.
@@ -907,6 +1159,10 @@ def _build_response_v2(
     gap_reason: str | None = None
     if source == _F4_SOURCE_DATA_GAP:
         gap_reason = "Options flow unavailable — F4 score withheld (DATA_GAP)."
+    elif opt_window_empty:
+        # Real reading, not a gap: the tape was fetched but no options flow
+        # landed in the 5-session window → genuinely neutral.
+        gap_reason = "No options flow in the 5-session window — neutral (not a data gap)."
     if dp_truncated:
         note = (
             f"Dark-pool covers {dp_sessions_covered} of {_F4_LOOKBACK_SESSIONS} sessions "
@@ -1000,38 +1256,52 @@ class OptionsFlowService:
                 )
                 return cached_response
 
-        # Step 2: three concurrent fetches — retry UW calls once on failure.
+        # Step 2: three concurrent fetches — market cap, dark-pool tape, and the
+        # OPTIONS FLOW-ALERTS feed (the F4 score's primary, anchor-calibrated
+        # source). An empty alerts list ([]) is a real "no significant flow"
+        # reading, not an error.
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            market_cap, dp_prints, opt_trades = await asyncio.gather(
+            market_cap, dp_prints, opt_alerts = await asyncio.gather(
                 _fetch_market_cap(client, ticker, self._polygon_api_key),
-                _fetch_dark_pool_prints(client, ticker, self._uw_headers),
+                _fetch_dark_pool_prints_cached(client, ticker, self._uw_headers),
                 _fetch_option_flow_alerts(client, ticker, self._uw_headers),
             )
 
-        # Retry whichever UW call returned None — single retry with 1s backoff.
-        if dp_prints is None or opt_trades is None:
+        # Retry whichever UW call HARD-errored (None). An empty list ([]) is a
+        # real reading, not an error, so it is never retried.
+        if dp_prints is None or opt_alerts is None:
             await asyncio.sleep(1.0)
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                if dp_prints is None and opt_trades is None:
-                    dp_prints, opt_trades = await asyncio.gather(
-                        _fetch_dark_pool_prints(client, ticker, self._uw_headers),
-                        _fetch_option_flow_alerts(client, ticker, self._uw_headers),
+                if dp_prints is None:
+                    dp_prints = await _fetch_dark_pool_prints_cached(
+                        client, ticker, self._uw_headers
                     )
-                elif dp_prints is None:
-                    dp_prints = await _fetch_dark_pool_prints(client, ticker, self._uw_headers)
-                else:
-                    opt_trades = await _fetch_option_flow_alerts(client, ticker, self._uw_headers)
+                if opt_alerts is None:
+                    opt_alerts = await _fetch_option_flow_alerts(
+                        client, ticker, self._uw_headers
+                    )
+
+        # Fallback: only when the alerts feed hard-errored do we reach for the
+        # raw per-trade tape (undersampled/uncalibrated) so a transient alerts
+        # outage degrades to a coarse reading instead of a flat DATA_GAP.
+        opt_tape: list[dict[str, Any]] | None = None
+        if opt_alerts is None:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                opt_tape = await _fetch_option_trades_tape_cached(
+                    client, ticker, self._uw_headers
+                )
 
         # Step 3: aggregate + score + build response.
         result = _build_response_v2(
             ticker=ticker,
             market_cap=market_cap,
             dp_prints=dp_prints,
-            opt_trades=opt_trades,
+            opt_trades=opt_alerts,
+            opt_tape=opt_tape,
         )
 
         # Cache only real data (not data-gap fallbacks) to avoid caching stale 50s.
-        if dp_prints is not None or opt_trades is not None:
+        if dp_prints is not None or opt_alerts is not None or opt_tape is not None:
             _f4_cache[ticker] = (datetime.now(UTC), result)
 
         return result
@@ -1048,7 +1318,7 @@ class OptionsFlowService:
 # Net-flow direction classifications --------------------------------------
 DPClassification = Literal["BUY", "SELL", "SETTLEMENT"]
 OptionsClassification = Literal["NEW_BULL", "PUT_SELL", "NEW_BEAR", "PROFIT_TAKING", "SPREAD_CROSS"]
-MarketCapTier = Literal["LARGE", "MID", "SMALL"]
+MarketCapTier = Literal["MEGA", "LARGE", "MID", "SMALL"]
 
 # OTC / ADR exclusion list (per locked Q3). These tickers return F4 = 50
 # with a DATA_GAP flag and skip all upstream API calls.
@@ -1067,7 +1337,12 @@ _F4_EXCLUDED_TICKERS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Market-cap tier thresholds (USD). LARGE > $50B; MID $5B-$50B; SMALL < $5B.
+# Market-cap tier thresholds (USD). MEGA > $500B; LARGE $50B-$500B;
+# MID $5B-$50B; SMALL < $5B. MEGA was split out of LARGE because a single
+# $50B-$5T band is too wide: flow that is meaningful for a $74B name (e.g. LITE)
+# is noise for a $5T name (NVDA). MEGA keeps the old wide LARGE band; LARGE is
+# tightened so $50-500B names move off the neutral plateau on real flow.
+_F4_MEGA_CAP_FLOOR: Final[float] = 500_000_000_000.0
 _F4_LARGE_CAP_FLOOR: Final[float] = 50_000_000_000.0
 _F4_MID_CAP_FLOOR: Final[float] = 5_000_000_000.0
 
@@ -1075,13 +1350,24 @@ _F4_MID_CAP_FLOOR: Final[float] = 5_000_000_000.0
 # monotonically increasing in net_flow. Linear interpolation between adjacent
 # anchors; flat extrapolation outside the endpoints (clamped to [0, 100]).
 # Inside the ±neutral band both anchors map to score 50 → flat neutral plateau.
-_F4_DP_ANCHORS_LARGE: Final[tuple[tuple[float, int], ...]] = (
+# MEGA (>$500B): the original wide LARGE calibration — mega-cap flow is huge.
+_F4_DP_ANCHORS_MEGA: Final[tuple[tuple[float, int], ...]] = (
     (-100_000_000.0, 0),
     (-25_000_000.0, 25),
     (-5_000_000.0, 50),
     (5_000_000.0, 50),
     (25_000_000.0, 75),
     (100_000_000.0, 100),
+)
+# LARGE ($50B-$500B): tightened — ±$2M neutral band, knees at $10M/$30M, so a
+# few-million-dollar net imbalance on a $50-200B name registers a real reading.
+_F4_DP_ANCHORS_LARGE: Final[tuple[tuple[float, int], ...]] = (
+    (-30_000_000.0, 0),
+    (-10_000_000.0, 25),
+    (-2_000_000.0, 50),
+    (2_000_000.0, 50),
+    (10_000_000.0, 75),
+    (30_000_000.0, 100),
 )
 _F4_DP_ANCHORS_MID: Final[tuple[tuple[float, int], ...]] = (
     (-20_000_000.0, 0),
@@ -1180,13 +1466,16 @@ def _is_excluded_ticker(ticker: str) -> bool:
 
 
 def _pick_tier(market_cap_usd: float | None) -> MarketCapTier:
-    """Map market cap → LARGE | MID | SMALL.
+    """Map market cap → MEGA | LARGE | MID | SMALL.
 
-    LARGE: > $50B ; MID: $5B-$50B (inclusive at $5B) ; SMALL: < $5B or unknown.
-    Unknown market cap (None) defaults to SMALL (most conservative anchors).
+    MEGA: > $500B ; LARGE: $50B-$500B ; MID: $5B-$50B (inclusive at $5B) ;
+    SMALL: < $5B or unknown. Unknown market cap (None) defaults to SMALL (most
+    conservative anchors).
     """
     if market_cap_usd is None:
         return "SMALL"
+    if market_cap_usd > _F4_MEGA_CAP_FLOOR:
+        return "MEGA"
     if market_cap_usd > _F4_LARGE_CAP_FLOOR:
         return "LARGE"
     if market_cap_usd >= _F4_MID_CAP_FLOOR:
@@ -1196,6 +1485,8 @@ def _pick_tier(market_cap_usd: float | None) -> MarketCapTier:
 
 def _anchors_for_tier(tier: MarketCapTier) -> tuple[tuple[float, int], ...]:
     """Return the anchor table for a tier."""
+    if tier == "MEGA":
+        return _F4_DP_ANCHORS_MEGA
     if tier == "LARGE":
         return _F4_DP_ANCHORS_LARGE
     if tier == "MID":

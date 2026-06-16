@@ -83,10 +83,15 @@ class TestIsExcludedTicker:
 
 
 class TestPickTier:
-    """Tiers: LARGE > $50B ; MID $5B-$50B ; SMALL < $5B ; None → SMALL."""
+    """Tiers: MEGA > $500B ; LARGE $50B-$500B ; MID $5B-$50B ; SMALL < $5B."""
 
-    def test_large_cap_above_50b(self) -> None:
+    def test_mega_cap_above_500b(self) -> None:
+        assert _pick_tier(600_000_000_000.0) == "MEGA"
+        assert _pick_tier(5_000_000_000_000.0) == "MEGA"
+
+    def test_large_cap_between_50b_and_500b(self) -> None:
         assert _pick_tier(_LARGE_CAP_50B_PLUS) == "LARGE"
+        assert _pick_tier(499_000_000_000.0) == "LARGE"
 
     def test_mid_cap_at_5b_floor_is_mid(self) -> None:
         # $5B is the MID floor (inclusive).
@@ -107,37 +112,59 @@ class TestPickTier:
 # ===========================================================================
 
 
-class TestMapNetFlowToScoreLargeCap:
-    """LARGE anchors: 100→±$100M / 75→+$25M / 50→±$5M / 25→-$25M / 0→-$100M."""
+class TestMapNetFlowToScoreMegaCap:
+    """MEGA anchors: 100→±$100M / 75→+$25M / 50→±$5M / 25→-$25M / 0→-$100M."""
 
     def test_at_plus_100m_anchor_returns_100(self) -> None:
-        assert _map_net_flow_to_score(100_000_000.0, "LARGE") == 100
+        assert _map_net_flow_to_score(100_000_000.0, "MEGA") == 100
 
     def test_above_plus_100m_clamps_at_100(self) -> None:
-        assert _map_net_flow_to_score(500_000_000.0, "LARGE") == 100
+        assert _map_net_flow_to_score(500_000_000.0, "MEGA") == 100
 
     def test_at_plus_25m_anchor_returns_75(self) -> None:
-        assert _map_net_flow_to_score(25_000_000.0, "LARGE") == 75
+        assert _map_net_flow_to_score(25_000_000.0, "MEGA") == 75
 
     def test_inside_neutral_band_returns_50(self) -> None:
         # ±$5M is the neutral band — both anchors are 50.
-        assert _map_net_flow_to_score(0.0, "LARGE") == 50
-        assert _map_net_flow_to_score(2_500_000.0, "LARGE") == 50
-        assert _map_net_flow_to_score(-3_000_000.0, "LARGE") == 50
+        assert _map_net_flow_to_score(0.0, "MEGA") == 50
+        assert _map_net_flow_to_score(2_500_000.0, "MEGA") == 50
+        assert _map_net_flow_to_score(-3_000_000.0, "MEGA") == 50
 
     def test_at_minus_25m_anchor_returns_25(self) -> None:
-        assert _map_net_flow_to_score(-25_000_000.0, "LARGE") == 25
+        assert _map_net_flow_to_score(-25_000_000.0, "MEGA") == 25
 
     def test_at_minus_100m_anchor_returns_0(self) -> None:
-        assert _map_net_flow_to_score(-100_000_000.0, "LARGE") == 0
+        assert _map_net_flow_to_score(-100_000_000.0, "MEGA") == 0
 
     def test_below_minus_100m_clamps_at_0(self) -> None:
-        assert _map_net_flow_to_score(-500_000_000.0, "LARGE") == 0
+        assert _map_net_flow_to_score(-500_000_000.0, "MEGA") == 0
 
     def test_linear_interpolation_between_25m_and_100m(self) -> None:
         # Midpoint between +$25M (75) and +$100M (100) ≈ +$62.5M → ~87 (87 or 88).
-        score = _map_net_flow_to_score(62_500_000.0, "LARGE")
+        score = _map_net_flow_to_score(62_500_000.0, "MEGA")
         assert 86 <= score <= 89
+
+
+class TestMapNetFlowToScoreLargeCap:
+    """LARGE ($50-500B) anchors: 100→±$30M / 75→+$10M / 50→±$2M / 25→-$10M / 0→-$30M."""
+
+    def test_at_plus_30m_anchor_returns_100(self) -> None:
+        assert _map_net_flow_to_score(30_000_000.0, "LARGE") == 100
+
+    def test_at_plus_10m_anchor_returns_75(self) -> None:
+        assert _map_net_flow_to_score(10_000_000.0, "LARGE") == 75
+
+    def test_tighter_neutral_band(self) -> None:
+        # ±$2M neutral band (vs ±$5M for MEGA).
+        assert _map_net_flow_to_score(0.0, "LARGE") == 50
+        assert _map_net_flow_to_score(1_500_000.0, "LARGE") == 50
+
+    def test_few_million_registers_above_neutral(self) -> None:
+        # The point of the split: ~$3M on a $50-500B name is no longer flat 50.
+        assert _map_net_flow_to_score(3_000_000.0, "LARGE") > 50
+
+    def test_at_minus_30m_anchor_returns_0(self) -> None:
+        assert _map_net_flow_to_score(-30_000_000.0, "LARGE") == 0
 
 
 class TestMapNetFlowToScoreMidCap:

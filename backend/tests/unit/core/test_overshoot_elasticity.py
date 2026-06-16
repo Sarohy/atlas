@@ -114,3 +114,8 @@ class TestResult:
             "ZZZ", ElasticityInputs(rv60=90), extra_data_gaps=["SHORT_INTEREST", "FLOAT"]
         )
         assert "SHORT_INTEREST" in r.data_gaps and "FLOAT" in r.data_gaps
+
+
+def test_sndk_calibration_excluded() -> None:
+    r = compute_elasticity("SNDK", ElasticityInputs(rv60=90), event_count=3)
+    assert r.exclude_recalibration is True

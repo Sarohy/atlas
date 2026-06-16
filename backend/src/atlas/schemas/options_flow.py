@@ -68,7 +68,7 @@ class OptionsFlowResponse(BaseModel):
         default=None, description="Market cap from Polygon (USD). None when unavailable."
     )
     market_cap_tier: str = Field(
-        description="LARGE | MID | SMALL — determines anchor table for net-flow scoring."
+        description="MEGA | LARGE | MID | SMALL — determines anchor table for net-flow scoring."
     )
 
     # ---- Direction (derived from signs of net flows) ---------------------

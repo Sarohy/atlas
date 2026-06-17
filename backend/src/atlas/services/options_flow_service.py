@@ -279,8 +279,10 @@ async def _fetch_dark_pool_prints_cached(
 # Network I/O — UW flow alerts (replaces the old flow-recent endpoint)
 # ---------------------------------------------------------------------------
 
-# Maximum pages to fetch per call. 4 pages x 200 = 800 alerts - enough to
-# cover 5 sessions of even the most active large-cap names.
+# Maximum pages to fetch per call. The multi-window F4b scores up to 5 sessions
+# (the 10-20 context window is not scored). 4 pages x 200 = 800 alerts covers 5
+# sessions for even the most active large-cap names; the loop stops early once
+# _F4_OPTIONS_MAX_SESSIONS distinct days are spanned.
 _UW_FLOW_ALERTS_MAX_PAGES: Final[int] = 4
 
 
@@ -498,9 +500,9 @@ async def _fetch_option_flow_alerts(
 
         all_alerts.extend(r for r in batch if isinstance(r, dict))
 
-        # Stop once we have data from at least _F4_LOOKBACK_SESSIONS distinct days.
+        # Stop once we span the deepest scored window (multi-window context).
         distinct_days = {r.get("created_at", "")[:10] for r in all_alerts if r.get("created_at")}
-        if len(distinct_days) >= _F4_LOOKBACK_SESSIONS:
+        if len(distinct_days) >= _F4_OPTIONS_MAX_SESSIONS:
             break
 
         # Paginate: request alerts older than the last record in this batch.
@@ -739,20 +741,9 @@ _F4_EW_SWING: Final[float] = 0.85  # 91-270 DTE (3-9mo)
 _F4_EW_LEAPS: Final[float] = 0.78  # >270 DTE
 _F4_EW_UNKNOWN: Final[float] = 0.85
 
-# Score bounds (Key §5/§8).
-_F4_SCORE_MAX: Final[int] = 95
-_F4_SCORE_MIN: Final[int] = 10
-
-# Dark-pool CONFIRMATION (Key §6 step 6 / §7). This re-admits dark pool into F4 as
-# a bounded confirmation — a deliberate supersession of the v2.2 options-only
-# firewall, authorized by the F4 Classification Key. A strong buy-lean upgrades a
-# non-bearish options tape; a strong sell-lean downgrades. DP buying does NOT
-# rescue a directional-bearish options tape (Key §9/§13): the upgrade is gated on
-# bullish_share >= _F4_DP_UPGRADE_MIN_SHARE so genuine bearish names (e.g. NBIS)
-# stay bearish despite institutional accumulation.
-_F4_DP_CONFIRM_MIN_USD: Final[float] = 50_000_000.0
-_F4_DP_CONFIRM_POINTS: Final[int] = 12
-_F4_DP_UPGRADE_MIN_SHARE: Final[float] = 0.42
+# F4a equity / dark-pool is NOT scored into F4b (final scoring rule). Dark-pool
+# confirmation belongs to the (deferred) Flow Monitor action gate, not the score,
+# so it surfaces only via the dark_pool_state chip / clearance / dark_pool_net_flow.
 
 # F4 state labels by score band (Key §5 / §12 / §13).
 _F4_STATE_STRONG_BULL: Final[str] = "Strong bullish"
@@ -884,6 +875,106 @@ def _bullish_share_to_score(share: float | None) -> int:
             ratio = (share - x0) / (x1 - x0)
             return round(y0 + ratio * (y1 - y0))
     return _F4_NEUTRAL_SCORE
+
+
+# ---------------------------------------------------------------------------
+# Multi-window F4b (Multi-Window Pull Spec §3) — weight current session heaviest
+# so rotations/reversals are not hidden by a flat 5-session average.
+# ---------------------------------------------------------------------------
+#
+# F4b = weighted blend of the classified options score over overlapping windows:
+#   current(35%) + prior(20%) + 3-session(20%) + 5-session(15%).
+# The 10-20 session context window is intentionally NOT scored (per the final
+# scoring rule) — deep history is context, not signal. Missing windows (not enough
+# history) are dropped and the remaining weights re-normalize.
+_F4_OPTIONS_MAX_SESSIONS: Final[int] = 5  # deepest window scored (5-session)
+_F4_WINDOW_WEIGHTS: Final[tuple[tuple[str, float, int, int], ...]] = (
+    # (label, weight, start_session_idx, end_session_idx) — newest session = 0.
+    # Weights sum to 0.90 and re-normalize over the windows that have data.
+    ("current", 0.35, 0, 1),
+    ("prior", 0.20, 1, 2),
+    ("3-session", 0.20, 0, 3),
+    ("5-session", 0.15, 0, 5),
+)
+
+# Live-tape-state thresholds (Multi-Window Pull Spec §4).
+_F4_LIVE_BULL: Final[int] = 58
+_F4_LIVE_BEAR: Final[int] = 42
+_F4_LIVE_DELTA: Final[int] = 6  # today-vs-baseline move that counts as a shift
+
+# Live tape state labels.
+_F4_LIVE_IMPROVING: Final[str] = "Improving"
+_F4_LIVE_DETERIORATING: Final[str] = "Deteriorating"
+_F4_LIVE_BULL_PERSISTENT: Final[str] = "Bullish persistent"
+_F4_LIVE_BEAR_PERSISTENT: Final[str] = "Bearish persistent"
+_F4_LIVE_BULL_REVERSAL: Final[str] = "Bullish reversal"
+_F4_LIVE_BEAR_REVERSAL: Final[str] = "Bearish reversal"
+_F4_LIVE_MIXED: Final[str] = "Mixed / structured"
+_F4_LIVE_DATA_GAP: Final[str] = "Data gap"
+
+
+def _window_score(sessions: list[list[dict[str, Any]]], start: int, end: int) -> int | None:
+    """Classified options score over sessions[start:end]; None if no flow there."""
+    alerts = [rec for sess in sessions[start:end] for rec in sess]
+    if not alerts:
+        return None
+    bullish, bearish, _ = _directional_premium(alerts)
+    share = _bullish_share(bullish, bearish)
+    if share is None:
+        return None
+    return _bullish_share_to_score(share)
+
+
+def _multi_window_score(sessions: list[list[dict[str, Any]]]) -> int | None:
+    """Weighted blend of the per-window classified scores (Multi-Window §3)."""
+    parts = [(w, _window_score(sessions, s, e)) for _, w, s, e in _F4_WINDOW_WEIGHTS]
+    avail = [(w, sc) for w, sc in parts if sc is not None]
+    if not avail:
+        return None
+    total_w = sum(w for w, _ in avail)
+    return round(sum(w * sc for w, sc in avail) / total_w)
+
+
+def _live_tape_state(current: int | None, baseline: int | None) -> str:
+    """Classify today's tape vs the 5-session baseline (Multi-Window §4)."""
+    if current is None:
+        return _F4_LIVE_DATA_GAP
+    if baseline is None:
+        baseline = current
+    cur_bull, cur_bear = current >= _F4_LIVE_BULL, current <= _F4_LIVE_BEAR
+    base_bull, base_bear = baseline >= _F4_LIVE_BULL, baseline <= _F4_LIVE_BEAR
+    if cur_bull and base_bull:
+        return _F4_LIVE_BULL_PERSISTENT
+    if cur_bear and base_bear:
+        return _F4_LIVE_BEAR_PERSISTENT
+    if cur_bull and baseline < _F4_NEUTRAL_SCORE:
+        return _F4_LIVE_BULL_REVERSAL
+    if cur_bear and baseline > _F4_NEUTRAL_SCORE:
+        return _F4_LIVE_BEAR_REVERSAL
+    delta = current - baseline
+    if delta >= _F4_LIVE_DELTA:
+        return _F4_LIVE_IMPROVING
+    if delta <= -_F4_LIVE_DELTA:
+        return _F4_LIVE_DETERIORATING
+    return _F4_LIVE_MIXED
+
+
+def _otm_ask_split(alerts: list[dict[str, Any]]) -> tuple[float, float]:
+    """Sum OTM call-ask and OTM put-ask premium over the window (Spec §7 display)."""
+    otm_call_ask = 0.0
+    otm_put_ask = 0.0
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        strike = _safe_float(rec.get("strike"))
+        under = _safe_float(rec.get("underlying_price"))
+        if strike is None or under is None or under <= 0:
+            continue
+        if opt_type == "call" and strike > under:
+            otm_call_ask += ask
+        elif opt_type == "put" and strike < under:
+            otm_put_ask += ask
+    return otm_call_ask, otm_put_ask
 
 
 def _decay_weighted_tape(
@@ -1379,18 +1470,40 @@ def _build_response_v2(
     opt_bullish_share: float | None = None
     hedge_flag: str = _HEDGE_NONE
     hedge_reason: str | None = None
-    # Equity accumulation (dark-pool net buying) only LABELS the hedge context —
-    # it never rewrites the F4 score (options-only per the firewall).
+    # Multi-window display fields (Multi-Window Pull Spec §4/§7).
+    live_tape_state: str = _F4_LIVE_DATA_GAP
+    persistence_state: str = _F4_STATE_NEUTRAL
+    current_session_net: float | None = None
+    otm_call_ask: float | None = None
+    otm_put_ask: float | None = None
+    # Equity accumulation (dark-pool net buying) only LABELS the hedge context here;
+    # the dark-pool CONFIRMATION upgrade/downgrade is applied to the score below.
     equity_bullish = dp_net_flow is not None and dp_net_flow > 0
     if opt_trades is not None:
-        windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
+        windowed_opts = _filter_to_recent_sessions(
+            opt_trades, timestamp_key="created_at", n=_F4_OPTIONS_MAX_SESSIONS
+        )
         opt_window_empty = not windowed_opts
-        # F4 = classified net-directional flow: bullish_share over the moneyness/
-        # expiry-weighted bullish vs bearish premium (ATLAS F4 Classification Key).
+        sessions = _group_by_session(windowed_opts, "created_at")  # newest first
+        # F4b = WEIGHTED MULTI-WINDOW classified score (current session heaviest)
+        # so rotations show through, not just the flat 5-session average.
+        opt_score = _multi_window_score(sessions)
+        if opt_score is None:
+            opt_score = _F4_NEUTRAL_SCORE
+        # Full-window share + net premium for display.
         bullish_prem, bearish_prem, largest_opt_buy = _directional_premium(windowed_opts)
         opt_bullish_share = _bullish_share(bullish_prem, bearish_prem)
-        opt_score = _bullish_share_to_score(opt_bullish_share)
-        opt_net_flow = bullish_prem - bearish_prem  # net directional premium
+        opt_net_flow = bullish_prem - bearish_prem
+        # Live tape state: today vs the 5-session baseline.
+        current_score = _window_score(sessions, 0, 1)
+        persistence_score = _window_score(sessions, 0, _F4_LOOKBACK_SESSIONS)
+        live_tape_state = _live_tape_state(current_score, persistence_score)
+        persistence_state = _f4_state_label(
+            persistence_score if persistence_score is not None else opt_score
+        )
+        cur_bull, cur_bear, _cur_largest = _directional_premium(sessions[0] if sessions else [])
+        current_session_net = cur_bull - cur_bear
+        otm_call_ask, otm_put_ask = _otm_ask_split(windowed_opts)
         hedge_flag, hedge_reason = _classify_hedge_structure(
             windowed_opts, equity_accumulation_bullish=equity_bullish
         )
@@ -1403,22 +1516,14 @@ def _build_response_v2(
         opt_score = None
         opt_net_flow = None
 
-    # Base F4 = the classified options-flow score (bullish_share). Dark-pool
-    # CONFIRMATION (Key §6/§7) then upgrades/downgrades it as a bounded modifier.
+    # F4b = the classified multi-window OPTIONS score. Per the final scoring rule,
+    # F4a equity/dark-pool is NOT scored into F4b — it is a separate confirmation
+    # that the (deferred) Flow Monitor uses to gate ACTION, surfaced here only via
+    # the dark_pool_state chip / clearance / dark_pool_net_flow (all unscored).
     if opt_score is None:
         f4_raw, source = _F4_NEUTRAL_SCORE, _F4_SOURCE_DATA_GAP
     else:
         f4_raw, source = opt_score, _F4_SOURCE_OPT_ONLY
-        if dp_net_flow is not None and abs(dp_net_flow) >= _F4_DP_CONFIRM_MIN_USD:
-            share = opt_bullish_share if opt_bullish_share is not None else 0.5
-            if dp_net_flow > 0 and share >= _F4_DP_UPGRADE_MIN_SHARE:
-                # Buy-lean confirms a non-bearish tape → upgrade.
-                f4_raw = min(_F4_SCORE_MAX, f4_raw + _F4_DP_CONFIRM_POINTS)
-                source = _F4_SOURCE_BOTH
-            elif dp_net_flow < 0:
-                # Sell-lean confirms/deepens bearishness → downgrade.
-                f4_raw = max(_F4_SCORE_MIN, f4_raw - _F4_DP_CONFIRM_POINTS)
-                source = _F4_SOURCE_BOTH
     f4_state = _f4_state_label(f4_raw)
     direction = _derive_flow_direction(None, opt_net_flow)
 
@@ -1480,6 +1585,11 @@ def _build_response_v2(
         hedge_structure_reason=hedge_reason,
         bullish_share=opt_bullish_share,
         f4_state=f4_state,
+        live_tape_state=live_tape_state,
+        persistence_state=persistence_state,
+        current_session_net_usd=current_session_net,
+        otm_call_ask_usd=otm_call_ask,
+        otm_put_ask_usd=otm_put_ask,
     )
 
 

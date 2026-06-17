@@ -57,6 +57,21 @@ export const optionsFlowResponseSchema = z.object({
   dark_pool_state_reason: z.string().nullable().optional(),
   clearance: z.enum(['CLEARED', 'WATCH', 'REVOKED']).default('WATCH'),
   clearance_reason: z.string().nullable().optional(),
+  // Hedge-structure context flag — tagged separately, never rewrites f4_score.
+  hedge_structure: z
+    .enum([
+      'DIRECTIONAL_BEARISH',
+      'PROTECTIVE_HEDGE',
+      'HEDGED_BULLISH',
+      'PUT_SELLING',
+      'BULLISH',
+      'MIXED',
+      'NONE',
+    ])
+    .default('NONE'),
+  hedge_structure_reason: z.string().nullable().optional(),
+  bullish_share: z.number().nullable().optional(),
+  f4_state: z.string().default('Neutral / constructive'),
 });
 
 export type OptionsFlowResponse = z.infer<typeof optionsFlowResponseSchema>;

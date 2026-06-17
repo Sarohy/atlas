@@ -11,218 +11,104 @@ from atlas.services.options_flow_service import (
 )
 
 
-def test_build_response_v2_applies_strategy_adjustment_for_complex_bullish_structure() -> None:
+def _atm(opt_type: str, *, ask: float = 0.0, bid: float = 0.0) -> dict:
+    # ATM (strike == spot), ~60 DTE → moneyness x expiry weight = 1.0.
+    return {
+        "type": opt_type,
+        "created_at": "2026-06-15T15:00:00Z",
+        "expiry": "2026-08-15",
+        "strike": 50,
+        "underlying_price": 50,
+        "total_ask_side_prem": ask,
+        "total_bid_side_prem": bid,
+        "total_premium": max(ask, bid),
+    }
+
+
+def test_build_response_v2_directional_put_buying_reads_bearish() -> None:
+    # ATLAS F4 Classification Key: ask-side put buying + call selling = bearish,
+    # shown through (not neutralized). bullish = call_ask 2M ; bearish = put_ask
+    # 10M + call_bid 4M = 14M → bullish_share = 2/16 = 0.125 → low-20s.
     response = _build_response_v2(
         ticker="SNDK",
         market_cap=10_000_000_000.0,
         dp_prints=None,
         opt_trades=[
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:00:00Z",
-                "expiry": "2026-09-19",
-                "strike": 42,
-                "underlying_price": 50,
-                "total_ask_side_prem": 8_000_000.0,
-                "total_bid_side_prem": 6_400_000.0,
-                "total_premium": 9_000_000.0,
-            },
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:05:00Z",
-                "expiry": "2026-09-19",
-                "strike": 38,
-                "underlying_price": 50,
-                "total_ask_side_prem": 4_000_000.0,
-                "total_bid_side_prem": 3_200_000.0,
-                "total_premium": 4_500_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:10:00Z",
-                "expiry": "2026-08-21",
-                "strike": 55,
-                "underlying_price": 50,
-                "total_ask_side_prem": 2_000_000.0,
-                "total_bid_side_prem": 6_000_000.0,
-                "total_premium": 6_200_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:12:00Z",
-                "expiry": "2028-01-21",
-                "strike": 65,
-                "underlying_price": 50,
-                "total_ask_side_prem": 5_000_000.0,
-                "total_bid_side_prem": 500_000.0,
-                "total_premium": 5_200_000.0,
-            },
+            _atm("put", ask=10_000_000.0),
+            _atm("call", ask=2_000_000.0, bid=4_000_000.0),
         ],
     )
-
-    assert response.market_cap_tier == "MID"
     assert response.data_source == "OPTIONS_ONLY"
-    assert response.options_net_flow_usd == 0.0
-    assert response.options_flow_score == 50
-    assert response.f4_score == 50
-    assert response.flow_direction == "NEUTRAL"
-    assert response.f4_grade == "NEUTRAL"
-
-
-def test_build_response_v2_does_not_adjust_when_any_bullish_leg_is_missing() -> None:
-    response = _build_response_v2(
-        ticker="SNDK",
-        market_cap=10_000_000_000.0,
-        dp_prints=None,
-        opt_trades=[
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:00:00Z",
-                "expiry": "2026-09-19",
-                "strike": 42,
-                "underlying_price": 50,
-                "total_ask_side_prem": 8_000_000.0,
-                "total_bid_side_prem": 6_400_000.0,
-                "total_premium": 9_000_000.0,
-            },
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:05:00Z",
-                "expiry": "2026-09-19",
-                "strike": 38,
-                "underlying_price": 50,
-                "total_ask_side_prem": 4_000_000.0,
-                "total_bid_side_prem": 3_200_000.0,
-                "total_premium": 4_500_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:10:00Z",
-                "expiry": "2026-08-21",
-                "strike": 55,
-                "underlying_price": 50,
-                "total_ask_side_prem": 2_000_000.0,
-                "total_bid_side_prem": 6_000_000.0,
-                "total_premium": 6_200_000.0,
-            },
-        ],
-    )
-
-    assert response.options_net_flow_usd == -10_000_000.0
-    assert response.options_flow_score == 17
-    assert response.f4_score == 17
+    assert response.bullish_share is not None and response.bullish_share < 0.2
+    assert response.f4_score <= 30
     assert response.flow_direction == "BEARISH"
-    assert response.f4_grade == "AVOID"
+    assert response.hedge_structure == "DIRECTIONAL_BEARISH"
 
 
-def test_build_response_v2_caps_adjustment_at_neutral_not_bullish_flip() -> None:
+def test_build_response_v2_call_buying_and_put_selling_reads_bullish() -> None:
+    # call buying ($10M) + put selling ($4M) = bullish; a little put buying ($2M)
+    # underneath. bullish = call_ask 10M + put_bid 4M = 14M ; bearish = put_ask 2M
+    # → bullish_share = 14/16 = 0.875 → high-80s.
     response = _build_response_v2(
         ticker="SNDK",
         market_cap=10_000_000_000.0,
         dp_prints=None,
         opt_trades=[
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:00:00Z",
-                "expiry": "2026-09-19",
-                "strike": 42,
-                "underlying_price": 50,
-                "total_ask_side_prem": 7_000_000.0,
-                "total_bid_side_prem": 5_500_000.0,
-                "total_premium": 7_500_000.0,
-            },
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:05:00Z",
-                "expiry": "2026-09-19",
-                "strike": 38,
-                "underlying_price": 50,
-                "total_ask_side_prem": 4_000_000.0,
-                "total_bid_side_prem": 3_000_000.0,
-                "total_premium": 4_500_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:10:00Z",
-                "expiry": "2026-08-21",
-                "strike": 55,
-                "underlying_price": 50,
-                "total_ask_side_prem": 3_000_000.0,
-                "total_bid_side_prem": 6_000_000.0,
-                "total_premium": 6_500_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:12:00Z",
-                "expiry": "2028-01-21",
-                "strike": 65,
-                "underlying_price": 50,
-                "total_ask_side_prem": 5_000_000.0,
-                "total_bid_side_prem": 300_000.0,
-                "total_premium": 5_200_000.0,
-            },
+            _atm("call", ask=10_000_000.0),
+            _atm("put", ask=2_000_000.0, bid=4_000_000.0),
         ],
     )
+    assert response.bullish_share is not None and response.bullish_share > 0.8
+    assert response.f4_score >= 80
+    assert response.flow_direction == "BULLISH"
+    assert response.hedge_structure in ("BULLISH", "HEDGED_BULLISH")
 
-    assert response.options_net_flow_usd == 0.0
-    assert response.options_flow_score == 50
-    assert response.flow_direction == "NEUTRAL"
 
-
-def test_build_response_v2_applies_strategy_adjustment_when_overwrite_leg_is_one_year_dte() -> None:
+def test_build_response_v2_call_buying_with_puts_underneath_is_hedged_bullish() -> None:
+    # Strong call buying with significant ask-side put buying alongside → net
+    # bullish but flagged HEDGED_BULLISH. bullish = call_ask 20M ; bearish =
+    # put_ask 8M → share = 20/28 = 0.71 → bullish, hedged context.
     response = _build_response_v2(
-        ticker="SNDK",
-        market_cap=10_000_000_000.0,
+        ticker="MU",
+        market_cap=1_200_000_000_000.0,
         dp_prints=None,
         opt_trades=[
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:00:00Z",
-                "expiry": "2026-09-19",
-                "strike": 42,
-                "underlying_price": 50,
-                "total_ask_side_prem": 8_000_000.0,
-                "total_bid_side_prem": 6_400_000.0,
-                "total_premium": 9_000_000.0,
-            },
-            {
-                "type": "put",
-                "created_at": "2026-06-03T15:05:00Z",
-                "expiry": "2026-09-19",
-                "strike": 38,
-                "underlying_price": 50,
-                "total_ask_side_prem": 4_000_000.0,
-                "total_bid_side_prem": 3_200_000.0,
-                "total_premium": 4_500_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:10:00Z",
-                "expiry": "2027-06-18",
-                "strike": 55,
-                "underlying_price": 50,
-                "total_ask_side_prem": 2_000_000.0,
-                "total_bid_side_prem": 6_000_000.0,
-                "total_premium": 6_200_000.0,
-            },
-            {
-                "type": "call",
-                "created_at": "2026-06-03T15:12:00Z",
-                "expiry": "2028-01-21",
-                "strike": 65,
-                "underlying_price": 50,
-                "total_ask_side_prem": 5_000_000.0,
-                "total_bid_side_prem": 500_000.0,
-                "total_premium": 5_200_000.0,
-            },
+            _atm("call", ask=20_000_000.0),
+            _atm("put", ask=8_000_000.0),
         ],
     )
+    assert response.bullish_share is not None and response.bullish_share > 0.6
+    assert response.f4_score >= 60
+    assert response.hedge_structure == "HEDGED_BULLISH"
 
-    assert response.options_net_flow_usd == 0.0
-    assert response.options_flow_score == 50
-    assert response.f4_score == 50
-    assert response.flow_direction == "NEUTRAL"
-    assert response.f4_grade == "NEUTRAL"
+
+def _structure_legs(*, put_ask: float) -> list[dict[str, object]]:
+    """Two protective put legs + a near-dated covered-call overwrite + a LEAP."""
+    return [
+        {"type": "put", "expiry": "2026-09-19", "total_ask_side_prem": put_ask / 2,
+         "total_bid_side_prem": 1_000_000.0},
+        {"type": "put", "expiry": "2026-09-19", "total_ask_side_prem": put_ask / 2,
+         "total_bid_side_prem": 1_000_000.0},
+        {"type": "call", "expiry": "2026-08-21", "total_ask_side_prem": 1_000_000.0,
+         "total_bid_side_prem": 2_000_000.0},  # near-dated overwrite (bid-dominant)
+        {"type": "call", "expiry": "2028-01-21", "total_ask_side_prem": 5_000_000.0,
+         "total_bid_side_prem": 500_000.0},  # LEAP accumulation (ask-dominant)
+    ]
+
+
+def test_relief_fires_only_when_bullish_side_confirms() -> None:
+    # call_ask = 1M + 5M = 6M.
+    # Branch A — bullish confirms (call_ask 6M >= put_ask 4M): relief neutralizes.
+    confirms = _structure_legs(put_ask=4_000_000.0)
+    assert _apply_strategy_aware_adjustment(confirms, -4_000_000.0) == 0.0
+    # Branch B — bullish does NOT confirm (call_ask 6M < put_ask 10M): the
+    # directional bearish net shows through unchanged (the NBIS case).
+    directional = _structure_legs(put_ask=10_000_000.0)
+    assert _apply_strategy_aware_adjustment(directional, -4_000_000.0) == -4_000_000.0
+
+
+def test_relief_never_touches_already_bullish_flow() -> None:
+    assert _apply_strategy_aware_adjustment(_structure_legs(put_ask=4_000_000.0), 9.0) == 9.0
 
 
 def test_build_response_v2_dark_pool_does_not_enter_f4_score() -> None:
@@ -298,10 +184,53 @@ def test_build_response_v2_dark_pool_does_not_enter_f4_score() -> None:
     assert response.dark_pool_net_flow_usd == 11_000_000.0
     assert response.dark_pool_large_buy_count == 5
     assert response.options_net_flow_usd == 0.0
-    # F4 is options-only now: strong dark-pool accumulation does NOT lift the score
-    # (it surfaces via the chip/clearance instead). Options neutral -> F4 == 50.
+    # DP net ($11M) is below the $50M confirmation threshold → no upgrade; balanced
+    # options (share 0.5) → F4 stays 50, options-only.
     assert response.f4_score == 50
     assert response.data_source == "OPTIONS_ONLY"
+
+
+def _dp_buy(prem: float) -> dict:
+    return {
+        "executed_at": "2026-06-15T20:00:00Z",
+        "price": 250.2, "nbbo_bid": 249.6, "nbbo_ask": 250.0,
+        "premium": prem, "sale_cond_codes": [],
+    }
+
+
+def _dp_sell(prem: float) -> dict:
+    return {
+        "executed_at": "2026-06-15T20:00:00Z",
+        "price": 248.0, "nbbo_bid": 249.6, "nbbo_ask": 250.0,
+        "premium": prem, "sale_cond_codes": [],
+    }
+
+
+def test_dark_pool_buy_lean_does_not_rescue_bearish_tape() -> None:
+    # NBIS case: directional-bearish options (share < 0.42) + huge DP accumulation.
+    # The buy-lean upgrade is GATED off → F4 stays bearish (Key §9/§13).
+    response = _build_response_v2(
+        ticker="NBIS",
+        market_cap=60_000_000_000.0,
+        dp_prints=[_dp_buy(200_000_000.0)],  # strong buy-lean
+        opt_trades=[_atm("put", ask=10_000_000.0), _atm("call", bid=4_000_000.0)],
+    )
+    assert response.bullish_share is not None and response.bullish_share < 0.42
+    assert response.f4_score <= 30  # not lifted out of bearish
+    assert response.f4_state in ("Bearish", "Strong bearish")
+
+
+def test_dark_pool_sell_lean_downgrades() -> None:
+    # Neutral options + strong DP sell-lean → downgrade.
+    response = _build_response_v2(
+        ticker="LITE",
+        market_cap=70_000_000_000.0,
+        dp_prints=[_dp_sell(200_000_000.0)],
+        opt_trades=[_atm("call", ask=2_000_000.0), _atm("put", ask=2_000_000.0)],
+    )
+    assert response.options_flow_score == 50  # balanced base
+    assert response.f4_score == 38  # 50 - 12 confirmation downgrade
+    assert response.data_source == "BOTH"
 
 
 def test_build_response_v2_does_not_boost_when_settlement_is_too_high() -> None:

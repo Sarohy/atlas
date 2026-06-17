@@ -66,6 +66,27 @@ const CLEARANCE_TONE: Record<string, string> = {
   REVOKED: 'is-red',
 };
 
+// Hedge-structure context flag — tagged separately from the F4 score so a bearish
+// reading with protective context is distinguished from raw directional bearishness.
+const HEDGE_LABEL: Record<string, string> = {
+  DIRECTIONAL_BEARISH: 'Directional bearish',
+  PROTECTIVE_HEDGE: 'Protective hedge',
+  HEDGED_BULLISH: 'Hedged bullish',
+  PUT_SELLING: 'Put selling',
+  BULLISH: 'Bullish',
+  MIXED: 'Mixed',
+  NONE: 'No structure',
+};
+const HEDGE_TONE: Record<string, string> = {
+  DIRECTIONAL_BEARISH: 'is-red',
+  PROTECTIVE_HEDGE: 'is-muted',
+  HEDGED_BULLISH: 'is-green',
+  PUT_SELLING: 'is-green',
+  BULLISH: 'is-green',
+  MIXED: 'is-muted',
+  NONE: 'is-muted',
+};
+
 // ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
@@ -169,6 +190,7 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           >
             {data.f4_grade}
           </span>
+          <span className="atlas-f4-label-sub" data-testid="f4-state">{data.f4_state}</span>
           <span className="atlas-f4-label-sub">options flow · {contribution}/{F4_DISPLAY_MAX} to F1</span>
         </div>
       </div>
@@ -187,10 +209,24 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
         >
           {chipLabel}
         </span>
+        <span
+          className={cn(
+            'atlas-frameworks-pill atlas-f4-tier-pill',
+            HEDGE_TONE[data.hedge_structure] ?? 'is-muted',
+          )}
+          data-testid="f4-hedge-structure"
+        >
+          {HEDGE_LABEL[data.hedge_structure] ?? data.hedge_structure}
+        </span>
       </div>
       {data.clearance_reason && (
         <p className="atlas-f4-state-msg" data-testid="f4-clearance-reason">
           {data.clearance_reason}
+        </p>
+      )}
+      {data.hedge_structure_reason && (
+        <p className="atlas-f4-state-msg" data-testid="f4-hedge-structure-reason">
+          Hedge context: {data.hedge_structure_reason}
         </p>
       )}
 
@@ -248,8 +284,12 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
       </div>
 
       <p className="atlas-f4-state-msg" data-testid="f4-firewall-note">
-        F4 scores options flow only (F4b). Dark pool / equity accumulation (F4a) is
-        overlay &amp; confirmation — it does not feed the score (SPEC v2.2).
+        F4 = classified net-directional flow: bullish (call-buy + put-sell) vs bearish
+        (put-buy + call-sell), weighted by moneyness/expiry → bullish share
+        {data.bullish_share !== null && data.bullish_share !== undefined
+          ? ` ${Math.round(data.bullish_share * 100)}%`
+          : ''}
+        . Dark-pool buy/sell-lean then confirms (F4 Classification Key §6–8).
       </p>
 
       {data.dark_pool_state_reason && (

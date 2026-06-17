@@ -186,3 +186,25 @@ class OptionsFlowResponse(BaseModel):
             "Mild bullish | Neutral / constructive | Mild bearish | Bearish | Strong bearish."
         ),
     )
+    # ---- Multi-window F4b (current-session-weighted) — Multi-Window Pull Spec ----
+    live_tape_state: str = Field(
+        default="Data gap",
+        description=(
+            "Today's tape vs the 5-session baseline: Improving | Deteriorating | "
+            "Bullish persistent | Bearish persistent | Bullish reversal | Bearish reversal | "
+            "Mixed / structured | Data gap. Lets timing react even when the average disagrees."
+        ),
+    )
+    persistence_state: str = Field(
+        default="Neutral / constructive",
+        description="F4 state label of the 5-session persistence window (vs the live blend).",
+    )
+    current_session_net_usd: float | None = Field(
+        default=None, description="Today's net directional options premium (bullish - bearish)."
+    )
+    otm_call_ask_usd: float | None = Field(
+        default=None, description="OTM call ask-side (bought) premium over the window."
+    )
+    otm_put_ask_usd: float | None = Field(
+        default=None, description="OTM put ask-side (bought) premium over the window."
+    )

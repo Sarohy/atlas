@@ -191,6 +191,9 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
             {data.f4_grade}
           </span>
           <span className="atlas-f4-label-sub" data-testid="f4-state">{data.f4_state}</span>
+          <span className="atlas-f4-label-sub" data-testid="f4-live-tape-state">
+            live tape: {data.live_tape_state} · {data.persistence_state} (5d)
+          </span>
           <span className="atlas-f4-label-sub">options flow · {contribution}/{F4_DISPLAY_MAX} to F1</span>
         </div>
       </div>
@@ -284,12 +287,14 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
       </div>
 
       <p className="atlas-f4-state-msg" data-testid="f4-firewall-note">
-        F4 = classified net-directional flow: bullish (call-buy + put-sell) vs bearish
-        (put-buy + call-sell), weighted by moneyness/expiry → bullish share
+        F4b (scored) = multi-window classified options flow, current session weighted
+        heaviest: bullish (call-buy + put-sell) vs bearish (put-buy + call-sell),
+        moneyness/expiry-weighted → bullish share
         {data.bullish_share !== null && data.bullish_share !== undefined
           ? ` ${Math.round(data.bullish_share * 100)}%`
           : ''}
-        . Dark-pool buy/sell-lean then confirms (F4 Classification Key §6–8).
+        . F4a equity / dark-pool is NOT scored — it confirms action via the Flow
+        Monitor (shown as the dark-pool chip / clearance overlay below).
       </p>
 
       {data.dark_pool_state_reason && (

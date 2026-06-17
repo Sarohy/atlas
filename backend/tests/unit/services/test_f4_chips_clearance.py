@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 from atlas.services.options_flow_service import (
+    _bullish_share,
+    _bullish_share_to_score,
     _dark_pool_daily_nets,
-    _decay_weighted_options,
+    _directional_premium,
     classify_dark_pool_state,
     clearance_state,
 )
 
 
-def _opt(day: str, opt_type: str, ask: float) -> dict:
+def _opt(day: str, opt_type: str, ask: float = 0.0, bid: float = 0.0) -> dict:
     return {
         "created_at": f"{day}T15:00:00Z",
         "type": opt_type,
         "total_ask_side_prem": ask,
-        "total_premium": ask,
+        "total_bid_side_prem": bid,
+        "total_premium": max(ask, bid),
     }
 
 
@@ -32,27 +35,58 @@ def _dp(day: str, buy: bool, prem: float = 2_000_000.0) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Layer 1 — options-only, time-decay ("fading memory")
+# Layer 1 — classified net-directional flow (bullish_share)
 # ---------------------------------------------------------------------------
 
 
-class TestDecayWeighting:
-    def test_recent_session_dominates(self) -> None:
-        # Today strongly bullish, four days ago strongly bearish (same magnitude).
-        recent_bull = [_opt("2026-06-12", "call", 10_000_000)]
-        old_bear = [_opt("2026-06-08", "put", 10_000_000)]
-        net, _ = _decay_weighted_options(recent_bull + old_bear)
-        # today weight (40) >> 4-days-ago weight (10) -> net is positive (bullish).
-        assert net > 0
+class TestDirectionalShare:
+    def test_call_buying_is_bullish(self) -> None:
+        # call ASK buying dominates put ASK buying → bullish_share > 0.5 → score > 50.
+        bull, bear, _ = _directional_premium(
+            [_opt("2026-06-12", "call", ask=10_000_000), _opt("2026-06-12", "put", ask=4_000_000)]
+        )
+        share = _bullish_share(bull, bear)
+        assert share is not None and share > 0.6
+        assert _bullish_share_to_score(share) >= 60
 
-    def test_single_session_preserves_magnitude(self) -> None:
-        # One session: weighted net equals the raw net (weight normalises to 1.0).
-        alerts = [_opt("2026-06-12", "call", 5_000_000), _opt("2026-06-12", "put", 2_000_000)]
-        net, _ = _decay_weighted_options(alerts)
-        assert net == 3_000_000.0
+    def test_put_buying_is_bearish(self) -> None:
+        # ask-side put buying dominates → bearish; shows through, not neutralized to 50.
+        bull, bear, _ = _directional_premium(
+            [_opt("2026-06-12", "put", ask=10_000_000), _opt("2026-06-12", "call", ask=2_000_000)]
+        )
+        share = _bullish_share(bull, bear)
+        assert share is not None and share < 0.4
+        assert _bullish_share_to_score(share) <= 45
 
-    def test_empty_is_zero(self) -> None:
-        assert _decay_weighted_options([]) == (0.0, None)
+    def test_put_selling_is_bullish(self) -> None:
+        # puts SOLD on the bid = bullish (downside sold).
+        bull, bear, _ = _directional_premium([_opt("2026-06-12", "put", bid=10_000_000)])
+        share = _bullish_share(bull, bear)
+        assert share == 1.0
+        assert _bullish_share_to_score(share) >= 80
+
+    def test_call_selling_is_bearish(self) -> None:
+        # calls SOLD on the bid = bearish (upside sold).
+        bull, bear, _ = _directional_premium([_opt("2026-06-12", "call", bid=10_000_000)])
+        share = _bullish_share(bull, bear)
+        assert share == 0.0
+        assert _bullish_share_to_score(share) <= 30
+
+    def test_no_flow_is_neutral(self) -> None:
+        assert _bullish_share(0.0, 0.0) is None
+        assert _bullish_share_to_score(None) == 50
+
+    def test_far_otm_put_is_down_weighted_vs_atm(self) -> None:
+        # A far-OTM put (crash hedge) contributes less bearishness than an ATM put.
+        atm = _directional_premium(
+            [{"type": "put", "total_ask_side_prem": 10e6, "total_premium": 10e6,
+              "strike": 100, "underlying_price": 100, "expiry": "2026-09-19"}]
+        )
+        far = _directional_premium(
+            [{"type": "put", "total_ask_side_prem": 10e6, "total_premium": 10e6,
+              "strike": 60, "underlying_price": 100, "expiry": "2026-09-19"}]
+        )
+        assert far[1] < atm[1]  # weighted bearish premium smaller for the far-OTM hedge
 
 
 # ---------------------------------------------------------------------------

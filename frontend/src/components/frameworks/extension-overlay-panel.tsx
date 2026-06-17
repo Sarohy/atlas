@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { useExtensionOverlay } from '@/lib/hooks/use-extension-overlay';
+import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import type {
   ExtensionFlag,
   ExtensionOverlayResponse,
@@ -28,6 +29,7 @@ const FLAG_LABEL: Record<ExtensionFlag, string> = {
 
 const ACTION_LABEL: Record<OverlayAction, string> = {
   ADD: 'ADD',
+  STARTER_WATCH: 'STARTER / WATCH — ADD ON FLOW',
   BUY_ON_PULLBACK: 'BUY ON PULLBACK',
   HOLD_TRIM: 'CORE HOLD / TRIM IF OVERWEIGHT',
   TRIM_HEDGE: 'TRIM / HEDGE',
@@ -36,6 +38,8 @@ const ACTION_LABEL: Record<OverlayAction, string> = {
 
 const ACTION_TONE: Record<OverlayAction, string> = {
   ADD: 'is-green',
+  // Amber — clean quality/extension but flow has not confirmed; start small, not a full ADD.
+  STARTER_WATCH: 'is-yellow',
   BUY_ON_PULLBACK: 'is-yellow',
   // Amber, not red — "core hold / don't chase" is a wait-for-entry, not a sell.
   HOLD_TRIM: 'is-yellow',
@@ -126,7 +130,15 @@ type ExtensionOverlayPanelProps = {
  * pairs quality with entry timing.
  */
 export function ExtensionOverlayPanel({ ticker, atlasScore }: ExtensionOverlayPanelProps) {
-  const { data, isLoading, isError, error } = useExtensionOverlay(ticker, atlasScore);
+  // F4 Options Flow gates the action (full ADD only when flow confirms, else
+  // STARTER / WATCH). React Query dedupes this with the F4 panel's own query —
+  // no extra API call — and the overlay refreshes if the F4 score moves.
+  const { data: f4Data } = useOptionsFlow(ticker);
+  const { data, isLoading, isError, error } = useExtensionOverlay(
+    ticker,
+    atlasScore,
+    f4Data?.f4_score,
+  );
   const hasData = ticker.trim().length > 0 && data !== undefined;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load extension data.';
 

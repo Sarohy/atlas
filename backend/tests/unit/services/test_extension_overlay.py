@@ -157,17 +157,41 @@ class TestFlag:
 
 class TestActionMatrix:
     def test_high_conviction_matrix(self) -> None:
-        assert ext.recommend_action(90, ExtensionFlag.GREEN)[0] == OverlayAction.ADD
+        # GREEN now requires F4 flow confirmation for a full ADD (see below).
+        assert (
+            ext.recommend_action(90, ExtensionFlag.GREEN, f4_score=75)[0] == OverlayAction.ADD
+        )
         assert ext.recommend_action(90, ExtensionFlag.YELLOW)[0] == OverlayAction.BUY_ON_PULLBACK
         assert ext.recommend_action(89, ExtensionFlag.RED)[0] == OverlayAction.HOLD_TRIM
         assert ext.recommend_action(89, ExtensionFlag.EXTREME_RED)[0] == OverlayAction.TRIM_HEDGE
+
+    def test_green_requires_f4_flow_confirmation_for_full_add(self) -> None:
+        # The TSM case: strong score, clean (GREEN) extension, but F4 neutral (51)
+        # → STARTER / WATCH, not a full ADD. Confirming flow (>=60) → ADD.
+        assert (
+            ext.recommend_action(90, ExtensionFlag.GREEN, f4_score=51)[0]
+            == OverlayAction.STARTER_WATCH
+        )
+        assert (
+            ext.recommend_action(90, ExtensionFlag.GREEN, f4_score=60)[0] == OverlayAction.ADD
+        )
+        # No F4 supplied → conservative default (cannot confirm flow) → STARTER/WATCH.
+        assert (
+            ext.recommend_action(90, ExtensionFlag.GREEN)[0] == OverlayAction.STARTER_WATCH
+        )
 
     def test_low_conviction_never_buys(self) -> None:
         assert ext.recommend_action(45, ExtensionFlag.GREEN)[0] == OverlayAction.AVOID
         assert ext.recommend_action(45, ExtensionFlag.RED)[0] == OverlayAction.AVOID
 
     def test_threshold_boundary_70_is_high(self) -> None:
-        assert ext.recommend_action(70, ExtensionFlag.GREEN)[0] == OverlayAction.ADD
+        # At/above 70 is high-conviction; GREEN still needs flow to reach ADD.
+        assert (
+            ext.recommend_action(70, ExtensionFlag.GREEN, f4_score=80)[0] == OverlayAction.ADD
+        )
+        assert (
+            ext.recommend_action(70, ExtensionFlag.GREEN)[0] == OverlayAction.STARTER_WATCH
+        )
         assert ext.recommend_action(69, ExtensionFlag.GREEN)[0] == OverlayAction.AVOID
 
     def test_no_atlas_score_omits_action(self) -> None:
@@ -224,13 +248,26 @@ def _bars(closes: list[float]) -> list[dict]:
 class TestServiceResponse:
     def test_calm_range_is_green_with_metrics(self) -> None:
         # Perfectly flat series → no extension and no technical signals → GREEN.
+        # Confirming F4 flow (>=60) is supplied so the GREEN action is a full ADD.
         closes = [100.0] * 260
-        resp = ExtensionOverlayService._build_response("aapl", _bars(closes), atlas_score=90)
+        resp = ExtensionOverlayService._build_response(
+            "aapl", _bars(closes), atlas_score=90, f4_score=70
+        )
         assert resp.ticker == "AAPL"
         assert resp.rsi_14 is not None
         assert resp.pct_above_50dma is not None
         assert resp.extension_flag == ExtensionFlag.GREEN
         assert resp.action == OverlayAction.ADD
+
+    def test_green_without_flow_confirmation_is_starter_watch(self) -> None:
+        # Same calm/GREEN setup but neutral F4 (the TSM case) → STARTER / WATCH,
+        # never a full ADD on quality + clean extension alone.
+        closes = [100.0] * 260
+        resp = ExtensionOverlayService._build_response(
+            "tsm", _bars(closes), atlas_score=90, f4_score=51
+        )
+        assert resp.extension_flag == ExtensionFlag.GREEN
+        assert resp.action == OverlayAction.STARTER_WATCH
         assert resp.td_signal is None
         assert resp.rsi_bearish_divergence is False
         assert "IV_RANK" in resp.data_gaps

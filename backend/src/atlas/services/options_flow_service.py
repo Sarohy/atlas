@@ -688,6 +688,98 @@ def _aggregate_flow_alerts(
 # (Layer 2) instead.
 _F4_DECAY_PCT: Final[tuple[int, ...]] = (40, 25, 15, 10, 10)  # today -> 4 days ago
 
+# ---------------------------------------------------------------------------
+# F4 = classified net-directional options flow (ATLAS F4 Classification Key)
+# ---------------------------------------------------------------------------
+#
+# F4 is a CLASSIFIED net-directional score, not a raw call/put premium count:
+#
+#   bullish_premium = call_ask + put_bid     (upside bought / downside sold)
+#   bearish_premium = put_ask  + call_bid     (downside bought / upside sold)
+#   bullish_share   = bullish / (bullish + bearish)
+#   F4 = map(bullish_share)                    (see _F4_SHARE_ANCHORS)
+#
+# Each print's premium is weighted by MONEYNESS (ATM/slight-OTM full; far-OTM and
+# deep-ITM discounted — a far-OTM put is a crash hedge, not a directional bet) and
+# by EXPIRY (1wk-3mo full; 0-3 DTE and LEAPS discounted). Genuine bearish flow
+# (ask-side put buying / call selling) shows through; hedges are down-weighted via
+# moneyness, not erased. Mid / no-side / unclassified prints are neutral (excluded
+# from the share). Dark-pool/price/cluster CONFIRMATIONS (Key §6) are separate
+# gates, not part of this options-only score.
+
+# bullish_share (0-1) -> F4 score anchors (ATLAS F4 Classification Key §5/§8).
+# Centered so a balanced tape (share 0.50) maps to exactly 50.
+_F4_SHARE_ANCHORS: Final[tuple[tuple[float, int], ...]] = (
+    (0.00, 10),
+    (0.20, 30),
+    (0.35, 40),
+    (0.45, 48),
+    (0.50, 50),
+    (0.55, 52),
+    (0.65, 65),
+    (0.80, 80),
+    (1.00, 95),
+)
+
+# Moneyness weights (Key §7): strike distance from spot, signed so >0 = OTM.
+_F4_MW_ATM: Final[float] = 1.00  # |dist| <= 5% (ATM) or slight OTM (<=15%)
+_F4_MW_FAR_OTM: Final[float] = 0.60  # 15-30% OTM
+_F4_MW_LOTTO: Final[float] = 0.45  # >30% OTM (far-OTM lotto / crash hedge)
+_F4_MW_ITM: Final[float] = 0.75  # 5-15% ITM
+_F4_MW_DEEP_ITM: Final[float] = 0.55  # >15% ITM (stock-replacement)
+_F4_MW_ATM_BAND: Final[float] = 0.05
+_F4_MW_SLIGHT_OTM_MAX: Final[float] = 0.15
+_F4_MW_FAR_OTM_MAX: Final[float] = 0.30
+_F4_MW_ITM_MAX: Final[float] = 0.15
+
+# Expiry weights (Key §7), keyed by days-to-expiry.
+_F4_EW_GAMMA: Final[float] = 0.60  # 0-3 DTE
+_F4_EW_TACTICAL: Final[float] = 1.00  # 4-90 DTE (1wk-3mo)
+_F4_EW_SWING: Final[float] = 0.85  # 91-270 DTE (3-9mo)
+_F4_EW_LEAPS: Final[float] = 0.78  # >270 DTE
+_F4_EW_UNKNOWN: Final[float] = 0.85
+
+# Score bounds (Key §5/§8).
+_F4_SCORE_MAX: Final[int] = 95
+_F4_SCORE_MIN: Final[int] = 10
+
+# Dark-pool CONFIRMATION (Key §6 step 6 / §7). This re-admits dark pool into F4 as
+# a bounded confirmation — a deliberate supersession of the v2.2 options-only
+# firewall, authorized by the F4 Classification Key. A strong buy-lean upgrades a
+# non-bearish options tape; a strong sell-lean downgrades. DP buying does NOT
+# rescue a directional-bearish options tape (Key §9/§13): the upgrade is gated on
+# bullish_share >= _F4_DP_UPGRADE_MIN_SHARE so genuine bearish names (e.g. NBIS)
+# stay bearish despite institutional accumulation.
+_F4_DP_CONFIRM_MIN_USD: Final[float] = 50_000_000.0
+_F4_DP_CONFIRM_POINTS: Final[int] = 12
+_F4_DP_UPGRADE_MIN_SHARE: Final[float] = 0.42
+
+# F4 state labels by score band (Key §5 / §12 / §13).
+_F4_STATE_STRONG_BULL: Final[str] = "Strong bullish"
+_F4_STATE_BULL: Final[str] = "Bullish"
+_F4_STATE_MILD_BULL: Final[str] = "Mild bullish"
+_F4_STATE_NEUTRAL: Final[str] = "Neutral / constructive"
+_F4_STATE_MILD_BEAR: Final[str] = "Mild bearish"
+_F4_STATE_BEAR: Final[str] = "Bearish"
+_F4_STATE_STRONG_BEAR: Final[str] = "Strong bearish"
+
+
+def _f4_state_label(score: int) -> str:
+    """Map an F4 score to its state label (Key §5 bands)."""
+    if score >= 85:
+        return _F4_STATE_STRONG_BULL
+    if score >= 70:
+        return _F4_STATE_BULL
+    if score >= 60:
+        return _F4_STATE_MILD_BULL
+    if score >= 50:
+        return _F4_STATE_NEUTRAL
+    if score >= 45:
+        return _F4_STATE_MILD_BEAR
+    if score >= 35:
+        return _F4_STATE_BEAR
+    return _F4_STATE_STRONG_BEAR
+
 
 def _group_by_session(
     records: list[dict[str, Any]], timestamp_key: str
@@ -701,40 +793,97 @@ def _group_by_session(
     return [groups[day] for day in sorted(groups, reverse=True)]
 
 
-def _options_net_raw(alerts: list[dict[str, Any]]) -> tuple[float, float | None]:
-    """Raw options net flow for one session: sum(call ask) - sum(put ask)."""
-    net = 0.0
-    largest = 0.0
+def _moneyness_weight(opt_type: str, strike: float | None, underlying: float | None) -> float:
+    """Per-print premium weight from moneyness (Key §7). Unknown → full weight."""
+    if strike is None or underlying is None or underlying <= 0:
+        return _F4_MW_ATM
+    # dist > 0 = out-of-the-money for this option type.
+    dist = (strike - underlying) / underlying if opt_type == "call" else (
+        underlying - strike
+    ) / underlying
+    if abs(dist) <= _F4_MW_ATM_BAND:
+        return _F4_MW_ATM
+    if dist > 0:  # OTM
+        if dist <= _F4_MW_SLIGHT_OTM_MAX:
+            return _F4_MW_ATM
+        if dist <= _F4_MW_FAR_OTM_MAX:
+            return _F4_MW_FAR_OTM
+        return _F4_MW_LOTTO
+    # ITM
+    if -dist <= _F4_MW_ITM_MAX:
+        return _F4_MW_ITM
+    return _F4_MW_DEEP_ITM
+
+
+def _expiry_weight(dte: int | None) -> float:
+    """Per-print premium weight from days-to-expiry (Key §7)."""
+    if dte is None:
+        return _F4_EW_UNKNOWN
+    if dte <= 3:
+        return _F4_EW_GAMMA
+    if dte <= 90:
+        return _F4_EW_TACTICAL
+    if dte <= 270:
+        return _F4_EW_SWING
+    return _F4_EW_LEAPS
+
+
+def _directional_premium(
+    alerts: list[dict[str, Any]],
+) -> tuple[float, float, float | None]:
+    """Classify the options tape into (bullish, bearish, largest_bullish_print).
+
+    bullish = call_ask + put_bid ; bearish = put_ask + call_bid, each premium
+    weighted by moneyness x expiry (Key §7/§8). Mid/no-side/unknown contributes
+    to neither (neutral). Pure function.
+    """
+    bullish = 0.0
+    bearish = 0.0
+    largest_bull = 0.0
     for rec in alerts:
         opt_type = str(rec.get("type", "")).lower()
+        if opt_type not in ("call", "put"):
+            continue
         ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        bid = _safe_float(rec.get("total_bid_side_prem")) or 0.0
         total = _safe_float(rec.get("total_premium")) or 0.0
+        w = _moneyness_weight(
+            opt_type, _safe_float(rec.get("strike")), _safe_float(rec.get("underlying_price"))
+        ) * _expiry_weight(_alert_dte_days(rec))
         if opt_type == "call":
-            net += ask
-            largest = max(largest, total)
-        elif opt_type == "put":
-            net -= ask
-    return net, (largest if largest > 0 else None)
+            bullish += ask * w  # calls bought = bullish
+            bearish += bid * w  # calls sold = bearish
+            largest_bull = max(largest_bull, total)
+        else:  # put
+            bearish += ask * w  # puts bought = bearish
+            bullish += bid * w  # puts sold = bullish
+    return bullish, bearish, (largest_bull if largest_bull > 0 else None)
 
 
-def _decay_weighted_options(
-    windowed_opts: list[dict[str, Any]],
-) -> tuple[float, float | None]:
-    """Time-decay-weighted options net flow over the 5-session window.
+def _bullish_share(bullish: float, bearish: float) -> float | None:
+    """bullish / (bullish + bearish); None when there is no directional flow."""
+    denom = bullish + bearish
+    if denom <= 0:
+        return None
+    return bullish / denom
 
-    Returns (weighted_net_flow_usd, largest_single_alert_premium_usd).
-    """
-    sessions = _group_by_session(windowed_opts, "created_at")[:_F4_LOOKBACK_SESSIONS]
-    if not sessions:
-        return 0.0, None
-    daily = [_options_net_raw(day) for day in sessions]  # newest first
-    nets = [d[0] for d in daily]
-    largest = max((d[1] for d in daily if d[1] is not None), default=None)
-    n = len(nets)
-    weights = _F4_DECAY_PCT[:n]
-    total_w = sum(weights)
-    weighted = sum(net * (w / total_w * n) for net, w in zip(nets, weights, strict=True))
-    return weighted, largest
+
+def _bullish_share_to_score(share: float | None) -> int:
+    """Map bullish_share (0-1) → F4 score via _F4_SHARE_ANCHORS (Key §5/§8)."""
+    if share is None:
+        return _F4_NEUTRAL_SCORE
+    anchors = _F4_SHARE_ANCHORS
+    if share <= anchors[0][0]:
+        return anchors[0][1]
+    if share >= anchors[-1][0]:
+        return anchors[-1][1]
+    for i in range(len(anchors) - 1):
+        x0, y0 = anchors[i]
+        x1, y1 = anchors[i + 1]
+        if x0 <= share <= x1:
+            ratio = (share - x0) / (x1 - x0)
+            return round(y0 + ratio * (y1 - y0))
+    return _F4_NEUTRAL_SCORE
 
 
 def _decay_weighted_tape(
@@ -845,19 +994,33 @@ def _alert_dte_days(rec: dict[str, Any]) -> int | None:
 
 
 def _apply_strategy_aware_adjustment(alerts: list[dict[str, Any]], raw_net_flow: float) -> float:
-    """Neutralize bearish net flow for complex bullish multi-leg structures.
+    """Neutralize bearish net flow ONLY when puts are clearly PROTECTIVE.
 
-    Relief is applied only when all are present:
-    - protective put-spread participation,
-    - near-dated covered-call overwriting,
-    - long-dated LEAP call accumulation.
+    Client rule (ATLAS): F4 must reflect the net directional options tape.
+    Hedge/protection structures are tagged separately and may neutralize the
+    score ONLY when the evidence clearly shows the puts are protective rather
+    than directional. Aggressive ask-side put buying with no confirming bullish
+    side must show through as bearish — never masked to neutral 50 (dangerous on
+    Sharp-Faller / hard-override names like NBIS).
 
-    Adjustment cannot flip bullish; cap at neutral (0).
+    Relief therefore requires BOTH:
+      1. the three structural legs (protective put-spread + covered-call
+         overwriting + LEAP call accumulation), AND
+      2. the bullish side CONFIRMING — call ask-side buying at least matching
+         put ask-side buying (calls are being bought, not sold).
+
+    When the bullish side does not confirm (puts bought, calls sold), the flow
+    is directional bearish and the raw (negative) net flows through unchanged.
+    Equity accumulation is NOT used here — it lives in its own layer (the
+    dark-pool chip / F4a), so it can never silently erase bearish put demand.
+
+    Adjustment can only move toward neutral; it never flips bullish (cap at 0).
     """
     if raw_net_flow >= 0:
         return raw_net_flow
 
     put_legs = 0
+    call_ask_total = 0.0
     put_ask_total = 0.0
     put_bid_total = 0.0
     overwrite_bid_total = 0.0
@@ -878,6 +1041,8 @@ def _apply_strategy_aware_adjustment(alerts: list[dict[str, Any]], raw_net_flow:
 
         if opt_type != "call":
             continue
+
+        call_ask_total += ask_prem
 
         if (
             dte is not None
@@ -900,10 +1065,15 @@ def _apply_strategy_aware_adjustment(alerts: list[dict[str, Any]], raw_net_flow:
     )
     has_covered_call_overwrite = overwrite_bid_total > 0
     has_leap_call_accumulation = leap_call_ask_total > 0
-
-    if not (
+    structure_present = (
         has_protective_put_spread and has_covered_call_overwrite and has_leap_call_accumulation
-    ):
+    )
+
+    # Bullish side confirms only when call buying at least matches put buying.
+    bullish_confirms = call_ask_total >= put_ask_total
+
+    if not (structure_present and bullish_confirms):
+        # Directional bearish put demand — show it through (do NOT neutralize).
         return raw_net_flow
 
     relief_capacity = (
@@ -913,6 +1083,89 @@ def _apply_strategy_aware_adjustment(alerts: list[dict[str, Any]], raw_net_flow:
     )
     relief = min(abs(raw_net_flow), relief_capacity)
     return min(0.0, raw_net_flow + relief)
+
+
+# ---------------------------------------------------------------------------
+# Hedge-structure flag — a CONTEXT label, scored separately from F4 (client rule)
+# ---------------------------------------------------------------------------
+#
+# F4 is the net directional options signal. The hedge_structure flag annotates
+# WHY the flow looks the way it does, so a bearish F4 with protective context can
+# be distinguished from raw directional bearishness without erasing the score.
+_HEDGE_NONE: Final[str] = "NONE"
+_HEDGE_BULLISH: Final[str] = "BULLISH"
+_HEDGE_DIRECTIONAL_BEARISH: Final[str] = "DIRECTIONAL_BEARISH"
+_HEDGE_HEDGED_BULLISH: Final[str] = "HEDGED_BULLISH"
+_HEDGE_PROTECTIVE: Final[str] = "PROTECTIVE_HEDGE"
+_HEDGE_PUT_SELLING: Final[str] = "PUT_SELLING"
+_HEDGE_MIXED: Final[str] = "MIXED"
+
+# bullish_share thresholds for the hedge-context label (aligned with the score).
+_F4_HEDGE_BULLISH_SHARE: Final[float] = 0.58
+_F4_HEDGE_BEARISH_SHARE: Final[float] = 0.42
+
+
+def _side_premium_totals(alerts: list[dict[str, Any]]) -> tuple[float, float, float, float]:
+    """Return (call_ask, call_bid, put_ask, put_bid) premium totals over alerts."""
+    call_ask = call_bid = put_ask = put_bid = 0.0
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        bid = _safe_float(rec.get("total_bid_side_prem")) or 0.0
+        if opt_type == "call":
+            call_ask += ask
+            call_bid += bid
+        elif opt_type == "put":
+            put_ask += ask
+            put_bid += bid
+    return call_ask, call_bid, put_ask, put_bid
+
+
+def _classify_hedge_structure(
+    alerts: list[dict[str, Any]],
+    *,
+    equity_accumulation_bullish: bool,
+) -> tuple[str, str]:
+    """Classify the options tape's hedge/structure context. Pure.
+
+    Returns (flag, reason). This is a CONTEXT label only — it never rewrites the
+    F4 score. The score's protective relief (``_apply_strategy_aware_adjustment``)
+    fires independently and only when the bullish side confirms.
+    """
+    call_ask, call_bid, put_ask, put_bid = _side_premium_totals(alerts)
+    if call_ask == call_bid == put_ask == put_bid == 0.0:
+        return _HEDGE_NONE, "No options flow in the window."
+
+    # Aligned with the F4 score: classify by the weighted bullish_share, then
+    # annotate the composition (net put / net call positioning).
+    bull, bear, _ = _directional_premium(alerts)
+    share = _bullish_share(bull, bear)
+    net_put = put_ask - put_bid  # >0 = net put BUYING (bearish)
+    net_call = call_ask - call_bid  # >0 = net call BUYING (bullish)
+
+    if share is None:
+        return _HEDGE_MIXED, "Mixed flow, no clear directional edge."
+
+    if share >= _F4_HEDGE_BULLISH_SHARE:
+        if net_put > 0:
+            ctx = " + equity accumulation" if equity_accumulation_bullish else ""
+            return (
+                _HEDGE_HEDGED_BULLISH,
+                f"Net bullish flow with puts bought underneath{ctx} — hedged bullish.",
+            )
+        return _HEDGE_BULLISH, "Net call buying / put selling — bullish options tape."
+
+    if share <= _F4_HEDGE_BEARISH_SHARE:
+        return (
+            _HEDGE_DIRECTIONAL_BEARISH,
+            "Ask-side put buying / call selling dominates — directional bearish "
+            "(hedges present do not offset).",
+        )
+
+    # Neutral-ish band — distinguish put selling (constructive) from mixed.
+    if net_put < 0 and -net_put >= abs(net_call):
+        return _HEDGE_PUT_SELLING, "Net put selling on the bid — neutral-to-bullish."
+    return _HEDGE_MIXED, "Mixed / two-way flow, no clear directional edge."
 
 
 def _dark_pool_settlement_ratio(prints: list[dict[str, Any]]) -> float | None:
@@ -1123,15 +1376,24 @@ def _build_response_v2(
     opt_net_flow: float | None
     largest_opt_buy: float | None = None
     opt_window_empty = False
+    opt_bullish_share: float | None = None
+    hedge_flag: str = _HEDGE_NONE
+    hedge_reason: str | None = None
+    # Equity accumulation (dark-pool net buying) only LABELS the hedge context —
+    # it never rewrites the F4 score (options-only per the firewall).
+    equity_bullish = dp_net_flow is not None and dp_net_flow > 0
     if opt_trades is not None:
         windowed_opts = _filter_to_recent_sessions(opt_trades, timestamp_key="created_at")
         opt_window_empty = not windowed_opts
-        opt_net_flow, largest_opt_buy = _decay_weighted_options(windowed_opts)
-        # Protective-structure relief (covered-call / put-spread) still applies to
-        # the weighted net — this is legitimate net-flow handling, distinct from
-        # the removed (broken) covered-call display tag.
-        opt_net_flow = _apply_strategy_aware_adjustment(windowed_opts, opt_net_flow)
-        opt_score = _map_net_flow_to_score(opt_net_flow, tier)
+        # F4 = classified net-directional flow: bullish_share over the moneyness/
+        # expiry-weighted bullish vs bearish premium (ATLAS F4 Classification Key).
+        bullish_prem, bearish_prem, largest_opt_buy = _directional_premium(windowed_opts)
+        opt_bullish_share = _bullish_share(bullish_prem, bearish_prem)
+        opt_score = _bullish_share_to_score(opt_bullish_share)
+        opt_net_flow = bullish_prem - bearish_prem  # net directional premium
+        hedge_flag, hedge_reason = _classify_hedge_structure(
+            windowed_opts, equity_accumulation_bullish=equity_bullish
+        )
     elif opt_tape is not None:
         windowed_tape = _filter_to_recent_sessions(opt_tape, timestamp_key="executed_at")
         opt_window_empty = not windowed_tape
@@ -1141,12 +1403,23 @@ def _build_response_v2(
         opt_score = None
         opt_net_flow = None
 
-    # F4 is now OPTIONS-ONLY. Dark-pool no longer enters the 0-100 (it drives the
-    # chips/clearance below). data_source reflects the score's single source.
+    # Base F4 = the classified options-flow score (bullish_share). Dark-pool
+    # CONFIRMATION (Key §6/§7) then upgrades/downgrades it as a bounded modifier.
     if opt_score is None:
         f4_raw, source = _F4_NEUTRAL_SCORE, _F4_SOURCE_DATA_GAP
     else:
         f4_raw, source = opt_score, _F4_SOURCE_OPT_ONLY
+        if dp_net_flow is not None and abs(dp_net_flow) >= _F4_DP_CONFIRM_MIN_USD:
+            share = opt_bullish_share if opt_bullish_share is not None else 0.5
+            if dp_net_flow > 0 and share >= _F4_DP_UPGRADE_MIN_SHARE:
+                # Buy-lean confirms a non-bearish tape → upgrade.
+                f4_raw = min(_F4_SCORE_MAX, f4_raw + _F4_DP_CONFIRM_POINTS)
+                source = _F4_SOURCE_BOTH
+            elif dp_net_flow < 0:
+                # Sell-lean confirms/deepens bearishness → downgrade.
+                f4_raw = max(_F4_SCORE_MIN, f4_raw - _F4_DP_CONFIRM_POINTS)
+                source = _F4_SOURCE_BOTH
+    f4_state = _f4_state_label(f4_raw)
     direction = _derive_flow_direction(None, opt_net_flow)
 
     # Layer 2 — stock-tape state ("chips") from per-session dark-pool flow.
@@ -1203,6 +1476,10 @@ def _build_response_v2(
         dark_pool_state_reason=dp_state_reason,
         clearance=clr_state,
         clearance_reason=clr_reason,
+        hedge_structure=hedge_flag,
+        hedge_structure_reason=hedge_reason,
+        bullish_share=opt_bullish_share,
+        f4_state=f4_state,
     )
 
 

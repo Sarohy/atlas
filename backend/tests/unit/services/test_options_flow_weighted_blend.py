@@ -346,8 +346,9 @@ def test_response_options_strategy_type_is_none_when_no_opt_trades() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_response_v2_dark_pool_excluded_from_options_only_f4() -> None:
-    """Strong dark-pool buying no longer lifts F4 — F4 is options-only (neutral here)."""
+def test_build_response_v2_dark_pool_confirmation_upgrades_neutral_tape() -> None:
+    """F4 Classification Key §6/§7: a strong dark-pool BUY-lean confirms a
+    non-bearish options tape and upgrades F4 (supersedes the v2.2 firewall)."""
     response = _build_response_v2(
         ticker="NBIS",
         market_cap=60_000_000_000.0,
@@ -400,9 +401,10 @@ def test_build_response_v2_dark_pool_excluded_from_options_only_f4() -> None:
             },
         ],
     )
-    # dp_net_flow = $100M → dp_score = 100, but dark pool is NOT in F4 anymore.
-    # opt_net_flow = $0 → opt_score = 50 (neutral band) → F4 = 50 (options-only).
-    assert response.f4_score == 50
-    assert response.data_source == "OPTIONS_ONLY"
-    assert response.dark_pool_score == 100  # still computed, informational only
+    # Options balanced (call_ask 2M vs put_ask 2M) → bullish_share 0.5 → base 50.
+    # dp_net_flow = $100M buy-lean (>= $50M) and tape not bearish (share >= 0.42)
+    # → +12 confirmation → F4 = 62, source BOTH.
     assert response.options_flow_score == 50
+    assert response.f4_score == 62
+    assert response.data_source == "BOTH"
+    assert response.dark_pool_score == 100  # still computed separately

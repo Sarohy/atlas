@@ -8,6 +8,9 @@ from atlas.services.options_flow_service import (
     _apply_strategy_aware_adjustment,
     _build_response_v2,
     _dark_pool_settlement_ratio,
+    _live_tape_state,
+    _multi_window_score,
+    _window_score,
 )
 
 
@@ -23,6 +26,28 @@ def _atm(opt_type: str, *, ask: float = 0.0, bid: float = 0.0) -> dict:
         "total_bid_side_prem": bid,
         "total_premium": max(ask, bid),
     }
+
+
+def test_multi_window_weights_current_session_heaviest() -> None:
+    # Today bullish (calls bought), four prior sessions bearish (puts bought).
+    today_bull = [_atm("call", ask=10_000_000.0)]
+    old_bear = [_atm("put", ask=10_000_000.0)]
+    sessions = [today_bull, old_bear, old_bear, old_bear, old_bear]
+    blended = _multi_window_score(sessions)
+    flat_5_session = _window_score(sessions, 0, 5)
+    # The current-session weight (35%) lifts the blend well above the flat average.
+    assert flat_5_session is not None and blended is not None
+    assert blended > flat_5_session
+
+
+def test_live_tape_state_transitions() -> None:
+    assert _live_tape_state(95, 30) == "Bullish reversal"
+    assert _live_tape_state(10, 80) == "Bearish reversal"
+    assert _live_tape_state(70, 65) == "Bullish persistent"
+    assert _live_tape_state(20, 25) == "Bearish persistent"
+    assert _live_tape_state(60, 50) == "Improving"
+    assert _live_tape_state(44, 52) == "Deteriorating"
+    assert _live_tape_state(None, 50) == "Data gap"
 
 
 def test_build_response_v2_directional_put_buying_reads_bearish() -> None:
@@ -206,9 +231,9 @@ def _dp_sell(prem: float) -> dict:
     }
 
 
-def test_dark_pool_buy_lean_does_not_rescue_bearish_tape() -> None:
-    # NBIS case: directional-bearish options (share < 0.42) + huge DP accumulation.
-    # The buy-lean upgrade is GATED off → F4 stays bearish (Key §9/§13).
+def test_dark_pool_buy_lean_is_not_scored_into_f4b() -> None:
+    # Final scoring rule: F4a equity/dark-pool is NOT scored. A huge DP buy-lean
+    # does NOT lift a bearish options tape — F4b stays bearish, source OPTIONS_ONLY.
     response = _build_response_v2(
         ticker="NBIS",
         market_cap=60_000_000_000.0,
@@ -216,21 +241,22 @@ def test_dark_pool_buy_lean_does_not_rescue_bearish_tape() -> None:
         opt_trades=[_atm("put", ask=10_000_000.0), _atm("call", bid=4_000_000.0)],
     )
     assert response.bullish_share is not None and response.bullish_share < 0.42
-    assert response.f4_score <= 30  # not lifted out of bearish
-    assert response.f4_state in ("Bearish", "Strong bearish")
+    assert response.f4_score <= 30
+    assert response.data_source == "OPTIONS_ONLY"  # dark pool did not enter the score
 
 
-def test_dark_pool_sell_lean_downgrades() -> None:
-    # Neutral options + strong DP sell-lean → downgrade.
+def test_dark_pool_sell_lean_is_not_scored_into_f4b() -> None:
+    # Balanced options + strong DP sell-lean → F4b stays neutral (DP not scored);
+    # the sell-lean shows in the dark_pool_state / clearance overlay instead.
     response = _build_response_v2(
         ticker="LITE",
         market_cap=70_000_000_000.0,
         dp_prints=[_dp_sell(200_000_000.0)],
         opt_trades=[_atm("call", ask=2_000_000.0), _atm("put", ask=2_000_000.0)],
     )
-    assert response.options_flow_score == 50  # balanced base
-    assert response.f4_score == 38  # 50 - 12 confirmation downgrade
-    assert response.data_source == "BOTH"
+    assert response.options_flow_score == 50
+    assert response.f4_score == 50  # unchanged — F4a not scored
+    assert response.data_source == "OPTIONS_ONLY"
 
 
 def test_build_response_v2_does_not_boost_when_settlement_is_too_high() -> None:

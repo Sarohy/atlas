@@ -72,6 +72,12 @@ export const optionsFlowResponseSchema = z.object({
   hedge_structure_reason: z.string().nullable().optional(),
   bullish_share: z.number().nullable().optional(),
   f4_state: z.string().default('Neutral / constructive'),
+  // Multi-window F4b (current-session-weighted) — Multi-Window Pull Spec.
+  live_tape_state: z.string().default('Data gap'),
+  persistence_state: z.string().default('Neutral / constructive'),
+  current_session_net_usd: z.number().nullable().optional(),
+  otm_call_ask_usd: z.number().nullable().optional(),
+  otm_put_ask_usd: z.number().nullable().optional(),
 });
 
 export type OptionsFlowResponse = z.infer<typeof optionsFlowResponseSchema>;

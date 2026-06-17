@@ -484,6 +484,36 @@ function buildDisplayFactor(
   };
 }
 
+// Tone for a factor grade. Handles both the legacy F1-F3/F5 vocabulary
+// (STRONG BUY / BUY / NEUTRAL / WEAK / AVOID) and the F4b band vocabulary
+// (Strong Bullish Options … Aggressive Bearish). Never green for a bearish band.
+// Flow Monitor verdict, short form for the F4 row (the only add authority).
+const FLOW_MONITOR_SHORT: Record<string, string> = {
+  ADD_ELIGIBLE: 'Add eligible',
+  ADD_PENDING_GATES: 'Add — pending gates',
+  STARTER: 'Starter / watch',
+  WATCH: 'Watch / no fresh add',
+  CONFLICT: 'Conflict / no chase',
+  MIXED_ABSORPTION: 'Mixed absorption / watch',
+  TRIM_WATCH: 'Trim-watch',
+  AVOID: 'Avoid',
+};
+
+function factorGradeTone(grade: string): string {
+  const g = grade.toLowerCase();
+  // Bearish first (so "mild bearish" doesn't match a bullish substring).
+  if (g.includes('aggressive bear') || g === 'avoid' || g === 'distressed') return 'is-red';
+  if (g.includes('bearish')) return g.includes('mild') ? 'is-orange' : 'is-red';
+  if (g === 'weak') return 'is-orange';
+  // Bullish / constructive.
+  if (g.includes('strong bull') || g === 'strong buy' || g === 'strong') return 'is-green';
+  if (g === 'buy' || g === 'good' || g.includes('bullish')) return 'is-cyan';
+  if (g.includes('constructive') && !g.includes('neutral')) return 'is-cyan';
+  // Neutral / neutral-constructive / unknown.
+  if (g.includes('neutral')) return 'is-yellow';
+  return 'is-yellow';
+}
+
 function calculateRawTotal(factors: FactorBreakdown[]): number {
   return factors.reduce((sum, factor) => sum + factor.contribution, 0);
 }
@@ -525,16 +555,7 @@ function FactorRow({
   f5RawScore?: number | null;
   f5CapSource?: string | null;
 }) {
-  const gradeTone =
-    factor.grade === 'STRONG BUY' || factor.grade === 'STRONG'
-      ? 'is-green'
-      : factor.grade === 'BUY' || factor.grade === 'GOOD'
-        ? 'is-cyan'
-        : factor.grade === 'NEUTRAL'
-          ? 'is-yellow'
-          : factor.grade === 'WEAK'
-            ? 'is-orange'
-            : 'is-red'; // DISTRESSED / AVOID / unknown
+  const gradeTone = factorGradeTone(factor.grade);
 
   return (
     <div
@@ -543,6 +564,27 @@ function FactorRow({
     >
       <span className="atlas-fws-factor-name">
         <span className="atlas-fws-factor-key">{factor.key.toUpperCase()}</span> {factor.name}
+        {factor.key === 'f4' && factor.available && (
+          <span
+            className={cn('atlas-fws-f4-state', gradeTone)}
+            data-testid="fws-f4-state"
+            title="F4b options-flow state — not an add signal. Flow Monitor is the action gate."
+          >
+            {' '}
+            — {factor.grade}
+          </span>
+        )}
+        {factor.key === 'f4' && factor.available && factor.flow_monitor_action && (
+          <span
+            className="atlas-fws-f4-flow-monitor"
+            data-testid="fws-f4-flow-monitor"
+            title="Flow Monitor — the only layer that clears an add."
+          >
+            {' '}
+            · Flow Monitor: {FLOW_MONITOR_SHORT[factor.flow_monitor_action] ??
+              factor.flow_monitor_action}
+          </span>
+        )}
         {!factor.available && <span className="atlas-fws-unavailable-tag"> (unavail.)</span>}
         {f4GapBadge && (
           <span

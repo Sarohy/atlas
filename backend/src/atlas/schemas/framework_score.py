@@ -60,6 +60,13 @@ class FactorBreakdown(BaseModel):
             "A neutral score of 50 is used as fallback."
         ),
     )
+    flow_monitor_action: str | None = Field(
+        default=None,
+        description=(
+            "F4 only: the Flow Monitor final action (add gate). Populated for the F4 row so "
+            "the panel shows the action verdict, never an implied BUY from the factor itself."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

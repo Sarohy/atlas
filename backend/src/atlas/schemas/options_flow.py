@@ -180,10 +180,25 @@ class OptionsFlowResponse(BaseModel):
         ),
     )
     f4_state: str = Field(
-        default="Neutral / constructive",
+        default="Neutral",
         description=(
-            "F4 state label from the score band (Key §5): Strong bullish | Bullish | "
-            "Mild bullish | Neutral / constructive | Mild bearish | Bearish | Strong bearish."
+            "F4 state label from the score band (Implementation Audit): Strong bullish | "
+            "Bullish | Mild bullish | Constructive | Neutral-constructive | Neutral | "
+            "Mild bearish | Bearish | Aggressive bearish. Never 'Neutral' below 45."
+        ),
+    )
+    f4_add_impact: str = Field(
+        default="No edge — no fresh add from F4b",
+        description=(
+            "Gate-aware F4b add impact — never a bare BUY. A full add is only emitted by "
+            "the Flow Monitor after F4a/VWAP/cluster/size/regime gates clear."
+        ),
+    )
+    dark_pool_confidence: str = Field(
+        default="No dark-pool data",
+        description=(
+            "F4a dark-pool coverage confidence: High (full) | Medium (partial) | "
+            "Low (1 session / truncation) | No dark-pool data."
         ),
     )
     # ---- Multi-window F4b (current-session-weighted) — Multi-Window Pull Spec ----
@@ -207,4 +222,17 @@ class OptionsFlowResponse(BaseModel):
     )
     otm_put_ask_usd: float | None = Field(
         default=None, description="OTM put ask-side (bought) premium over the window."
+    )
+
+    # ---- Flow Monitor — the final action gate (only add authority) -----------
+    flow_monitor_action: str = Field(
+        default="WATCH",
+        description=(
+            "Final Flow Monitor action combining F4b + F4a + live tape (+ order-time "
+            "gates): ADD_ELIGIBLE | ADD_PENDING_GATES | STARTER | WATCH | CONFLICT | "
+            "MIXED_ABSORPTION | TRIM_WATCH | AVOID. The only layer allowed to clear an add."
+        ),
+    )
+    flow_monitor_reason: str | None = Field(
+        default=None, description="Plain-English reason for the Flow Monitor action."
     )

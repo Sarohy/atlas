@@ -7,11 +7,94 @@ from atlas.services.options_flow_service import (
     _apply_dark_pool_quality_boost,
     _apply_strategy_aware_adjustment,
     _build_response_v2,
+    _dark_pool_confidence,
     _dark_pool_settlement_ratio,
+    _f4_add_impact,
+    _f4_state_label,
     _live_tape_state,
     _multi_window_score,
     _window_score,
+    clearance_state,
 )
+
+
+# ---------------------------------------------------------------------------
+# F4 Implementation Audit — score-band labels, add-impact, DP confidence
+# ---------------------------------------------------------------------------
+
+
+def test_f4_state_label_audit_bands() -> None:
+    assert _f4_state_label(90) == "Strong bullish"
+    assert _f4_state_label(75) == "Bullish"
+    assert _f4_state_label(65) == "Mild bullish"
+    assert _f4_state_label(62) == "Constructive"
+    assert _f4_state_label(57) == "Neutral-constructive"
+    assert _f4_state_label(52) == "Neutral"
+    assert _f4_state_label(46) == "Mild bearish"
+    assert _f4_state_label(43) == "Bearish"
+    assert _f4_state_label(20) == "Aggressive bearish"
+
+
+def test_f4_never_labels_sub_45_as_neutral() -> None:
+    # Audit rule: no NEUTRAL below 45.
+    for score in range(0, 45):
+        assert "neutral" not in _f4_state_label(score).lower()
+
+
+def test_f4_add_impact_never_says_buy() -> None:
+    for score in range(0, 101):
+        assert "buy" not in _f4_add_impact(score).lower()
+
+
+def test_f4_add_impact_bands() -> None:
+    assert "no full add" in _f4_add_impact(65).lower()  # supportive, not a buy
+    assert "add blocked" in _f4_add_impact(46).lower()
+    assert "trim-watch" in _f4_add_impact(43).lower()
+    assert "avoid" in _f4_add_impact(20).lower()
+
+
+def test_f4_framework_row_label_bands_never_say_buy() -> None:
+    from atlas.services.options_flow_service import f4_framework_row_label
+
+    assert f4_framework_row_label(90) == "Strong Bullish Options"
+    assert f4_framework_row_label(75) == "Bullish Options"
+    assert f4_framework_row_label(65) == "Mild Bullish / Supportive"
+    assert f4_framework_row_label(62) == "Constructive"
+    assert f4_framework_row_label(57) == "Neutral-Constructive"
+    assert f4_framework_row_label(52) == "Neutral"
+    assert f4_framework_row_label(46) == "Mild Bearish"
+    assert f4_framework_row_label(43) == "Bearish"
+    assert f4_framework_row_label(20) == "Aggressive Bearish"
+    for score in range(0, 101):
+        assert "buy" not in f4_framework_row_label(score).lower()
+
+
+def test_dark_pool_confidence_bands() -> None:
+    assert _dark_pool_confidence(2, 2, False).startswith("High")
+    assert _dark_pool_confidence(1, 2, False).startswith("Low")
+    assert _dark_pool_confidence(3, 5, False).startswith("Medium")
+    assert _dark_pool_confidence(5, 5, True).startswith("Low")  # truncation
+    assert _dark_pool_confidence(None, 2, False).startswith("No")
+
+
+def test_clearance_mixed_absorption_when_bearish_options_meet_accumulation() -> None:
+    # F4b bearish + F4a accumulation chip → WATCH / mixed absorption (no full add).
+    state, reason = clearance_state("FRESH_ACCUMULATION", 30)
+    assert state == "WATCH"
+    assert "mixed absorption" in reason.lower()
+
+
+def test_build_response_v2_score_43_is_bearish_not_neutral() -> None:
+    # Acceptance test: F4b=43-ish from put-heavy tape → Bearish state, add blocked.
+    response = _build_response_v2(
+        ticker="X",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[_atm("put", ask=10_000_000.0), _atm("call", ask=3_000_000.0)],
+    )
+    assert response.f4_state in ("Bearish", "Mild bearish", "Aggressive bearish")
+    assert response.f4_state != "Neutral"
+    assert "buy" not in response.f4_add_impact.lower()
 
 
 def _atm(opt_type: str, *, ask: float = 0.0, bid: float = 0.0) -> dict:
@@ -444,22 +527,20 @@ def _dp(day: str) -> dict:
     return {"executed_at": f"{day}T15:00:00Z", "price": 10.0, "premium": 1000.0}
 
 
-async def test_dark_pool_fetch_paginates_until_five_sessions() -> None:
+async def test_dark_pool_fetch_paginates_until_two_sessions() -> None:
     from atlas.services.options_flow_service import _fetch_dark_pool_prints
 
     pages = [
-        {"data": [_dp("2026-06-12"), _dp("2026-06-11")]},  # 2 distinct days
-        {"data": [_dp("2026-06-10"), _dp("2026-06-09")]},  # 4 cumulative
-        {"data": [_dp("2026-06-08")]},  # 5 cumulative -> stop
+        {"data": [_dp("2026-06-12")]},  # 1 distinct day
+        {"data": [_dp("2026-06-11")]},  # 2 cumulative -> stop (2-session window)
     ]
     client = _PagedClient(pages)
     prints = await _fetch_dark_pool_prints(client, "MU", {})  # type: ignore[arg-type]
 
-    assert prints is not None and len(prints) == 5
-    assert len(client.calls) == 3  # paginated across three pages
-    # Pages 2 and 3 carry the older_than cursor from the prior page's last record.
-    assert client.calls[1]["older_than"] == "2026-06-11T15:00:00Z"
-    assert client.calls[2]["older_than"] == "2026-06-09T15:00:00Z"
+    assert prints is not None and len(prints) == 2
+    assert len(client.calls) == 2  # paginated across two pages
+    # Page 2 carries the older_than cursor from page 1's last record.
+    assert client.calls[1]["older_than"] == "2026-06-12T15:00:00Z"
 
 
 async def test_dark_pool_fetch_stops_after_one_page_when_window_covered() -> None:
@@ -508,4 +589,5 @@ def test_build_response_v2_no_truncation_when_window_fully_covered() -> None:
         ticker="ACME", market_cap=8_000_000_000.0, dp_prints=dp_prints, opt_trades=None
     )
     assert resp.dark_pool_truncated is False
-    assert resp.dark_pool_sessions_covered == 5
+    # Window is 2 sessions → only the 2 most recent distinct days are covered.
+    assert resp.dark_pool_sessions_covered == 2

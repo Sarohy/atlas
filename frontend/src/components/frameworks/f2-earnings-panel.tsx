@@ -10,14 +10,6 @@ import type { EarningsResponse } from '@/lib/schemas/earnings';
 
 const SCORE_BAR_SEGMENTS = 10;
 
-const GRADE_TONE: Record<string, string> = {
-  'STRONG BUY': 'is-green',
-  BUY: 'is-cyan',
-  NEUTRAL: 'is-yellow',
-  WEAK: 'is-orange',
-  AVOID: 'is-red',
-};
-
 const FWD_VIS_LABEL: Record<string, string> = {
   SPECIFIC_RAISED: 'Guidance Raised',
   SPECIFIC_MAINTAINED: 'Guidance Maintained',
@@ -227,7 +219,7 @@ function SubFactorCard({ id, label, score, weight, children }: SubFactorCardProp
         <span className="atlas-f2-indicator-weight">{weight}</span>
         <span className={cn('atlas-f2-indicator-score', tone)}>
           {score !== null ? score.toFixed(0) : 'N/A'}
-          <span className="atlas-f2-indicator-max">/100</span>
+          {score !== null && <span className="atlas-f2-indicator-max">/100</span>}
         </span>
       </header>
       {score !== null && <ScoreBar score={score} gradeTone={tone} />}

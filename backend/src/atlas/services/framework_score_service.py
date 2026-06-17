@@ -39,6 +39,7 @@ from atlas.services.framework8_service import Framework8Service
 from atlas.services.framework9_service import evaluate_framework9
 from atlas.services.fundamental_service import FundamentalService
 from atlas.services.momentum_service import MomentumService
+from atlas.services.options_flow_service import f4_framework_row_label
 from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,14 @@ class FrameworkScoreService:
         f4_score, f4_grade, f4_ok = self._extract_factor(
             f4_result, "f4_score", "f4_grade", "F4 Options Flow Persistence", flags
         )
+        # F4 row uses the F4b band vocabulary, NOT the legacy BUY/STRONG BUY grade
+        # (F4 Implementation Audit): the Framework panel must not imply an add from
+        # F4 alone — the Flow Monitor is the action gate. f4_grade is still kept on
+        # the raw F4 response for back-compat; only the displayed factor row changes.
+        f4_flow_monitor: str | None = None
+        if f4_ok:
+            f4_grade = f4_framework_row_label(f4_score)
+            f4_flow_monitor = getattr(f4_result, "flow_monitor_action", None)
         f5_score, f5_grade, f5_ok = self._extract_factor(
             f5_result, "f5_score", "f5_grade", "F5 Fundamental Quality", flags
         )
@@ -228,6 +237,7 @@ class FrameworkScoreService:
                 contribution=round(score * weight, 4),
                 grade=grade,
                 available=available,
+                flow_monitor_action=(f4_flow_monitor if key == "f4" else None),
             )
             for key, name, score, weight, grade, available in factor_meta
         ]

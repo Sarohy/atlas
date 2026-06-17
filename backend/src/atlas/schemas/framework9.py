@@ -166,6 +166,12 @@ class Framework9Result(BaseModel):
         )
     )
     f4_contribution: float = Field(ge=0.0, le=15.0, description="f4_score x 0.15.")
+    flow_monitor_action: str = Field(
+        default="WATCH",
+        description="Flow Monitor final action (the add gate): ADD_ELIGIBLE | "
+        "ADD_PENDING_GATES | STARTER | WATCH | CONFLICT | MIXED_ABSORPTION | "
+        "TRIM_WATCH | AVOID.",
+    )
 
     # ── Signal hierarchy ─────────────────────────────────────────────────────
     signal_tier: SignalTier

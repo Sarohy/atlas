@@ -20,6 +20,8 @@ export const factorBreakdownSchema = z.object({
   grade: z.string(),
   /** False when the factor could not be computed; neutral score 50 used */
   available: z.boolean().default(true),
+  /** F4 only: Flow Monitor final action (the add gate). */
+  flow_monitor_action: z.string().nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------

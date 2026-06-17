@@ -44,6 +44,7 @@ class OverlayAction:
     """Action recommendations (ATLAS quality x extension timing)."""
 
     ADD: Final[str] = "ADD"
+    STARTER_WATCH: Final[str] = "STARTER_WATCH"
     BUY_ON_PULLBACK: Final[str] = "BUY_ON_PULLBACK"
     HOLD_TRIM: Final[str] = "HOLD_TRIM"
     TRIM_HEDGE: Final[str] = "TRIM_HEDGE"
@@ -53,6 +54,12 @@ class OverlayAction:
 # ATLAS final score at/above which a name counts as "high conviction" for the
 # action matrix (Tier 2+ per the v7.3.4 tier structure).
 _HIGH_CONVICTION_MIN: Final[int] = 70
+
+# F4 options-flow score at/above which flow is "confirming" (BUY-grade). Mirrors
+# forward_growth._F4_CONFIRMING_MIN so the two panels agree on what "flow
+# confirmation" means. A non-extended high-quality name only earns a full ADD
+# once flow confirms; below this it is STARTER / WATCH (add on confirmation).
+_F4_CONFIRMING_MIN: Final[int] = 60
 
 # ---------------------------------------------------------------------------
 # Extension Risk Score — points table (client spec)
@@ -399,11 +406,9 @@ def classify_extension_flag(risk_score: int) -> str:
 # Action matrix — ATLAS quality x extension timing
 # ---------------------------------------------------------------------------
 
+# GREEN is handled separately in recommend_action() because a non-extended,
+# high-conviction name must clear the F4 flow gate before it earns a full ADD.
 _HIGH_CONVICTION_ACTIONS: Final[dict[str, tuple[str, str]]] = {
-    ExtensionFlag.GREEN: (
-        OverlayAction.ADD,
-        "Buyable — conviction is high and the name is not extended.",
-    ),
     ExtensionFlag.YELLOW: (
         OverlayAction.BUY_ON_PULLBACK,
         "Good name; add only on a pullback / VWAP hold, size-controlled.",
@@ -425,14 +430,26 @@ _HIGH_CONVICTION_ACTIONS: Final[dict[str, tuple[str, str]]] = {
 }
 
 
-def recommend_action(atlas_score: int | None, flag: str) -> tuple[str | None, str | None]:
-    """Combine ATLAS conviction with the extension flag into an action.
+def recommend_action(
+    atlas_score: int | None,
+    flag: str,
+    f4_score: int | None = None,
+) -> tuple[str | None, str | None]:
+    """Combine ATLAS conviction, extension flag, and F4 flow into an action.
 
     Returns ``(action, detail)``.  When ``atlas_score`` is None (caller did not
     supply a conviction score) the action is omitted — the overlay is purely
     informational without a quality anchor.
 
     Low-conviction names never generate a buy purely because they are oversold.
+
+    Flow gate (ATLAS v2.2): a non-extended (GREEN) high-conviction name is NOT a
+    full ADD on quality + clean extension alone.  A full ADD requires options
+    flow (F4) to confirm (``f4_score >= _F4_CONFIRMING_MIN``).  When flow is
+    neutral/weak or unavailable, the action is STARTER / WATCH — start small and
+    add on flow confirmation — so the screen never says "ADD" while another panel
+    says "wait for F4 confirmation".  This only gates GREEN; it never makes an
+    extended name MORE aggressive (no options override of a hold/trim).
     """
     if atlas_score is None:
         return None, None
@@ -444,6 +461,20 @@ def recommend_action(atlas_score: int | None, flag: str) -> tuple[str | None, st
                 "Oversold but conviction is insufficient — no new capital.",
             )
         return OverlayAction.AVOID, "Conviction is insufficient — no new capital."
+
+    if flag == ExtensionFlag.GREEN:
+        f4_confirming = f4_score is not None and f4_score >= _F4_CONFIRMING_MIN
+        if f4_confirming:
+            return (
+                OverlayAction.ADD,
+                "Buyable — conviction is high, the name is not extended, and "
+                "options flow (F4) is confirming.",
+            )
+        return (
+            OverlayAction.STARTER_WATCH,
+            "STARTER / WATCH — quality and extension are clean, but options flow "
+            "(F4) is neutral/unconfirmed. Start small; add on F4 flow confirmation.",
+        )
 
     return _HIGH_CONVICTION_ACTIONS[flag]
 

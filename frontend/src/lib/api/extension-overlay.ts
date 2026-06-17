@@ -6,17 +6,22 @@ import {
 
 /**
  * Fetch the Overbought / Extension Overlay for a single ticker.
- * Calls GET /api/v1/extension-overlay/{ticker}[?atlas_score={n}].
+ * Calls GET /api/v1/extension-overlay/{ticker}[?atlas_score={n}][&f4_score={n}].
  *
  * Pass the ticker's final ATLAS conviction score to get an action
- * recommendation from the quality x timing matrix.
+ * recommendation from the quality x timing matrix, and the F4 Options Flow score
+ * so the action reflects flow confirmation (a non-extended high-conviction name
+ * is a full ADD only when flow confirms, else STARTER / WATCH).
  */
 export function fetchExtensionOverlay(
   ticker: string,
   atlasScore?: number | null,
+  f4Score?: number | null,
 ): Promise<ExtensionOverlayResponse> {
-  const query =
-    atlasScore != null ? `?atlas_score=${encodeURIComponent(Math.round(atlasScore))}` : '';
+  const params = new URLSearchParams();
+  if (atlasScore != null) params.set('atlas_score', String(Math.round(atlasScore)));
+  if (f4Score != null) params.set('f4_score', String(Math.round(f4Score)));
+  const query = params.toString() ? `?${params.toString()}` : '';
   return apiFetch(
     `/api/v1/extension-overlay/${encodeURIComponent(ticker.toUpperCase())}${query}`,
     extensionOverlayResponseSchema,

@@ -157,3 +157,32 @@ class OptionsFlowResponse(BaseModel):
     clearance_reason: str | None = Field(
         default=None, description="Plain-English reason for the clearance decision."
     )
+
+    # ---- Hedge-structure flag — context only, never rewrites f4_score --------
+    hedge_structure: str = Field(
+        default="NONE",
+        description=(
+            "Options hedge/structure context, tagged separately from f4_score: "
+            "DIRECTIONAL_BEARISH | PROTECTIVE_HEDGE | HEDGED_BULLISH | PUT_SELLING | "
+            "BULLISH | MIXED | NONE. Bearish put demand shows through F4 unless the "
+            "structure is clearly protective (bullish side confirming)."
+        ),
+    )
+    hedge_structure_reason: str | None = Field(
+        default=None, description="Plain-English reason for the hedge_structure flag."
+    )
+    bullish_share: float | None = Field(
+        default=None,
+        description=(
+            "bullish_premium / (bullish_premium + bearish_premium) over the window, "
+            "where bullish = call_ask + put_bid and bearish = put_ask + call_bid "
+            "(moneyness/expiry-weighted). Drives f4_score. None when no directional flow."
+        ),
+    )
+    f4_state: str = Field(
+        default="Neutral / constructive",
+        description=(
+            "F4 state label from the score band (Key §5): Strong bullish | Bullish | "
+            "Mild bullish | Neutral / constructive | Mild bearish | Bearish | Strong bearish."
+        ),
+    )

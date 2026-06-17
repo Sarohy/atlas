@@ -45,7 +45,7 @@ export const extensionOverlayResponseSchema = z.object({
   extension_flag: z.enum(['GREEN', 'YELLOW', 'RED', 'EXTREME_RED']),
   atlas_score: z.number().int().nullable().optional(),
   action: z
-    .enum(['ADD', 'BUY_ON_PULLBACK', 'HOLD_TRIM', 'TRIM_HEDGE', 'AVOID'])
+    .enum(['ADD', 'STARTER_WATCH', 'BUY_ON_PULLBACK', 'HOLD_TRIM', 'TRIM_HEDGE', 'AVOID'])
     .nullable()
     .optional(),
   action_detail: z.string().nullable().optional(),

@@ -51,16 +51,26 @@ class ExtensionOverlayService:
         self._client = client
 
     async def compute_overlay(
-        self, ticker: str, atlas_score: int | None = None
+        self,
+        ticker: str,
+        atlas_score: int | None = None,
+        f4_score: int | None = None,
     ) -> ExtensionOverlayResponse:
-        """Fetch bars + IV rank + ATH and assemble the Extension Overlay response."""
+        """Fetch bars + IV rank + ATH and assemble the Extension Overlay response.
+
+        ``f4_score`` (the name's F4 Options Flow Persistence score) gates the
+        action: a non-extended high-conviction name only earns a full ADD when
+        flow confirms, otherwise STARTER / WATCH (add on F4 confirmation).
+        """
         if self._client is not None:
             bars, iv_rank, ath, ath_date = await self._fetch_inputs(self._client, ticker)
         else:
             async with httpx.AsyncClient() as client:
                 bars, iv_rank, ath, ath_date = await self._fetch_inputs(client, ticker)
 
-        return self._build_response(ticker, bars, atlas_score, iv_rank, ath, ath_date)
+        return self._build_response(
+            ticker, bars, atlas_score, iv_rank, ath, ath_date, f4_score
+        )
 
     async def _fetch_inputs(
         self, client: httpx.AsyncClient, ticker: str
@@ -180,6 +190,7 @@ class ExtensionOverlayService:
         iv_rank: float | None = None,
         ath: float | None = None,
         ath_date: str | None = None,
+        f4_score: int | None = None,
     ) -> ExtensionOverlayResponse:
         symbol = ticker.upper()
         data_gaps: list[str] = []
@@ -272,7 +283,7 @@ class ExtensionOverlayService:
             macd_bearish_cross=macd_cross,
         )
         flag = ext.classify_extension_flag(risk)
-        action, detail = ext.recommend_action(atlas_score, flag)
+        action, detail = ext.recommend_action(atlas_score, flag, f4_score)
 
         def _round(value: float | None) -> float | None:
             return round(value, 2) if value is not None else None

@@ -636,6 +636,10 @@ class AnalystService:
                 )
             if not consensus_data:
                 consensus_data = await self._fetch_consensus_fmp(client, ticker)
+            if not consensus_data:
+                # Final fallback: Yahoo Finance aggregates coverage for names the
+                # ratings vendors miss — notably brand-new listings (e.g. SPCX).
+                consensus_data = await self._fetch_yfinance_consensus(ticker)
 
             ratings_data = await ratings_task
             current_price = await price_task
@@ -668,6 +672,69 @@ class AnalystService:
     # ------------------------------------------------------------------
     # Yahoo Finance — highest analyst price target
     # ------------------------------------------------------------------
+
+    async def _fetch_yfinance_consensus(self, ticker: str) -> dict[str, Any]:
+        """Consensus fallback from Yahoo Finance (analyst rating breakdown + PT).
+
+        Yahoo aggregates sell-side coverage that Benzinga / Alpha Vantage / FMP can
+        miss — especially brand-new listings. Returns the same shape as the other
+        consensus fetchers (rating-bucket counts + num_analysts + consensus_pt), or
+        ``{}`` when no rating breakdown is available. Runs the synchronous yfinance
+        calls in a thread-pool executor to avoid blocking the event loop.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, self._yfinance_consensus_sync, ticker)
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _yfinance_consensus_sync(ticker: str) -> dict[str, Any]:
+        t = yf.Ticker(ticker)
+        out: dict[str, Any] = {}
+
+        # Rating breakdown from the most recent recommendations period ("0m").
+        try:
+            rec = t.recommendations
+            if rec is not None and len(rec) > 0:
+                row = rec.iloc[0]
+
+                def _ri(col: str) -> int:
+                    try:
+                        return int(row[col])
+                    except (KeyError, TypeError, ValueError):
+                        return 0
+
+                out["strong_buy"] = _ri("strongBuy")
+                out["buy"] = _ri("buy")
+                out["hold"] = _ri("hold")
+                out["sell"] = _ri("sell")
+                out["strong_sell"] = _ri("strongSell")
+        except Exception:
+            pass
+
+        info: dict[str, Any] = {}
+        try:
+            info = t.info or {}
+        except Exception:
+            info = {}
+
+        n = info.get("numberOfAnalystOpinions")
+        if isinstance(n, (int, float)) and n > 0:
+            out["num_analysts"] = int(n)
+        pt = info.get("targetMeanPrice")
+        if isinstance(pt, (int, float)) and pt > 0:
+            out["consensus_pt"] = float(pt)
+
+        total = (
+            out.get("strong_buy", 0)
+            + out.get("buy", 0)
+            + out.get("hold", 0)
+            + out.get("sell", 0)
+            + out.get("strong_sell", 0)
+        )
+        # Require an actual rating breakdown to classify a consensus.
+        return out if total > 0 else {}
 
     async def _fetch_yfinance_pt(self, ticker: str) -> float | None:
         """Return the highest individual analyst price target from Yahoo Finance.

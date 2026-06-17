@@ -14,12 +14,18 @@ const SCORE_BAR_SEGMENTS = 10;
 // so the panel surfaces a 0-15 "contribution" alongside the raw 0-100 score.
 const F4_DISPLAY_MAX = 15;
 
-const GRADE_TONE: Record<string, string> = {
-  'STRONG BUY': 'is-green',
-  BUY: 'is-cyan',
-  NEUTRAL: 'is-yellow',
-  WEAK: 'is-orange',
-  AVOID: 'is-red',
+// Headline tone by F4b STATE band (Implementation Audit). The panel headlines the
+// state band — never a BUY (a full add only comes from the Flow Monitor).
+const STATE_TONE: Record<string, string> = {
+  'Strong bullish': 'is-green',
+  Bullish: 'is-green',
+  'Mild bullish': 'is-cyan',
+  Constructive: 'is-cyan',
+  'Neutral-constructive': 'is-yellow',
+  Neutral: 'is-yellow',
+  'Mild bearish': 'is-orange',
+  Bearish: 'is-red',
+  'Aggressive bearish': 'is-red',
 };
 
 const DIRECTION_TONE: Record<string, string> = {
@@ -64,6 +70,28 @@ const CLEARANCE_TONE: Record<string, string> = {
   CLEARED: 'is-green',
   WATCH: 'is-yellow',
   REVOKED: 'is-red',
+};
+
+// Flow Monitor — the final action gate (the only add authority).
+const FLOW_MONITOR_LABEL: Record<string, string> = {
+  ADD_ELIGIBLE: 'ADD ELIGIBLE',
+  ADD_PENDING_GATES: 'ADD — PENDING GATES',
+  STARTER: 'STARTER / WATCH',
+  WATCH: 'WATCH / NO FRESH ADD',
+  CONFLICT: 'CONFLICT / NO CHASE',
+  MIXED_ABSORPTION: 'MIXED ABSORPTION / WATCH',
+  TRIM_WATCH: 'TRIM-WATCH',
+  AVOID: 'AVOID',
+};
+const FLOW_MONITOR_TONE: Record<string, string> = {
+  ADD_ELIGIBLE: 'is-green',
+  ADD_PENDING_GATES: 'is-cyan',
+  STARTER: 'is-yellow',
+  WATCH: 'is-yellow',
+  CONFLICT: 'is-orange',
+  MIXED_ABSORPTION: 'is-orange',
+  TRIM_WATCH: 'is-red',
+  AVOID: 'is-red',
 };
 
 // Hedge-structure context flag — tagged separately from the F4 score so a bearish
@@ -164,7 +192,8 @@ function EmptyState({ ticker }: { ticker: string }) {
 // ---------------------------------------------------------------------------
 
 function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
-  const gradeTone = GRADE_TONE[data.f4_grade] ?? 'is-yellow';
+  // Headline by STATE band, not the legacy BUY/SELL grade (Implementation Audit).
+  const stateTone = STATE_TONE[data.f4_state] ?? 'is-yellow';
   const directionTone = DIRECTION_TONE[data.flow_direction] ?? 'is-muted';
   const tierTone = TIER_TONE[data.market_cap_tier] ?? 'is-muted';
   const sourceLabel = SOURCE_LABEL[data.data_source] ?? data.data_source;
@@ -175,28 +204,49 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
 
   return (
     <div className="atlas-f4-content" data-testid="f4-content">
-      {/* Score hero — F4 is the options-flow score (resume) */}
+      {/* Score hero — F4b options-flow persistence (headlined by state band) */}
       <div className="atlas-f4-score-hero">
         <div className="atlas-f4-score-ring">
-          <span className={cn('atlas-f4-score-number', gradeTone)} data-testid="f4-score">
+          <span className={cn('atlas-f4-score-number', stateTone)} data-testid="f4-score">
             {data.f4_score}
           </span>
           <span className="atlas-f4-score-denom">/100</span>
         </div>
         <div className="atlas-f4-score-meta">
           <span
-            className={cn('atlas-frameworks-pill atlas-f4-grade-pill', gradeTone)}
-            data-testid="f4-grade"
+            className={cn('atlas-frameworks-pill atlas-f4-grade-pill', stateTone)}
+            data-testid="f4-state"
           >
-            {data.f4_grade}
+            {data.f4_state}
           </span>
-          <span className="atlas-f4-label-sub" data-testid="f4-state">{data.f4_state}</span>
+          <span className="atlas-f4-label-sub" data-testid="f4-add-impact">
+            {data.f4_add_impact}
+          </span>
           <span className="atlas-f4-label-sub" data-testid="f4-live-tape-state">
-            live tape: {data.live_tape_state} · {data.persistence_state} (5d)
+            live tape: {data.live_tape_state} · {data.persistence_state} (2d)
           </span>
           <span className="atlas-f4-label-sub">options flow · {contribution}/{F4_DISPLAY_MAX} to F1</span>
         </div>
       </div>
+
+      {/* Flow Monitor — the final action gate (the only add authority) */}
+      <div className="atlas-f4-signal-row" data-testid="f4-flow-monitor">
+        <span className="atlas-f4-label-sub">Flow Monitor</span>
+        <span
+          className={cn(
+            'atlas-frameworks-pill atlas-f4-grade-pill',
+            FLOW_MONITOR_TONE[data.flow_monitor_action] ?? 'is-yellow',
+          )}
+          data-testid="f4-flow-monitor-action"
+        >
+          {FLOW_MONITOR_LABEL[data.flow_monitor_action] ?? data.flow_monitor_action}
+        </span>
+      </div>
+      {data.flow_monitor_reason && (
+        <p className="atlas-f4-state-msg" data-testid="f4-flow-monitor-reason">
+          {data.flow_monitor_reason}
+        </p>
+      )}
 
       {/* Clearance (the entry decision) + stock-tape chip (this week) */}
       <div className="atlas-f4-signal-row">
@@ -268,7 +318,7 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
       )}
 
       {/* Score bar */}
-      <ScoreBar score={data.f4_score} gradeTone={gradeTone} />
+      <ScoreBar score={data.f4_score} gradeTone={stateTone} />
 
       {/* Two sub-score cards */}
       <div className="atlas-f4-indicators">
@@ -302,6 +352,10 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           Stock tape (overlay): {data.dark_pool_state_reason}
         </p>
       )}
+
+      <p className="atlas-f4-state-msg" data-testid="f4a-confidence">
+        F4a dark-pool confidence: {data.dark_pool_confidence}
+      </p>
 
       {data.market_cap_usd !== null && (
         <p className="atlas-f4-state-msg" data-testid="f4-market-cap">

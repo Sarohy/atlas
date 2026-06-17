@@ -975,6 +975,7 @@ async def evaluate_framework9(
             f4_score=round(f4_score, 2),
             f4_grade=_grade_from_score(f4_score),
             f4_contribution=round(f4_score * 0.15, 2),
+            flow_monitor_action=f4.flow_monitor_action,
             signal_tier=tier,
             flow_direction=flow_dir,
             largest_print_usd=largest_dp,

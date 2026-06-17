@@ -71,13 +71,18 @@ export const optionsFlowResponseSchema = z.object({
     .default('NONE'),
   hedge_structure_reason: z.string().nullable().optional(),
   bullish_share: z.number().nullable().optional(),
-  f4_state: z.string().default('Neutral / constructive'),
+  f4_state: z.string().default('Neutral'),
+  f4_add_impact: z.string().default('No edge — no fresh add from F4b'),
+  dark_pool_confidence: z.string().default('No dark-pool data'),
   // Multi-window F4b (current-session-weighted) — Multi-Window Pull Spec.
   live_tape_state: z.string().default('Data gap'),
   persistence_state: z.string().default('Neutral / constructive'),
   current_session_net_usd: z.number().nullable().optional(),
   otm_call_ask_usd: z.number().nullable().optional(),
   otm_put_ask_usd: z.number().nullable().optional(),
+  // Flow Monitor — the final action gate (only add authority).
+  flow_monitor_action: z.string().default('WATCH'),
+  flow_monitor_reason: z.string().nullable().optional(),
 });
 
 export type OptionsFlowResponse = z.infer<typeof optionsFlowResponseSchema>;

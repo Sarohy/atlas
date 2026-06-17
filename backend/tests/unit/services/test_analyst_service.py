@@ -951,6 +951,62 @@ class TestFetchYfinancePt:
 
 
 # ---------------------------------------------------------------------------
+# _fetch_yfinance_consensus — rating breakdown fallback (e.g. new listings)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchYfinanceConsensus:
+    """Yahoo Finance consensus fallback — covers names Benzinga/AV/FMP miss."""
+
+    async def test_returns_breakdown_for_covered_name(self) -> None:
+        import pandas as pd
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        df = pd.DataFrame(
+            [{"period": "0m", "strongBuy": 1, "buy": 4, "hold": 0, "sell": 1, "strongSell": 0}]
+        )
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.recommendations = df
+            mock_yf.return_value.info = {
+                "numberOfAnalystOpinions": 6,
+                "targetMeanPrice": 188.0,
+            }
+            result = await service._fetch_yfinance_consensus("SPCX")
+
+        assert result["strong_buy"] == 1
+        assert result["buy"] == 4
+        assert result["sell"] == 1
+        assert result["num_analysts"] == 6
+        assert result["consensus_pt"] == 188.0
+
+    async def test_returns_empty_when_no_rating_breakdown(self) -> None:
+        import pandas as pd
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        empty = pd.DataFrame(
+            [{"period": "0m", "strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}]
+        )
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.return_value.recommendations = empty
+            mock_yf.return_value.info = {"targetMeanPrice": 188.0}
+            result = await service._fetch_yfinance_consensus("ZZZZ")
+
+        assert result == {}
+
+    async def test_returns_empty_on_exception(self) -> None:
+        from unittest.mock import patch
+
+        service = AnalystService(benzinga_api_key="bz", polygon_api_key="poly")
+        with patch("atlas.services.analyst_service.yf.Ticker") as mock_yf:
+            mock_yf.side_effect = Exception("network error")
+            result = await service._fetch_yfinance_consensus("MU")
+
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
 # _build_analyst_response — highest_pt used in formula
 # ---------------------------------------------------------------------------
 

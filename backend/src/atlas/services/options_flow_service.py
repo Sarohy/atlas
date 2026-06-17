@@ -47,6 +47,7 @@ from typing import Any, Final, Literal
 
 import httpx
 
+from atlas.core.flow_monitor import F4aState, FlowMonitorInputs, resolve_flow_monitor
 from atlas.schemas.options_flow import OptionsFlowResponse
 from atlas.services.provider_response_cache import cached_call
 
@@ -79,8 +80,10 @@ _UW_FETCH_LIMIT: Final[int] = 500
 # Pagination stops early as soon as 5 distinct sessions are collected.
 _UW_DARK_POOL_MAX_PAGES: Final[int] = 8
 
-# Rolling window length: F4 v2 always evaluates the last 5 trading sessions.
-_F4_LOOKBACK_SESSIONS: Final[int] = 5
+# Rolling window length: F4 evaluates the last 2 trading sessions (current +
+# prior). Timing-focused — a tighter window reacts to rotations and works for
+# brand-new options listings (e.g. SPCX) that have only a couple of sessions.
+_F4_LOOKBACK_SESSIONS: Final[int] = 2
 
 # Exceptional Conviction support: dark-pool BUY prints >$1M counted for F9.
 _F4_LARGE_DP_BUY_USD: Final[float] = 1_000_000.0
@@ -745,31 +748,101 @@ _F4_EW_UNKNOWN: Final[float] = 0.85
 # confirmation belongs to the (deferred) Flow Monitor action gate, not the score,
 # so it surfaces only via the dark_pool_state chip / clearance / dark_pool_net_flow.
 
-# F4 state labels by score band (Key §5 / §12 / §13).
+# F4 state labels by score band — F4 Implementation Audit calibration.
+# 85-100 Strong bullish | 70-84 Bullish | 65-69 Mild bullish | 60-64 Constructive |
+# 55-59 Neutral-constructive | 50-54 Neutral | 45-49 Mild bearish | 35-44 Bearish |
+# 0-34 Aggressive bearish. NB: never label a sub-45 score "Neutral".
 _F4_STATE_STRONG_BULL: Final[str] = "Strong bullish"
 _F4_STATE_BULL: Final[str] = "Bullish"
 _F4_STATE_MILD_BULL: Final[str] = "Mild bullish"
-_F4_STATE_NEUTRAL: Final[str] = "Neutral / constructive"
+_F4_STATE_CONSTRUCTIVE: Final[str] = "Constructive"
+_F4_STATE_NEUTRAL_CONSTRUCTIVE: Final[str] = "Neutral-constructive"
+_F4_STATE_NEUTRAL: Final[str] = "Neutral"
 _F4_STATE_MILD_BEAR: Final[str] = "Mild bearish"
 _F4_STATE_BEAR: Final[str] = "Bearish"
-_F4_STATE_STRONG_BEAR: Final[str] = "Strong bearish"
+_F4_STATE_AGGRESSIVE_BEAR: Final[str] = "Aggressive bearish"
 
 
 def _f4_state_label(score: int) -> str:
-    """Map an F4 score to its state label (Key §5 bands)."""
+    """Map an F4 score to its state label (Implementation Audit bands)."""
     if score >= 85:
         return _F4_STATE_STRONG_BULL
     if score >= 70:
         return _F4_STATE_BULL
-    if score >= 60:
+    if score >= 65:
         return _F4_STATE_MILD_BULL
+    if score >= 60:
+        return _F4_STATE_CONSTRUCTIVE
+    if score >= 55:
+        return _F4_STATE_NEUTRAL_CONSTRUCTIVE
     if score >= 50:
         return _F4_STATE_NEUTRAL
     if score >= 45:
         return _F4_STATE_MILD_BEAR
     if score >= 35:
         return _F4_STATE_BEAR
-    return _F4_STATE_STRONG_BEAR
+    return _F4_STATE_AGGRESSIVE_BEAR
+
+
+def f4_framework_row_label(score: int) -> str:
+    """Framework-Score panel label for the F4 row (Implementation Audit row vocab).
+
+    Distinct wording from the detailed-panel state ("…Options"), and never a BUY:
+    the Framework panel must not imply an add from F4 alone — the Flow Monitor is
+    the action gate.
+    """
+    if score >= 85:
+        return "Strong Bullish Options"
+    if score >= 70:
+        return "Bullish Options"
+    if score >= 65:
+        return "Mild Bullish / Supportive"
+    if score >= 60:
+        return "Constructive"
+    if score >= 55:
+        return "Neutral-Constructive"
+    if score >= 50:
+        return "Neutral"
+    if score >= 45:
+        return "Mild Bearish"
+    if score >= 35:
+        return "Bearish"
+    return "Aggressive Bearish"
+
+
+def _f4_add_impact(score: int) -> str:
+    """Gate-aware F4b add impact (Audit Action-Impact column). NEVER a bare BUY —
+    a full add is only ever emitted by the Flow Monitor after all gates clear."""
+    if score >= 85:
+        return "Add confirmation only if all other gates pass"
+    if score >= 70:
+        return "Add allowed only if F4a, VWAP, cluster, size & regime gates clear"
+    if score >= 65:
+        return "Starter / watch — F4b supportive, no full add from F4b alone"
+    if score >= 60:
+        return "Watch / starter only if Flow Monitor confirms"
+    if score >= 55:
+        return "Hold / watch — no fresh add"
+    if score >= 50:
+        return "No edge — no fresh add from F4b"
+    if score >= 45:
+        return "Add blocked — mild bearish"
+    if score >= 35:
+        return "No add / trim-watch — bearish"
+    return "Avoid / protect / hedge context"
+
+
+def _dark_pool_confidence(sessions_covered: int | None, window: int, truncated: bool) -> str:
+    """F4a dark-pool coverage confidence (Audit confidence rules)."""
+    if sessions_covered is None or sessions_covered <= 0:
+        return "No dark-pool data"
+    if truncated:
+        return "Low — high-volume truncation; chip understates the window"
+    if sessions_covered >= window:
+        return "High — full coverage"
+    if sessions_covered <= 1 and window > 1:
+        return "Low — 1 session only"
+    return "Medium — partial coverage"
 
 
 def _group_by_session(
@@ -882,19 +955,18 @@ def _bullish_share_to_score(share: float | None) -> int:
 # so rotations/reversals are not hidden by a flat 5-session average.
 # ---------------------------------------------------------------------------
 #
-# F4b = weighted blend of the classified options score over overlapping windows:
-#   current(35%) + prior(20%) + 3-session(20%) + 5-session(15%).
-# The 10-20 session context window is intentionally NOT scored (per the final
-# scoring rule) — deep history is context, not signal. Missing windows (not enough
-# history) are dropped and the remaining weights re-normalize.
-_F4_OPTIONS_MAX_SESSIONS: Final[int] = 5  # deepest window scored (5-session)
+# F4b = weighted blend of the classified options score over a 2-SESSION window:
+#   current(35%) + prior(20%), current session weighted heaviest. Deeper windows
+#   (3/5/10-20 session) are intentionally NOT scored — F4 is timing-focused, and a
+#   2-session window reacts to rotations and works for brand-new options listings.
+# Missing windows (not enough history) drop and the remaining weights re-normalize.
+_F4_OPTIONS_MAX_SESSIONS: Final[int] = 2  # deepest window scored (2-session)
 _F4_WINDOW_WEIGHTS: Final[tuple[tuple[str, float, int, int], ...]] = (
     # (label, weight, start_session_idx, end_session_idx) — newest session = 0.
-    # Weights sum to 0.90 and re-normalize over the windows that have data.
+    # Weights re-normalize over the windows that have data (current alone if only
+    # one session exists yet).
     ("current", 0.35, 0, 1),
     ("prior", 0.20, 1, 2),
-    ("3-session", 0.20, 0, 3),
-    ("5-session", 0.15, 0, 5),
 )
 
 # Live-tape-state thresholds (Multi-Window Pull Spec §4).
@@ -936,7 +1008,7 @@ def _multi_window_score(sessions: list[list[dict[str, Any]]]) -> int | None:
 
 
 def _live_tape_state(current: int | None, baseline: int | None) -> str:
-    """Classify today's tape vs the 5-session baseline (Multi-Window §4)."""
+    """Classify today's tape vs the 2-session baseline (Multi-Window §4)."""
     if current is None:
         return _F4_LIVE_DATA_GAP
     if baseline is None:
@@ -1058,6 +1130,17 @@ _CLEARANCE_F4_MIN: Final[int] = 60  # options flow must be at least BUY-grade to
 _CLEARANCE_F4_WEAK: Final[int] = 40
 
 
+def _f4a_state_from_chip(chip: str) -> F4aState:
+    """Map the dark-pool chip to the Flow Monitor's F4a equity state."""
+    if chip == _DP_DISTRIBUTION:
+        return "BEARISH"
+    if chip == _DP_FADING:
+        return "FADING"
+    if chip in (_DP_FRESH, _DP_PERSISTENT):
+        return "BULLISH"
+    return "NEUTRAL"
+
+
 def clearance_state(chip: str, f4_score: int) -> tuple[str, str]:
     """Combine the F4 options score (resume) with the stock-tape chip (this week)
     into an entry decision. Pure function."""
@@ -1065,6 +1148,14 @@ def clearance_state(chip: str, f4_score: int) -> tuple[str, str]:
         return _CLEARANCE_REVOKED, "Active distribution — institutions selling; adds blocked."
     if chip == _DP_FADING:
         return _CLEARANCE_WATCH, "Accumulation fading — no fresh adds; wait for a reset."
+    # Mixed absorption (Audit): bearish options tape but bullish equity
+    # accumulation — equity confirms nothing on its own; never a full add.
+    if chip in (_DP_FRESH, _DP_PERSISTENT) and f4_score < _CLEARANCE_F4_WEAK:
+        return (
+            _CLEARANCE_WATCH,
+            "Mixed absorption — bearish options vs bullish equity accumulation; "
+            "no full add (watch).",
+        )
     if chip in (_DP_FRESH, _DP_PERSISTENT) and f4_score >= _CLEARANCE_F4_MIN:
         return _CLEARANCE_CLEARED, "Accumulation confirmed and options flow supportive."
     if f4_score < _CLEARANCE_F4_WEAK:
@@ -1486,7 +1577,7 @@ def _build_response_v2(
         opt_window_empty = not windowed_opts
         sessions = _group_by_session(windowed_opts, "created_at")  # newest first
         # F4b = WEIGHTED MULTI-WINDOW classified score (current session heaviest)
-        # so rotations show through, not just the flat 5-session average.
+        # so rotations show through, not just a flat multi-session average.
         opt_score = _multi_window_score(sessions)
         if opt_score is None:
             opt_score = _F4_NEUTRAL_SCORE
@@ -1494,7 +1585,7 @@ def _build_response_v2(
         bullish_prem, bearish_prem, largest_opt_buy = _directional_premium(windowed_opts)
         opt_bullish_share = _bullish_share(bullish_prem, bearish_prem)
         opt_net_flow = bullish_prem - bearish_prem
-        # Live tape state: today vs the 5-session baseline.
+        # Live tape state: today vs the 2-session baseline.
         current_score = _window_score(sessions, 0, 1)
         persistence_score = _window_score(sessions, 0, _F4_LOOKBACK_SESSIONS)
         live_tape_state = _live_tape_state(current_score, persistence_score)
@@ -1525,6 +1616,10 @@ def _build_response_v2(
     else:
         f4_raw, source = opt_score, _F4_SOURCE_OPT_ONLY
     f4_state = _f4_state_label(f4_raw)
+    f4_add_impact = _f4_add_impact(f4_raw)
+    dark_pool_confidence = _dark_pool_confidence(
+        dp_sessions_covered, _F4_LOOKBACK_SESSIONS, dp_truncated
+    )
     direction = _derive_flow_direction(None, opt_net_flow)
 
     # Layer 2 — stock-tape state ("chips") from per-session dark-pool flow.
@@ -1534,13 +1629,24 @@ def _build_response_v2(
     # Layer 3 — clearance: resume (F4) x this-week behaviour (chip).
     clr_state, clr_reason = clearance_state(dp_state, f4_raw)
 
+    # Flow Monitor — the final action gate: combines F4b + F4a + live tape (the
+    # order-time gates VWAP/cluster/SMH/size are not evaluated in the F4 service,
+    # so a clean F4b+F4a alignment resolves to ADD_PENDING_GATES, never a bare add).
+    fm = resolve_flow_monitor(
+        FlowMonitorInputs(
+            f4b_score=f4_raw,
+            f4b_live_state=live_tape_state,
+            f4a_state=_f4a_state_from_chip(dp_state),
+        )
+    )
+
     gap_reason: str | None = None
     if source == _F4_SOURCE_DATA_GAP:
         gap_reason = "Options flow unavailable — F4 score withheld (DATA_GAP)."
     elif opt_window_empty:
         # Real reading, not a gap: the tape was fetched but no options flow
-        # landed in the 5-session window → genuinely neutral.
-        gap_reason = "No options flow in the 5-session window — neutral (not a data gap)."
+        # landed in the 2-session window → genuinely neutral.
+        gap_reason = "No options flow in the 2-session window — neutral (not a data gap)."
     if dp_truncated:
         note = (
             f"Dark-pool covers {dp_sessions_covered} of {_F4_LOOKBACK_SESSIONS} sessions "
@@ -1585,11 +1691,15 @@ def _build_response_v2(
         hedge_structure_reason=hedge_reason,
         bullish_share=opt_bullish_share,
         f4_state=f4_state,
+        f4_add_impact=f4_add_impact,
+        dark_pool_confidence=dark_pool_confidence,
         live_tape_state=live_tape_state,
         persistence_state=persistence_state,
         current_session_net_usd=current_session_net,
         otm_call_ask_usd=otm_call_ask,
         otm_put_ask_usd=otm_put_ask,
+        flow_monitor_action=fm.action,
+        flow_monitor_reason=fm.reason,
     )
 
 

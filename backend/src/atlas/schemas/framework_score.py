@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from atlas.schemas.fundamental import F5DebugBridge
+
 # ---------------------------------------------------------------------------
 # Sub-schemas
 # ---------------------------------------------------------------------------
@@ -162,4 +164,8 @@ class FrameworkScoreResponse(BaseModel):
             "Display-only note when multiple C-suite insiders sell without a 10b5-1 plan. "
             "Null when no concern detected. Carries no scoring impact."
         ),
+    )
+    f5_debug_bridge: F5DebugBridge | None = Field(
+        default=None,
+        description="Expanded F5 debug bridge propagated from the fundamental service.",
     )

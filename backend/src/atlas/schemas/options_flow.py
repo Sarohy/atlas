@@ -129,6 +129,52 @@ class OptionsFlowResponse(BaseModel):
     largest_options_buy_usd: float | None = Field(
         default=None, description="Largest single NEW_BULL or PUT_SELL options premium (USD)."
     )
+    raw_bull_premium_usd: float | None = Field(
+        default=None,
+        description="Raw bullish options premium before ATLAS weighting/declassification (USD).",
+    )
+    raw_bear_premium_usd: float | None = Field(
+        default=None,
+        description="Raw bearish options premium before ATLAS weighting/declassification (USD).",
+    )
+    raw_bullish_share: float | None = Field(
+        default=None,
+        description="Raw bullish share before ATLAS weighting/declassification.",
+    )
+    raw_largest_bullish_print_usd: float | None = Field(
+        default=None,
+        description="Largest raw bullish print before weighting/declassification (USD).",
+    )
+    raw_largest_call_ask_print_usd: float | None = Field(
+        default=None,
+        description="Largest raw call ask-side print before weighting/declassification (USD).",
+    )
+    declassified_premium_by_reason: dict[str, float] = Field(
+        default_factory=dict,
+        description="Premium excluded/declassified from F4b by weighting reason.",
+    )
+    adjusted_bull_premium_usd: float | None = Field(
+        default=None,
+        description=(
+            "Adjusted bullish options premium after ATLAS "
+            "weighting/declassification (USD)."
+        ),
+    )
+    adjusted_bear_premium_usd: float | None = Field(
+        default=None,
+        description=(
+            "Adjusted bearish options premium after ATLAS "
+            "weighting/declassification (USD)."
+        ),
+    )
+    adjusted_bullish_share: float | None = Field(
+        default=None,
+        description="Adjusted bullish share used by the final F4b score.",
+    )
+    adjusted_largest_bullish_print_usd: float | None = Field(
+        default=None,
+        description="Largest adjusted bullish print after ATLAS weighting/declassification (USD).",
+    )
 
     # ---- F4a reconciliation (raw vs stripped vs kept) ---------------------
     raw_dark_pool_notional_usd: float = Field(
@@ -177,7 +223,10 @@ class OptionsFlowResponse(BaseModel):
     )
     confidence: str = Field(
         default="No dark-pool data",
-        description="F4a confidence label mirrored from dark_pool_confidence for UI reconciliation.",
+        description=(
+            "F4a confidence label mirrored from dark_pool_confidence "
+            "for UI reconciliation."
+        ),
     )
 
     # ---- Signal quality / strategy context (new) -------------------------

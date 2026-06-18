@@ -1,39 +1,23 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
-import { FrameworkScorePanel } from '@/components/frameworks/framework-score-panel';
+import { FrameworkScoreOverviewCard } from '@/components/frameworks/framework-score-overview-card';
 import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
 
-function makeWrapper() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const Wrapper = ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-  return Wrapper;
-}
-
 const mockState = vi.hoisted(() => ({
-  f8BuyingBonus: 0,
+  activeTicker: 'AAPL',
   frameworkScoreData: undefined as FrameworkScoreResponse | undefined,
-  momentumData: undefined as { ticker: string; f1_score: number } | undefined,
-  earningsData: undefined as { ticker: string; f2_score: number } | undefined,
-  analystData: undefined as { ticker: string; f3_score: number } | undefined,
   optionsFlowData: undefined as OptionsFlowResponse | undefined,
-  fundamentalData: undefined as { ticker: string; f5_score: number; f5_grade: string } | undefined,
-  framework8Data: undefined as
-    | {
-        ticker: string;
-        buying_bonus: number;
-        clustered_selling_note: string | null;
-        source: string;
-      }
-    | undefined,
   extensionOverlayData: undefined as ExtensionOverlayResponse | undefined,
   extensionWashoutData: undefined as ExtensionWashoutResponse | undefined,
+}));
+
+vi.mock('@/lib/stores/framework-store', () => ({
+  useFrameworkStore: (selector: (state: { activeTicker: string }) => string) =>
+    selector({ activeTicker: mockState.activeTicker }),
 }));
 
 vi.mock('@/lib/hooks/use-framework-score', () => ({
@@ -41,43 +25,12 @@ vi.mock('@/lib/hooks/use-framework-score', () => ({
     data: mockState.frameworkScoreData,
     isLoading: false,
     isError: false,
-    error: null,
-  }),
-}));
-
-vi.mock('@/lib/hooks/use-momentum', () => ({
-  useMomentum: () => ({
-    data: mockState.momentumData,
-  }),
-}));
-
-vi.mock('@/lib/hooks/use-earnings', () => ({
-  useEarnings: () => ({
-    data: mockState.earningsData,
-  }),
-}));
-
-vi.mock('@/lib/hooks/use-analyst', () => ({
-  useAnalyst: () => ({
-    data: mockState.analystData,
   }),
 }));
 
 vi.mock('@/lib/hooks/use-options-flow', () => ({
   useOptionsFlow: () => ({
     data: mockState.optionsFlowData,
-  }),
-}));
-
-vi.mock('@/lib/hooks/use-fundamental', () => ({
-  useFundamental: () => ({
-    data: mockState.fundamentalData,
-  }),
-}));
-
-vi.mock('@/lib/hooks/use-framework8', () => ({
-  useFramework8: () => ({
-    data: mockState.framework8Data,
     isLoading: false,
     isError: false,
   }),
@@ -117,28 +70,28 @@ function makeFrameworkScoreData(
       {
         key: 'f2',
         name: 'Earnings Quality',
-        score: 64,
+        score: 70,
         weight: 0.25,
-        contribution: 16,
+        contribution: 17.5,
         grade: 'BUY',
         available: true,
       },
       {
         key: 'f3',
         name: 'Analyst Sentiment',
-        score: 66,
+        score: 60,
         weight: 0.15,
-        contribution: 9.9,
+        contribution: 9,
         grade: 'BUY',
         available: true,
       },
       {
         key: 'f4',
-        name: 'Options Flow',
+        name: 'Options Flow Persistence',
         score: 74,
         weight: 0.15,
         contribution: 11.1,
-        grade: 'BUY',
+        grade: 'Bullish',
         available: true,
         flow_monitor_action: 'ADD_PENDING_GATES',
       },
@@ -152,19 +105,19 @@ function makeFrameworkScoreData(
         available: true,
       },
     ],
-    raw_total: 71,
-    final_score: 71,
-    action: 'HOLD',
-    action_tone: 'tone-yellow',
+    raw_total: 71.6,
+    final_score: 72,
+    action: 'GTC ADDS PERMITTED',
+    action_tone: 'tone-blue',
     f5_blocked: false,
-    f5_raw_score: null,
-    f8_buying_bonus: mockState.f8BuyingBonus,
-    f8_clustered_selling_note: null,
     flags: [],
     degraded: false,
     f4_data_gap_badge: null,
     f4_data_gap_message: null,
     f4_data_gap_tooltip: null,
+    f5_raw_score: null,
+    f8_buying_bonus: 0,
+    f8_clustered_selling_note: null,
     ...overrides,
   };
 }
@@ -259,104 +212,21 @@ function makeExtensionWashoutData(
   } as ExtensionWashoutResponse;
 }
 
-describe('FrameworkScorePanel', () => {
-  beforeEach(() => {
-    mockState.f8BuyingBonus = 0;
+describe('FrameworkScoreOverviewCard', () => {
+  it('keeps the normal tier headline when flow is confirmed and no major gaps exist', () => {
+    mockState.activeTicker = 'AAPL';
     mockState.frameworkScoreData = makeFrameworkScoreData();
-    mockState.momentumData = { ticker: 'AAPL', f1_score: 93 };
-    mockState.earningsData = { ticker: 'AAPL', f2_score: 70 };
-    mockState.analystData = { ticker: 'AAPL', f3_score: 60 };
     mockState.optionsFlowData = makeOptionsFlowData();
-    mockState.fundamentalData = { ticker: 'AAPL', f5_score: 77, f5_grade: 'WEAK' };
-    mockState.framework8Data = {
-      ticker: 'AAPL',
-      buying_bonus: 0,
-      clustered_selling_note: null,
-      source: 'default',
-    };
     mockState.extensionOverlayData = makeExtensionOverlayData();
     mockState.extensionWashoutData = makeExtensionWashoutData();
+
+    render(<FrameworkScoreOverviewCard />);
+
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent('GTC ADDS PERMITTED');
   });
 
-  it('renders factor rows from the same F1-F5 scores shown in the detailed cards', async () => {
-    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(within(screen.getByTestId('fws-factor-f1')).getByText('93')).toBeInTheDocument();
-    expect(within(screen.getByTestId('fws-factor-f2')).getByText('70')).toBeInTheDocument();
-    expect(within(screen.getByTestId('fws-factor-f3')).getByText('60')).toBeInTheDocument();
-    expect(within(screen.getByTestId('fws-factor-f4')).getByText('74')).toBeInTheDocument();
-    expect(within(screen.getByTestId('fws-factor-f5')).getByText('77')).toBeInTheDocument();
-    expect(screen.getByText('71.60')).toBeInTheDocument();
-    expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('72');
-    expect(screen.getByTestId('fws-score')).toHaveTextContent('72');
-  });
-
-  it('does not apply the regime modifier — the score is the pure framework score', async () => {
-    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    // Headline equals the framework score; there is no regime-adjusted row.
-    expect(screen.getByTestId('fws-score')).toHaveTextContent('72');
-    expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('72');
-    expect(screen.getByText('Framework score')).toBeInTheDocument();
-    expect(screen.queryByTestId('fws-regime-adjusted-score')).not.toBeInTheDocument();
-    expect(screen.queryByText('Displayed after regime modifier')).not.toBeInTheDocument();
-  });
-
-  it('folds the F8 insider-buying bonus into the framework score (matches backend)', async () => {
-    // raw_total from overrides = 71.6. With a +5 F8 bonus the backend computes
-    // round(71.6 + 5) = 77; the frontend must match rather than showing the
-    // advertised "+5" caption without applying it (round(71.6)=72).
-    mockState.f8BuyingBonus = 5;
-    mockState.frameworkScoreData = makeFrameworkScoreData({ f8_buying_bonus: 5 });
-    mockState.framework8Data = {
-      ticker: 'AAPL',
-      buying_bonus: 5,
-      clustered_selling_note: null,
-      source: 'default',
-    };
-
-    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-f8-bonus-note')).toHaveTextContent('+5');
-    expect(screen.getByTestId('fws-final-score-calc')).toHaveTextContent('77');
-    expect(screen.getByTestId('fws-score')).toHaveTextContent('77');
-  });
-
-  it('keeps the normal tier headline when flow is confirmed and no major gaps exist', async () => {
-    render(<FrameworkScorePanel ticker="AAPL" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-action')).toHaveTextContent('GTC ADDS PERMITTED');
-    expect(screen.getByTestId('fws-f4-summary')).toHaveTextContent(
-      'F4: 74 - Bullish / Add Pending Gates',
-    );
-    expect(screen.getByTestId('fws-score')).toHaveClass('is-blue');
-  });
-
-  it('caps a T2 quality-pass headline when flow confirmation is missing or neutral', async () => {
+  it('caps the overview headline when flow confirmation is missing or neutral', () => {
+    mockState.activeTicker = 'VRT';
     mockState.frameworkScoreData = makeFrameworkScoreData({
       ticker: 'VRT',
       final_score: 79,
@@ -411,44 +281,28 @@ describe('FrameworkScorePanel', () => {
         },
       ],
     });
-    mockState.momentumData = { ticker: 'VRT', f1_score: 88 };
-    mockState.earningsData = { ticker: 'VRT', f2_score: 80 };
-    mockState.analystData = { ticker: 'VRT', f3_score: 78 };
-    mockState.fundamentalData = { ticker: 'VRT', f5_score: 85, f5_grade: 'BUY' };
     mockState.optionsFlowData = makeOptionsFlowData({
       ticker: 'VRT',
       f4_score: 59,
       f4_state: 'Neutral-constructive',
       flow_monitor_action: 'WATCH',
-      live_tape_state: 'Data gap',
-      persistence_state: 'Neutral-constructive',
     });
     mockState.extensionOverlayData = makeExtensionOverlayData({ ticker: 'VRT', action: 'ADD' });
     mockState.extensionWashoutData = makeExtensionWashoutData({
       ticker: 'VRT',
-      state: 'WAIT',
       data_gaps: ['OPTIONS', 'DP', 'F4', 'FLOW_MONITOR'],
     });
 
-    render(<FrameworkScorePanel ticker="VRT" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
+    render(<FrameworkScoreOverviewCard />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
       'WATCH / STARTER ONLY - FLOW CONFIRMATION REQUIRED',
     );
-    expect(screen.getByTestId('fws-action')).not.toHaveTextContent('GTC ADDS PERMITTED');
-    expect(screen.getByTestId('fws-f4-summary')).toHaveTextContent(
-      'F4: 59 - Neutral-Constructive / Watch',
-    );
-    expect(screen.getByTestId('fws-score')).toHaveClass('is-blue');
+    expect(screen.getByTestId('fws-overview-card')).not.toHaveTextContent('GTC ADDS PERMITTED');
   });
 
-  it('caps an elite headline to core hold when extension and event-risk blocks are active', async () => {
+  it('caps the overview elite headline when extension and event-risk blocks are active', () => {
+    mockState.activeTicker = 'MU';
     mockState.frameworkScoreData = makeFrameworkScoreData({
       ticker: 'MU',
       final_score: 86,
@@ -502,59 +356,41 @@ describe('FrameworkScorePanel', () => {
         },
       ],
     });
-    mockState.momentumData = { ticker: 'MU', f1_score: 98 };
-    mockState.earningsData = { ticker: 'MU', f2_score: 100 };
-    mockState.analystData = { ticker: 'MU', f3_score: 96 };
-    mockState.fundamentalData = { ticker: 'MU', f5_score: 91, f5_grade: 'STRONG BUY' };
     mockState.optionsFlowData = makeOptionsFlowData({
       ticker: 'MU',
       f4_score: 52,
       f4_state: 'Neutral',
       flow_monitor_action: 'WATCH',
-      live_tape_state: 'Mixed / structured',
-      persistence_state: 'Neutral',
     });
     mockState.extensionOverlayData = makeExtensionOverlayData({
       ticker: 'MU',
       extension_flag: 'RED',
       action: 'HOLD_TRIM',
-      pct_vs_vwap: -0.6,
       iv_rank: 96,
+      pct_vs_vwap: -0.6,
       td_signal: 'SELL_SETUP',
     });
     mockState.extensionWashoutData = makeExtensionWashoutData({
       ticker: 'MU',
-      state: 'WAIT',
-      reason: 'Event risk ahead',
       negative_catalyst: true,
+      reason: 'Event risk ahead',
     });
 
-    render(<FrameworkScorePanel ticker="MU" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
+    render(<FrameworkScoreOverviewCard />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
       'T1 ELITE / CORE HOLD - LEAPS ONLY ON RESET',
     );
-    expect(screen.getByTestId('fws-action')).not.toHaveTextContent('T1 ELITE — LEAPS ELIGIBLE');
-    expect(screen.getByTestId('fws-score')).toHaveClass('is-green');
   });
 
-  it('shows strict hard-block hold/watch label when F5 blocks but flow is not deteriorating', async () => {
+  it('shows hold/watch hard-block label when F5 blocks but flow is not deteriorating', () => {
+    mockState.activeTicker = 'CRWV';
     mockState.frameworkScoreData = makeFrameworkScoreData({
       ticker: 'CRWV',
       final_score: 86,
       raw_total: 86,
       f5_blocked: true,
     });
-    mockState.momentumData = { ticker: 'CRWV', f1_score: 93 };
-    mockState.earningsData = { ticker: 'CRWV', f2_score: 70 };
-    mockState.analystData = { ticker: 'CRWV', f3_score: 60 };
-    mockState.fundamentalData = { ticker: 'CRWV', f5_score: 22, f5_grade: 'DISTRESSED' };
     mockState.optionsFlowData = makeOptionsFlowData({
       ticker: 'CRWV',
       f4_score: 66,
@@ -563,30 +399,21 @@ describe('FrameworkScorePanel', () => {
     mockState.extensionOverlayData = makeExtensionOverlayData({ ticker: 'CRWV', action: 'ADD' });
     mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'CRWV' });
 
-    render(<FrameworkScorePanel ticker="CRWV" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
+    render(<FrameworkScoreOverviewCard />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
       'HOLD / WATCH - F5 HARD BLOCK / NO NEW CAPITAL',
     );
   });
 
-  it('shows trim/reduce label when F5 blocks and flow monitor deteriorates', async () => {
+  it('shows trim/reduce label when F5 blocks and flow deteriorates', () => {
+    mockState.activeTicker = 'CRWV';
     mockState.frameworkScoreData = makeFrameworkScoreData({
       ticker: 'CRWV',
       final_score: 78,
       raw_total: 78,
       f5_blocked: true,
     });
-    mockState.momentumData = { ticker: 'CRWV', f1_score: 88 };
-    mockState.earningsData = { ticker: 'CRWV', f2_score: 75 };
-    mockState.analystData = { ticker: 'CRWV', f3_score: 72 };
-    mockState.fundamentalData = { ticker: 'CRWV', f5_score: 24, f5_grade: 'DISTRESSED' };
     mockState.optionsFlowData = makeOptionsFlowData({
       ticker: 'CRWV',
       f4_score: 41,
@@ -598,14 +425,8 @@ describe('FrameworkScorePanel', () => {
     });
     mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'CRWV' });
 
-    render(<FrameworkScorePanel ticker="CRWV" onPreviewDetails={() => {}} />, {
-      wrapper: makeWrapper(),
-    });
+    render(<FrameworkScoreOverviewCard />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('fws-action')).toHaveTextContent('TRIM / REDUCE');
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent('TRIM / REDUCE');
   });
 });

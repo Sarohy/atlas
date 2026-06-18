@@ -19,7 +19,6 @@ from atlas.services.options_flow_service import (
     clearance_state,
 )
 
-
 # ---------------------------------------------------------------------------
 # F4 Implementation Audit — score-band labels, add-impact, DP confidence
 # ---------------------------------------------------------------------------
@@ -190,6 +189,128 @@ def test_build_response_v2_call_buying_with_puts_underneath_is_hedged_bullish() 
     assert response.bullish_share is not None and response.bullish_share > 0.6
     assert response.f4_score >= 60
     assert response.hedge_structure == "HEDGED_BULLISH"
+
+
+def test_build_response_v2_exposes_f4b_debug_fields_for_clean_bullish_tape() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            _atm("call", ask=10_000_000.0),
+            _atm("put", ask=2_000_000.0, bid=4_000_000.0),
+        ],
+    )
+
+    assert response.raw_bull_premium_usd == pytest.approx(14_000_000.0)
+    assert response.raw_bear_premium_usd == pytest.approx(2_000_000.0)
+    assert response.raw_bullish_share == pytest.approx(0.875)
+    assert response.raw_largest_bullish_print_usd == pytest.approx(10_000_000.0)
+    assert response.raw_largest_call_ask_print_usd == pytest.approx(10_000_000.0)
+    assert response.declassified_premium_by_reason == {}
+    assert response.adjusted_bull_premium_usd == pytest.approx(14_000_000.0)
+    assert response.adjusted_bear_premium_usd == pytest.approx(2_000_000.0)
+    assert response.adjusted_bullish_share == pytest.approx(0.875)
+    assert response.adjusted_largest_bullish_print_usd == pytest.approx(10_000_000.0)
+    assert response.f4_score == 86
+    assert response.flow_direction == "BULLISH"
+
+
+def test_build_response_v2_surfaces_f4b_declassified_premium_and_scores_from_adjusted_share(
+) -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            {
+                "type": "call",
+                "created_at": "2026-06-15T15:00:00Z",
+                "expiry": "2026-06-17",
+                "strike": 50,
+                "underlying_price": 50,
+                "total_ask_side_prem": 10_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 10_000_000.0,
+            },
+            _atm("put", ask=2_000_000.0),
+        ],
+    )
+
+    assert response.raw_bull_premium_usd == pytest.approx(10_000_000.0)
+    assert response.raw_bear_premium_usd == pytest.approx(2_000_000.0)
+    assert response.raw_bullish_share == pytest.approx(10.0 / 12.0)
+    assert response.raw_largest_bullish_print_usd == pytest.approx(10_000_000.0)
+    assert response.raw_largest_call_ask_print_usd == pytest.approx(10_000_000.0)
+    assert response.largest_options_buy_usd == pytest.approx(10_000_000.0)
+    assert response.declassified_premium_by_reason == {"expiry_0_3_dte": pytest.approx(4_000_000.0)}
+    assert response.adjusted_bull_premium_usd == pytest.approx(6_000_000.0)
+    assert response.adjusted_bear_premium_usd == pytest.approx(2_000_000.0)
+    assert response.adjusted_bullish_share == pytest.approx(0.75)
+    assert response.adjusted_largest_bullish_print_usd == pytest.approx(6_000_000.0)
+    assert response.f4_score == 75
+    assert response.flow_direction == "BULLISH"
+
+
+def test_build_response_v2_suppresses_f4b_debug_bridge_on_tape_fallback() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=None,
+        opt_tape=[
+            {
+                "executed_at": "2026-06-17T15:00:00Z",
+                "side": "ask",
+                "option_type": "call",
+                "expiry": "2026-08-15",
+                "premium": 5_000_000.0,
+            },
+            {
+                "executed_at": "2026-06-17T15:01:00Z",
+                "side": "ask",
+                "option_type": "put",
+                "expiry": "2026-08-15",
+                "premium": 2_000_000.0,
+            },
+        ],
+    )
+
+    assert response.data_source == "OPTIONS_ONLY"
+    assert response.raw_bull_premium_usd is None
+    assert response.raw_bear_premium_usd is None
+    assert response.raw_bullish_share is None
+    assert response.raw_largest_bullish_print_usd is None
+    assert response.raw_largest_call_ask_print_usd is None
+    assert response.adjusted_bull_premium_usd is None
+    assert response.adjusted_bear_premium_usd is None
+    assert response.adjusted_bullish_share is None
+    assert response.adjusted_largest_bullish_print_usd is None
+    assert response.declassified_premium_by_reason == {}
+
+
+def test_build_response_v2_keeps_legacy_largest_options_buy_raw() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            {
+                "type": "call",
+                "created_at": "2026-06-15T15:00:00Z",
+                "expiry": "2026-06-17",
+                "strike": 50,
+                "underlying_price": 50,
+                "total_ask_side_prem": 10_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 10_000_000.0,
+            },
+            _atm("put", ask=2_000_000.0),
+        ],
+    )
+
+    assert response.largest_options_buy_usd == pytest.approx(10_000_000.0)
+    assert response.adjusted_largest_bullish_print_usd == pytest.approx(6_000_000.0)
 
 
 def _structure_legs(*, put_ask: float) -> list[dict[str, object]]:
@@ -726,7 +847,9 @@ def test_f4a_strips_required_plumbing_aliases(plumbing_code: str) -> None:
     assert response.stripped_notional_by_reason.get(expected_reason) == 100_000_000.0
 
 
-def test_f4a_chip_and_flow_monitor_use_stripped_genuine_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_f4a_chip_and_flow_monitor_use_stripped_genuine_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import atlas.services.options_flow_service as svc
 
     captured: dict[str, object] = {}
@@ -763,7 +886,7 @@ def test_f4a_chip_and_flow_monitor_use_stripped_genuine_flow(monkeypatch: pytest
 
     inputs = captured["inputs"]
     assert hasattr(inputs, "f4a_state")
-    assert getattr(inputs, "f4a_state") == "BEARISH"
+    assert inputs.f4a_state == "BEARISH"
 
 
 def test_f4a_canceled_flag_string_false_is_not_stripped() -> None:

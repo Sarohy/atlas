@@ -279,6 +279,11 @@ class FrameworkScoreService:
             f5_raw_score=f5_raw_score,
             f8_buying_bonus=f8_buying_bonus,
             f8_clustered_selling_note=f8_clustered_selling_note,
+            f5_debug_bridge=(
+                f5_result.f5_debug_bridge
+                if isinstance(f5_result, FundamentalResponse)
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------

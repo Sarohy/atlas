@@ -19,7 +19,7 @@ export const insiderActivityIndicatorSchema = z.object({
   /** NET_BUYING | NO_ACTIVITY | SMALL_SALE | MULTIPLE_SALES | CEO_MEGA_SALE */
   activity_label: z.string(),
   score: z.number().int().min(0).max(100),
-  weight: z.number().default(0.30),
+  weight: z.number().default(0.3),
 });
 
 export const altmanZScoreIndicatorSchema = z.object({
@@ -47,7 +47,7 @@ export const freeCashFlowIndicatorSchema = z.object({
    */
   fcf_trend: z.string(),
   score: z.number().int().min(0).max(100),
-  weight: z.number().default(0.20),
+  weight: z.number().default(0.2),
 });
 
 export const debtEquityIndicatorSchema = z.object({
@@ -67,7 +67,34 @@ export const institutionalOwnershipIndicatorSchema = z.object({
   /** NET_BUYING | FLAT | SMALL_SELLING | LARGE_SELLING */
   change_label: z.string(),
   score: z.number().int().min(0).max(100),
-  weight: z.number().default(0.10),
+  weight: z.number().default(0.1),
+});
+
+export const f5DebugBridgeSchema = z.object({
+  altman_z_score: z.number().nullable().optional(),
+  altman_variant_used: z.string().default('Altman Z (public manufacturing 5-factor)'),
+  x1_working_capital_to_assets: z.number().nullable().optional(),
+  x2_retained_earnings_to_assets: z.number().nullable().optional(),
+  x3_ebit_to_assets: z.number().nullable().optional(),
+  x4_market_equity_to_liabilities: z.number().nullable().optional(),
+  x5_sales_to_assets: z.number().nullable().optional(),
+  current_assets_usd: z.number().nullable().optional(),
+  current_liabilities_usd: z.number().nullable().optional(),
+  deferred_revenue_current_usd: z.number().nullable().optional(),
+  working_capital_usd: z.number().nullable().optional(),
+  cash_claim_working_capital_usd: z.number().nullable().optional(),
+  cash_usd: z.number().nullable().optional(),
+  short_term_debt_usd: z.number().nullable().optional(),
+  total_debt_usd: z.number().nullable().optional(),
+  net_debt_usd: z.number().nullable().optional(),
+  ebit_interest_coverage: z.number().nullable().optional(),
+  interest_expense_ttm_usd: z.number().nullable().optional(),
+  qoq_working_capital_change_usd: z.number().nullable().optional(),
+  qoq_working_capital_trend: z.string().nullable().optional(),
+  qoq_debt_change_usd: z.number().nullable().optional(),
+  qoq_debt_trend: z.string().nullable().optional(),
+  piotroski_score: z.number().int().nullable().optional(),
+  piotroski_is_supporting_vendor_signal: z.boolean().default(false),
 });
 
 // ---------------------------------------------------------------------------
@@ -96,6 +123,8 @@ export const fundamentalResponseSchema = z.object({
   f5_grade: z.string(),
   /** False when Alpha Vantage was rate-limited — scores are fallback values. */
   data_available: z.boolean().default(true),
+  /** Expanded F5 transparency bridge for liquidity/refinancing diagnostics. */
+  f5_debug_bridge: f5DebugBridgeSchema.nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -107,4 +136,5 @@ export type AltmanZScoreIndicator = z.infer<typeof altmanZScoreIndicatorSchema>;
 export type FreeCashFlowIndicator = z.infer<typeof freeCashFlowIndicatorSchema>;
 export type DebtEquityIndicator = z.infer<typeof debtEquityIndicatorSchema>;
 export type InstitutionalOwnershipIndicator = z.infer<typeof institutionalOwnershipIndicatorSchema>;
+export type F5DebugBridge = z.infer<typeof f5DebugBridgeSchema>;
 export type FundamentalResponse = z.infer<typeof fundamentalResponseSchema>;

@@ -448,3 +448,91 @@ class TestInstitutionalOwnershipYfFallback:
         assert result.institutional_ownership.score == 80
         assert result.institutional_ownership.change_label == "FLAT"
         assert result.f5_score == 68
+
+
+@pytest.mark.asyncio
+async def test_compute_fundamental_exposes_f5_debug_bridge_core_liquidity_fields() -> None:
+    svc = FundamentalService(sec_api_key="", alphavantage_key="")
+
+    bs_raw = {
+        "quarterlyReports": [
+            {
+                "totalAssets": "50000000000",
+                "totalCurrentAssets": "5600000000",
+                "totalCurrentLiabilities": "17800000000",
+                "retainedEarnings": "-2000000000",
+                "totalLiabilities": "42000000000",
+                "totalShareholderEquity": "8000000000",
+                "shortLongTermDebtTotal": "23000000000",
+                "shortTermDebt": "8100000000",
+                "currentLongTermDebt": "8100000000",
+                "deferredRevenueCurrent": "2200000000",
+                "cashAndCashEquivalentsAtCarryingValue": "3000000000",
+            },
+            {
+                "totalAssets": "49000000000",
+                "totalCurrentAssets": "5900000000",
+                "totalCurrentLiabilities": "16400000000",
+                "shortLongTermDebtTotal": "21000000000",
+                "shortTermDebt": "7000000000",
+                "currentLongTermDebt": "7000000000",
+            },
+        ]
+    }
+    inc_raw = {
+        "quarterlyReports": [
+            {
+                "totalRevenue": "3000000000",
+                "ebit": "-150000000",
+                "grossProfit": "1000000000",
+                "interestExpense": "250000000",
+            },
+            {
+                "totalRevenue": "2900000000",
+                "ebit": "-100000000",
+                "grossProfit": "980000000",
+                "interestExpense": "220000000",
+            },
+            {
+                "totalRevenue": "2800000000",
+                "ebit": "-120000000",
+                "grossProfit": "950000000",
+                "interestExpense": "210000000",
+            },
+            {
+                "totalRevenue": "2700000000",
+                "ebit": "-130000000",
+                "grossProfit": "910000000",
+                "interestExpense": "200000000",
+            },
+        ]
+    }
+    ov_raw = {
+        "MarketCapitalization": "8000000000",
+        "PiotroskiScore": "3",
+    }
+
+    with (
+        patch.object(FundamentalService, "_fetch_insider_trades_yf", new=AsyncMock(return_value=[])),
+        patch.object(FundamentalService, "_fetch_institutional_ownership_yf", new=AsyncMock(return_value=None)),
+        patch.object(FundamentalService, "_fetch_insider_trades", new=AsyncMock(return_value=[])),
+        patch.object(FundamentalService, "_fetch_balance_sheet", new=AsyncMock(return_value=bs_raw)),
+        patch.object(FundamentalService, "_fetch_income_statement", new=AsyncMock(return_value=inc_raw)),
+        patch.object(FundamentalService, "_fetch_cash_flow", new=AsyncMock(return_value={})),
+        patch.object(FundamentalService, "_fetch_overview", new=AsyncMock(return_value=ov_raw)),
+    ):
+        result = await svc.compute_fundamental("CRWV")
+
+    bridge = result.f5_debug_bridge
+    assert bridge is not None
+    assert bridge.altman_variant_used.startswith("Altman Z")
+    assert bridge.altman_z_score == pytest.approx(result.altman_z.z_score)
+    assert bridge.current_assets_usd == pytest.approx(5_600_000_000.0)
+    assert bridge.current_liabilities_usd == pytest.approx(17_800_000_000.0)
+    assert bridge.deferred_revenue_current_usd == pytest.approx(2_200_000_000.0)
+    assert bridge.cash_usd == pytest.approx(3_000_000_000.0)
+    assert bridge.short_term_debt_usd == pytest.approx(8_100_000_000.0)
+    assert bridge.total_debt_usd == pytest.approx(23_000_000_000.0)
+    assert bridge.net_debt_usd == pytest.approx(20_000_000_000.0)
+    assert bridge.piotroski_score == 3
+    assert bridge.piotroski_is_supporting_vendor_signal is True

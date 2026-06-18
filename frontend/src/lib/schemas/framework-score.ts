@@ -70,6 +70,36 @@ export const frameworkScoreResponseSchema = z.object({
    * Null when no concern. Carries no scoring impact.
    */
   f8_clustered_selling_note: z.string().nullable().default(null),
+  /** Optional expanded F5 debug bridge propagated from backend. */
+  f5_debug_bridge: z
+    .object({
+      altman_z_score: z.number().nullable().optional(),
+      altman_variant_used: z.string().optional(),
+      x1_working_capital_to_assets: z.number().nullable().optional(),
+      x2_retained_earnings_to_assets: z.number().nullable().optional(),
+      x3_ebit_to_assets: z.number().nullable().optional(),
+      x4_market_equity_to_liabilities: z.number().nullable().optional(),
+      x5_sales_to_assets: z.number().nullable().optional(),
+      current_assets_usd: z.number().nullable().optional(),
+      current_liabilities_usd: z.number().nullable().optional(),
+      deferred_revenue_current_usd: z.number().nullable().optional(),
+      working_capital_usd: z.number().nullable().optional(),
+      cash_claim_working_capital_usd: z.number().nullable().optional(),
+      cash_usd: z.number().nullable().optional(),
+      short_term_debt_usd: z.number().nullable().optional(),
+      total_debt_usd: z.number().nullable().optional(),
+      net_debt_usd: z.number().nullable().optional(),
+      ebit_interest_coverage: z.number().nullable().optional(),
+      interest_expense_ttm_usd: z.number().nullable().optional(),
+      qoq_working_capital_change_usd: z.number().nullable().optional(),
+      qoq_working_capital_trend: z.string().nullable().optional(),
+      qoq_debt_change_usd: z.number().nullable().optional(),
+      qoq_debt_trend: z.string().nullable().optional(),
+      piotroski_score: z.number().int().nullable().optional(),
+      piotroski_is_supporting_vendor_signal: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------

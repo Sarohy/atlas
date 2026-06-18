@@ -225,7 +225,9 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           <span className="atlas-f4-label-sub" data-testid="f4-live-tape-state">
             live tape: {data.live_tape_state} · {data.persistence_state} (2d)
           </span>
-          <span className="atlas-f4-label-sub">options flow · {contribution}/{F4_DISPLAY_MAX} to F1</span>
+          <span className="atlas-f4-label-sub">
+            options flow · {contribution}/{F4_DISPLAY_MAX} to F1
+          </span>
         </div>
       </div>
 
@@ -336,15 +338,17 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
         />
       </div>
 
+      <F4bDebugCard data={data} />
+
       <p className="atlas-f4-state-msg" data-testid="f4-firewall-note">
-        F4b (scored) = multi-window classified options flow, current session weighted
-        heaviest: bullish (call-buy + put-sell) vs bearish (put-buy + call-sell),
-        moneyness/expiry-weighted → bullish share
+        F4b (scored) = multi-window classified options flow, current session weighted heaviest:
+        bullish (call-buy + put-sell) vs bearish (put-buy + call-sell), moneyness/expiry-weighted →
+        bullish share
         {data.bullish_share !== null && data.bullish_share !== undefined
           ? ` ${Math.round(data.bullish_share * 100)}%`
           : ''}
-        . F4a equity / dark-pool is NOT scored — it confirms action via the Flow
-        Monitor (shown as the dark-pool chip / clearance overlay below).
+        . F4a equity / dark-pool is NOT scored — it confirms action via the Flow Monitor (shown as
+        the dark-pool chip / clearance overlay below).
       </p>
 
       {data.dark_pool_state_reason && (
@@ -444,7 +448,12 @@ function DarkPoolFlowCard({
   largestBuy,
 }: DarkPoolFlowCardProps) {
   return (
-    <SubCardShell label="Dark Pool · Equity Accum (F4a)" testIdSlug="dark-pool" score={score} scored={false}>
+    <SubCardShell
+      label="Dark Pool · Equity Accum (F4a)"
+      testIdSlug="dark-pool"
+      score={score}
+      scored={false}
+    >
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
           <dt>Net Flow</dt>
@@ -479,7 +488,12 @@ type OptionsFlowCardProps = {
 
 function OptionsFlowCard({ score, netFlow, largestBuy }: OptionsFlowCardProps) {
   return (
-    <SubCardShell label="Options Flow (F4b · scored)" testIdSlug="options" score={score} scored={true}>
+    <SubCardShell
+      label="Options Flow (F4b · scored)"
+      testIdSlug="options"
+      score={score}
+      scored={true}
+    >
       <dl className="atlas-f4-dl">
         <div className="atlas-f4-dl-row">
           <dt>Net Flow</dt>
@@ -495,6 +509,86 @@ function OptionsFlowCard({ score, netFlow, largestBuy }: OptionsFlowCardProps) {
         )}
       </dl>
     </SubCardShell>
+  );
+}
+
+function F4bDebugCard({ data }: { data: OptionsFlowResponse }) {
+  const hasValue = (value: number | null | undefined): boolean =>
+    value !== null && value !== undefined;
+  const hasDebugFields =
+    hasValue(data.raw_bull_premium_usd) ||
+    hasValue(data.raw_bear_premium_usd) ||
+    hasValue(data.raw_bullish_share) ||
+    hasValue(data.raw_largest_bullish_print_usd) ||
+    hasValue(data.raw_largest_call_ask_print_usd) ||
+    hasValue(data.adjusted_bull_premium_usd) ||
+    hasValue(data.adjusted_bear_premium_usd) ||
+    hasValue(data.adjusted_bullish_share) ||
+    hasValue(data.adjusted_largest_bullish_print_usd) ||
+    Boolean(
+      data.declassified_premium_by_reason &&
+      Object.keys(data.declassified_premium_by_reason).length > 0,
+    );
+
+  if (!hasDebugFields) {
+    return null;
+  }
+
+  const declassifiedEntries = Object.entries(data.declassified_premium_by_reason ?? {}).sort(
+    ([left], [right]) => left.localeCompare(right),
+  );
+
+  return (
+    <article className="atlas-f4-indicator" data-testid="f4b-debug">
+      <header className="atlas-f4-indicator-header">
+        <span className="atlas-f4-indicator-label">F4b Debug Bridge</span>
+        <span className="atlas-frameworks-pill atlas-f4-tier-pill is-muted">raw → adjusted</span>
+      </header>
+      <div className="atlas-f4-indicator-body">
+        <dl className="atlas-f4-dl">
+          <DebugRow label="Raw Bull Premium" value={formatNullableUsd(data.raw_bull_premium_usd)} />
+          <DebugRow label="Raw Bear Premium" value={formatNullableUsd(data.raw_bear_premium_usd)} />
+          <DebugRow label="Raw Bull Share" value={formatNullablePercent(data.raw_bullish_share)} />
+          <DebugRow
+            label="Raw Largest Bullish Print"
+            value={formatNullableUsd(data.raw_largest_bullish_print_usd)}
+          />
+          <DebugRow
+            label="Raw Largest Call-Ask Print"
+            value={formatNullableUsd(data.raw_largest_call_ask_print_usd)}
+          />
+          <DebugRow
+            label="Adjusted Bull Premium"
+            value={formatNullableUsd(data.adjusted_bull_premium_usd)}
+          />
+          <DebugRow
+            label="Adjusted Bear Premium"
+            value={formatNullableUsd(data.adjusted_bear_premium_usd)}
+          />
+          <DebugRow
+            label="Adjusted Bull Share"
+            value={formatNullablePercent(data.adjusted_bullish_share)}
+          />
+          <DebugRow
+            label="Adjusted Largest Bullish Print"
+            value={formatNullableUsd(data.adjusted_largest_bullish_print_usd)}
+          />
+          <DebugRow label="Final F4b Score" value={String(data.f4_score)} />
+          {declassifiedEntries.map(([reason, value]) => (
+            <DebugRow key={reason} label={reason} value={formatMillions(value)} />
+          ))}
+        </dl>
+      </div>
+    </article>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="atlas-f4-dl-row">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }
 
@@ -519,6 +613,16 @@ function formatBigUsd(value: number): string {
   if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
   return `$${value.toFixed(0)}`;
+}
+
+function formatNullableUsd(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return formatMillions(value);
+}
+
+function formatNullablePercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function netFlowTone(value: number | null): string {

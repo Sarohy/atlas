@@ -1054,6 +1054,114 @@ def _expiry_weight(dte: int | None) -> float:
     return _F4_EW_LEAPS
 
 
+def _moneyness_reason(opt_type: str, strike: float | None, underlying: float | None) -> str | None:
+    """Return the canonical moneyness declassification reason, if any."""
+    weight = _moneyness_weight(opt_type, strike, underlying)
+    if weight == _F4_MW_ATM:
+        return None
+    if weight == _F4_MW_FAR_OTM:
+        return "moneyness_far_otm"
+    if weight == _F4_MW_LOTTO:
+        return "moneyness_lotto_otm"
+    if weight == _F4_MW_ITM:
+        return "moneyness_itm"
+    if weight == _F4_MW_DEEP_ITM:
+        return "moneyness_deep_itm"
+    return None
+
+
+def _expiry_reason(dte: int | None) -> str | None:
+    """Return the canonical expiry declassification reason, if any."""
+    weight = _expiry_weight(dte)
+    if weight == _F4_EW_GAMMA:
+        return "expiry_0_3_dte"
+    if weight == _F4_EW_SWING:
+        return "expiry_91_270_dte"
+    if weight == _F4_EW_LEAPS:
+        return "expiry_271_plus_dte"
+    if weight == _F4_EW_UNKNOWN:
+        return "expiry_unknown"
+    return None
+
+
+def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return raw and adjusted F4b directional-premium bridge fields."""
+    raw_bull = 0.0
+    raw_bear = 0.0
+    adjusted_bull = 0.0
+    adjusted_bear = 0.0
+    raw_largest_bull = 0.0
+    raw_largest_call_ask = 0.0
+    adjusted_largest_bull = 0.0
+    declassified_by_reason: dict[str, float] = defaultdict(float)
+
+    def _record_loss(
+        amount: float,
+        mw: float,
+        ew: float,
+        m_reason: str | None,
+        e_reason: str | None,
+    ) -> None:
+        if amount <= 0:
+            return
+        m_loss = amount * (1.0 - mw)
+        if m_reason is not None and m_loss > 0:
+            declassified_by_reason[m_reason] += m_loss
+        e_loss = amount * mw * (1.0 - ew)
+        if e_reason is not None and e_loss > 0:
+            declassified_by_reason[e_reason] += e_loss
+
+    for rec in alerts:
+        opt_type = str(rec.get("type", "")).lower()
+        if opt_type not in ("call", "put"):
+            continue
+        ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
+        bid = _safe_float(rec.get("total_bid_side_prem")) or 0.0
+        strike = _safe_float(rec.get("strike"))
+        underlying = _safe_float(rec.get("underlying_price"))
+        dte = _alert_dte_days(rec)
+        mw = _moneyness_weight(opt_type, strike, underlying)
+        ew = _expiry_weight(dte)
+        weight = mw * ew
+        m_reason = _moneyness_reason(opt_type, strike, underlying)
+        e_reason = _expiry_reason(dte)
+
+        if opt_type == "call":
+            raw_bull += ask
+            adjusted_bull += ask * weight
+            raw_bear += bid
+            adjusted_bear += bid * weight
+            raw_largest_bull = max(raw_largest_bull, ask)
+            raw_largest_call_ask = max(raw_largest_call_ask, ask)
+            adjusted_largest_bull = max(adjusted_largest_bull, ask * weight)
+            _record_loss(ask, mw, ew, m_reason, e_reason)
+            _record_loss(bid, mw, ew, m_reason, e_reason)
+        else:
+            raw_bear += ask
+            adjusted_bear += ask * weight
+            raw_bull += bid
+            adjusted_bull += bid * weight
+            raw_largest_bull = max(raw_largest_bull, bid)
+            adjusted_largest_bull = max(adjusted_largest_bull, bid * weight)
+            _record_loss(ask, mw, ew, m_reason, e_reason)
+            _record_loss(bid, mw, ew, m_reason, e_reason)
+
+    return {
+        "raw_bull": raw_bull,
+        "raw_bear": raw_bear,
+        "raw_share": _bullish_share(raw_bull, raw_bear),
+        "raw_largest_bull": raw_largest_bull if raw_largest_bull > 0 else None,
+        "raw_largest_call_ask": raw_largest_call_ask if raw_largest_call_ask > 0 else None,
+        "adjusted_bull": adjusted_bull,
+        "adjusted_bear": adjusted_bear,
+        "adjusted_share": _bullish_share(adjusted_bull, adjusted_bear),
+        "adjusted_largest_bull": (
+            adjusted_largest_bull if adjusted_largest_bull > 0 else None
+        ),
+        "declassified_by_reason": dict(declassified_by_reason),
+    }
+
+
 def _directional_premium(
     alerts: list[dict[str, Any]],
 ) -> tuple[float, float, float | None]:
@@ -1063,27 +1171,12 @@ def _directional_premium(
     weighted by moneyness x expiry (Key §7/§8). Mid/no-side/unknown contributes
     to neither (neutral). Pure function.
     """
-    bullish = 0.0
-    bearish = 0.0
-    largest_bull = 0.0
-    for rec in alerts:
-        opt_type = str(rec.get("type", "")).lower()
-        if opt_type not in ("call", "put"):
-            continue
-        ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
-        bid = _safe_float(rec.get("total_bid_side_prem")) or 0.0
-        total = _safe_float(rec.get("total_premium")) or 0.0
-        w = _moneyness_weight(
-            opt_type, _safe_float(rec.get("strike")), _safe_float(rec.get("underlying_price"))
-        ) * _expiry_weight(_alert_dte_days(rec))
-        if opt_type == "call":
-            bullish += ask * w  # calls bought = bullish
-            bearish += bid * w  # calls sold = bearish
-            largest_bull = max(largest_bull, total)
-        else:  # put
-            bearish += ask * w  # puts bought = bearish
-            bullish += bid * w  # puts sold = bullish
-    return bullish, bearish, (largest_bull if largest_bull > 0 else None)
+    debug = _directional_premium_debug(alerts)
+    return (
+        float(debug["adjusted_bull"]),
+        float(debug["adjusted_bear"]),
+        debug["raw_largest_bull"],
+    )
 
 
 def _bullish_share(bullish: float, bearish: float) -> float | None:
@@ -1742,6 +1835,16 @@ def _build_response_v2(
     largest_opt_buy: float | None = None
     opt_window_empty = False
     opt_bullish_share: float | None = None
+    raw_bull_premium: float | None = None
+    raw_bear_premium: float | None = None
+    raw_bullish_share: float | None = None
+    raw_largest_bullish_print: float | None = None
+    raw_largest_call_ask_print: float | None = None
+    declassified_premium_by_reason: dict[str, float] = {}
+    adjusted_bull_premium: float | None = None
+    adjusted_bear_premium: float | None = None
+    adjusted_bullish_share: float | None = None
+    adjusted_largest_bullish_print: float | None = None
     hedge_flag: str = _HEDGE_NONE
     hedge_reason: str | None = None
     # Multi-window display fields (Multi-Window Pull Spec §4/§7).
@@ -1764,9 +1867,23 @@ def _build_response_v2(
         opt_score = _multi_window_score(sessions)
         if opt_score is None:
             opt_score = _F4_NEUTRAL_SCORE
+        if windowed_opts:
+            debug = _directional_premium_debug(windowed_opts)
+            raw_bull_premium = float(debug["raw_bull"])
+            raw_bear_premium = float(debug["raw_bear"])
+            raw_bullish_share = debug["raw_share"]
+            raw_largest_bullish_print = debug["raw_largest_bull"]
+            raw_largest_call_ask_print = debug["raw_largest_call_ask"]
+            declassified_premium_by_reason = debug["declassified_by_reason"]
+            adjusted_bull_premium = float(debug["adjusted_bull"])
+            adjusted_bear_premium = float(debug["adjusted_bear"])
+            adjusted_bullish_share = debug["adjusted_share"]
+            adjusted_largest_bullish_print = debug["adjusted_largest_bull"]
+            largest_opt_buy = raw_largest_bullish_print
         # Full-window share + net premium for display.
-        bullish_prem, bearish_prem, largest_opt_buy = _directional_premium(windowed_opts)
-        opt_bullish_share = _bullish_share(bullish_prem, bearish_prem)
+        bullish_prem = adjusted_bull_premium or 0.0
+        bearish_prem = adjusted_bear_premium or 0.0
+        opt_bullish_share = adjusted_bullish_share
         opt_net_flow = bullish_prem - bearish_prem
         # Live tape state: today vs the 2-session baseline.
         current_score = _window_score(sessions, 0, 1)
@@ -1878,6 +1995,16 @@ def _build_response_v2(
         session_coverage=dp_sessions_covered,
         confidence=dark_pool_confidence,
         largest_options_buy_usd=largest_opt_buy,
+        raw_bull_premium_usd=raw_bull_premium,
+        raw_bear_premium_usd=raw_bear_premium,
+        raw_bullish_share=raw_bullish_share,
+        raw_largest_bullish_print_usd=raw_largest_bullish_print,
+        raw_largest_call_ask_print_usd=raw_largest_call_ask_print,
+        declassified_premium_by_reason=declassified_premium_by_reason,
+        adjusted_bull_premium_usd=adjusted_bull_premium,
+        adjusted_bear_premium_usd=adjusted_bear_premium,
+        adjusted_bullish_share=adjusted_bullish_share,
+        adjusted_largest_bullish_print_usd=adjusted_largest_bullish_print,
         dark_pool_settlement_ratio=dp_settlement_ratio,
         options_strategy_type=None,
         dark_pool_state=dp_state,
@@ -2278,7 +2405,7 @@ def _combine_f4_scores(
 
     When both sources are available the default is a 50/50 average.  One
     exception applies: when the dark-pool score is strong (≥ 80) and the
-    options score is genuinely neutral (45–55) the blend shifts to 65/35
+    options score is genuinely neutral (45-55) the blend shifts to 65/35
     (DP / options).  A neutral options reading in that regime most often
     reflects a covered-call management posture rather than a lack of
     conviction, so giving it equal weight would systematically understate

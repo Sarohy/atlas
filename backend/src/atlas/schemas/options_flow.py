@@ -118,8 +118,66 @@ class OptionsFlowResponse(BaseModel):
     largest_dark_pool_buy_usd: float | None = Field(
         default=None, description="Largest single dark-pool BUY print premium (USD)."
     )
+    largest_kept_buy_usd: float | None = Field(
+        default=None,
+        description="Largest single kept (non-plumbing) dark-pool BUY print premium (USD).",
+    )
+    largest_stripped_print_usd: float | None = Field(
+        default=None,
+        description="Largest stripped plumbing/settlement dark-pool print premium (USD).",
+    )
     largest_options_buy_usd: float | None = Field(
         default=None, description="Largest single NEW_BULL or PUT_SELL options premium (USD)."
+    )
+
+    # ---- F4a reconciliation (raw vs stripped vs kept) ---------------------
+    raw_dark_pool_notional_usd: float = Field(
+        default=0.0,
+        description="Raw dark-pool notional across window before plumbing strip (USD).",
+    )
+    stripped_plumbing_notional_usd: float = Field(
+        default=0.0,
+        description="Dark-pool notional stripped as plumbing/settlement (USD).",
+    )
+    kept_dark_pool_notional_usd: float = Field(
+        default=0.0,
+        description="Kept non-plumbing dark-pool notional after strip (USD).",
+    )
+    strict_buy_notional_usd: float = Field(
+        default=0.0,
+        description="Strict bid/ask-classified dark-pool BUY notional (USD).",
+    )
+    strict_sell_notional_usd: float = Field(
+        default=0.0,
+        description="Strict bid/ask-classified dark-pool SELL notional (USD).",
+    )
+    midpoint_lean_buy_notional_usd: float = Field(
+        default=0.0,
+        description="All kept midpoint-lean dark-pool BUY notional (USD).",
+    )
+    midpoint_lean_sell_notional_usd: float = Field(
+        default=0.0,
+        description="All kept midpoint-lean dark-pool SELL notional (USD).",
+    )
+    net_classified_flow_usd: float = Field(
+        default=0.0,
+        description="Net kept classified dark-pool flow: buy notional minus sell notional (USD).",
+    )
+    buy_share: float | None = Field(
+        default=None,
+        description="Midpoint-lean kept buy-share: buy / (buy + sell).",
+    )
+    stripped_notional_by_reason: dict[str, float] = Field(
+        default_factory=dict,
+        description="Stripped plumbing notional grouped by canonical strip reason.",
+    )
+    session_coverage: int | None = Field(
+        default=None,
+        description="Distinct dark-pool sessions covered in the current F4a window.",
+    )
+    confidence: str = Field(
+        default="No dark-pool data",
+        description="F4a confidence label mirrored from dark_pool_confidence for UI reconciliation.",
     )
 
     # ---- Signal quality / strategy context (new) -------------------------

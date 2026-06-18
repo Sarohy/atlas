@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from atlas.services.options_flow_service import (
     _alert_dte_days,
     _apply_dark_pool_quality_boost,
@@ -591,3 +593,217 @@ def test_build_response_v2_no_truncation_when_window_fully_covered() -> None:
     assert resp.dark_pool_truncated is False
     # Window is 2 sessions → only the 2 most recent distinct days are covered.
     assert resp.dark_pool_sessions_covered == 2
+
+
+def _dp_keep_buy(day: str, premium: float, price: float = 100.0) -> dict[str, object]:
+    return {
+        "executed_at": f"{day}T15:00:00Z",
+        "price": price,
+        "nbbo_bid": 99.0,
+        "nbbo_ask": 100.0,
+        "premium": premium,
+        "sale_cond_codes": [],
+    }
+
+
+def _dp_keep_sell(day: str, premium: float, price: float = 99.0) -> dict[str, object]:
+    return {
+        "executed_at": f"{day}T15:00:00Z",
+        "price": price,
+        "nbbo_bid": 99.0,
+        "nbbo_ask": 100.0,
+        "premium": premium,
+        "sale_cond_codes": [],
+    }
+
+
+def test_f4a_reconciliation_fields_match_kept_vs_stripped_breakdown() -> None:
+    response = _build_response_v2(
+        ticker="ASML",
+        market_cap=300_000_000_000.0,
+        dp_prints=[
+            _dp_keep_buy("2026-06-17", 20_000_000.0),
+            _dp_keep_sell("2026-06-17", 5_000_000.0),
+            {
+                "executed_at": "2026-06-17T15:05:00Z",
+                "price": 99.6,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 3_000_000.0,
+                "sale_cond_codes": [],
+            },
+            {
+                "executed_at": "2026-06-17T15:06:00Z",
+                "price": 99.4,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 2_000_000.0,
+                "sale_cond_codes": [],
+            },
+            {
+                "executed_at": "2026-06-17T15:10:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 50_000_000.0,
+                "sale_cond_codes": ["average_price_trade"],
+            },
+            {
+                "executed_at": "2026-06-17T15:11:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 30_000_000.0,
+                "sale_cond_codes": ["QCT"],
+            },
+            {
+                "executed_at": "2026-06-17T15:12:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 10_000_000.0,
+                "sale_cond_codes": ["sold_out_of_seq"],
+            },
+        ],
+        opt_trades=[_atm("call", ask=4_000_000.0)],
+    )
+
+    assert response.raw_dark_pool_notional_usd == 120_000_000.0
+    assert response.stripped_plumbing_notional_usd == 90_000_000.0
+    assert response.kept_dark_pool_notional_usd == 30_000_000.0
+    assert response.strict_buy_notional_usd == 20_000_000.0
+    assert response.strict_sell_notional_usd == 5_000_000.0
+    assert response.midpoint_lean_buy_notional_usd == 23_000_000.0
+    assert response.midpoint_lean_sell_notional_usd == 7_000_000.0
+    assert response.net_classified_flow_usd == 16_000_000.0
+    assert response.buy_share == pytest.approx(23_000_000.0 / 30_000_000.0)
+    assert response.largest_dark_pool_buy_usd == 20_000_000.0
+    assert response.largest_stripped_print_usd == 50_000_000.0
+    assert response.stripped_notional_by_reason == {
+        "average_price_trade": 50_000_000.0,
+        "QCT": 30_000_000.0,
+        "sold_out_of_seq": 10_000_000.0,
+    }
+
+
+@pytest.mark.parametrize(
+    "plumbing_code",
+    [
+        "average_price_trade",
+        "prior_reference_price",
+        "derivative_priced",
+        "QCT",
+        "sold_out_of_sequence",
+        "sold_out_of_seq",
+    ],
+)
+def test_f4a_strips_required_plumbing_aliases(plumbing_code: str) -> None:
+    response = _build_response_v2(
+        ticker="SNDK",
+        market_cap=8_000_000_000.0,
+        dp_prints=[
+            _dp_keep_sell("2026-06-17", 3_000_000.0),
+            {
+                "executed_at": "2026-06-17T15:10:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 100_000_000.0,
+                "sale_cond_codes": [plumbing_code],
+            },
+        ],
+        opt_trades=[_atm("put", ask=3_000_000.0)],
+    )
+
+    assert response.raw_dark_pool_notional_usd == 103_000_000.0
+    assert response.stripped_plumbing_notional_usd == 100_000_000.0
+    assert response.kept_dark_pool_notional_usd == 3_000_000.0
+    assert response.dark_pool_net_flow_usd == -3_000_000.0
+    assert response.dark_pool_prints_count == 1
+    expected_reason = (
+        "sold_out_of_seq" if plumbing_code == "sold_out_of_sequence" else plumbing_code
+    )
+    assert response.stripped_notional_by_reason.get(expected_reason) == 100_000_000.0
+
+
+def test_f4a_chip_and_flow_monitor_use_stripped_genuine_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+    import atlas.services.options_flow_service as svc
+
+    captured: dict[str, object] = {}
+    original_resolve_flow_monitor = svc.resolve_flow_monitor
+
+    def _fake_resolve_flow_monitor(inputs: object) -> object:
+        captured["inputs"] = inputs
+        return original_resolve_flow_monitor(inputs)  # pragma: no cover
+
+    monkeypatch.setattr(svc, "resolve_flow_monitor", _fake_resolve_flow_monitor)
+
+    response = _build_response_v2(
+        ticker="SNDK",
+        market_cap=8_000_000_000.0,
+        dp_prints=[
+            _dp_keep_sell("2026-06-17", 20_000_000.0),
+            _dp_keep_sell("2026-06-16", 10_000_000.0),
+            {
+                "executed_at": "2026-06-17T15:10:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 200_000_000.0,
+                "sale_cond_codes": ["average_price_trade"],
+            },
+        ],
+        opt_trades=[_atm("call", ask=4_000_000.0)],
+    )
+
+    assert response.dark_pool_state == "ACTIVE_DISTRIBUTION"
+    assert response.dark_pool_net_flow_usd == -30_000_000.0
+    assert response.largest_dark_pool_buy_usd is None
+    assert response.largest_stripped_print_usd == 200_000_000.0
+
+    inputs = captured["inputs"]
+    assert hasattr(inputs, "f4a_state")
+    assert getattr(inputs, "f4a_state") == "BEARISH"
+
+
+def test_f4a_canceled_flag_string_false_is_not_stripped() -> None:
+    response = _build_response_v2(
+        ticker="ASML",
+        market_cap=300_000_000_000.0,
+        dp_prints=[
+            {
+                "executed_at": "2026-06-17T15:00:00Z",
+                "price": 100.0,
+                "nbbo_bid": 99.0,
+                "nbbo_ask": 100.0,
+                "premium": 4_000_000.0,
+                "canceled": "false",
+                "sale_cond_codes": [],
+            }
+        ],
+        opt_trades=[_atm("call", ask=2_000_000.0)],
+    )
+
+    assert response.stripped_plumbing_notional_usd == 0.0
+    assert response.kept_dark_pool_notional_usd == 4_000_000.0
+    assert response.dark_pool_net_flow_usd == 4_000_000.0
+
+
+def test_f4a_raw_and_kept_notional_include_premium_when_price_missing() -> None:
+    response = _build_response_v2(
+        ticker="ASML",
+        market_cap=300_000_000_000.0,
+        dp_prints=[
+            {
+                "executed_at": "2026-06-17T15:00:00Z",
+                "premium": 7_500_000.0,
+                "sale_cond_codes": [],
+            }
+        ],
+        opt_trades=[_atm("call", ask=2_000_000.0)],
+    )
+
+    assert response.raw_dark_pool_notional_usd == 7_500_000.0
+    assert response.kept_dark_pool_notional_usd == 7_500_000.0
+    assert response.dark_pool_prints_count == 0
+    assert response.net_classified_flow_usd == 0.0

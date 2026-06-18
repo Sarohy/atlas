@@ -240,9 +240,7 @@ async def _fetch_dark_pool_prints(
         if not raw:
             break
 
-        all_prints.extend(
-            rec for rec in raw if isinstance(rec, dict) and not rec.get("canceled")
-        )
+        all_prints.extend(rec for rec in raw if isinstance(rec, dict))
 
         # Stop once the collected prints span at least 5 distinct session days.
         distinct_days = {
@@ -522,6 +520,19 @@ async def _fetch_option_flow_alerts(
 # ---------------------------------------------------------------------------
 
 
+def _parse_sale_cond_codes(raw: Any) -> tuple[str, ...]:
+    """Normalise sale_cond_codes regardless of whether UW returns a string, list,
+    or None.  The UW dark-pool endpoint returns the field as a bare string in
+    current API versions (e.g. ``"average_price_trade"``), not a list."""
+    if not raw:
+        return ()
+    if isinstance(raw, str):
+        return (raw,)
+    if isinstance(raw, (list, tuple)):
+        return tuple(str(c) for c in raw if c)
+    return ()
+
+
 def _safe_float(value: Any) -> float | None:
     """Best-effort coerce *value* to float. Returns None when not numeric."""
     if isinstance(value, (int, float)):
@@ -532,6 +543,17 @@ def _safe_float(value: Any) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def _truthy_flag(value: Any) -> bool:
+    """Parse bool-like provider values without treating "false" as truthy."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return False
 
 
 def _print_premium_usd(rec: dict[str, Any]) -> float:
@@ -566,14 +588,15 @@ def _aggregate_dark_pool(
             continue
         bid = _safe_float(rec.get("nbbo_bid"))
         ask = _safe_float(rec.get("nbbo_ask"))
-        codes_raw = rec.get("sale_cond_codes") or ()
-        codes: tuple[str, ...] = (
-            tuple(c for c in codes_raw if isinstance(c, str))
-            if isinstance(codes_raw, (list, tuple))
-            else ()
-        )
+        codes = _parse_sale_cond_codes(rec.get("sale_cond_codes"))
 
-        cls = _classify_dark_pool_print(price, bid, ask, codes)
+        cls = _classify_dark_pool_print(
+            price,
+            bid,
+            ask,
+            codes,
+            is_canceled=_truthy_flag(rec.get("canceled")),
+        )
         if cls == "SETTLEMENT":
             continue
 
@@ -597,6 +620,145 @@ def _aggregate_dark_pool(
         large_buys,
         largest_buy if largest_buy > 0 else None,
     )
+
+
+def _dark_pool_strict_side(
+    *,
+    price: float,
+    bid: float | None,
+    ask: float | None,
+) -> tuple[str, bool]:
+    """Classify kept print side and whether it is strict bid/ask classified."""
+    if bid is None or ask is None:
+        return "BUY", False
+    if price >= ask * _F4_AT_OR_ABOVE_ASK_FACTOR:
+        return "BUY", True
+    if price <= bid * _F4_AT_OR_BELOW_BID_FACTOR:
+        return "SELL", True
+    midpoint = (bid + ask) / 2.0
+    return ("BUY" if price >= midpoint else "SELL"), False
+
+
+def _canonical_plumbing_reason(code: str) -> str | None:
+    """Normalize sale-condition aliases into canonical plumbing-strip reasons."""
+    normalized = re.sub(r"[^a-z0-9]+", "_", code.strip().lower()).strip("_")
+    if not normalized:
+        return None
+
+    aliases: dict[str, str] = {
+        "average_price": "average_price_trade",
+        "average_price_trade": "average_price_trade",
+        "prior_reference": "prior_reference_price",
+        "prior_reference_price": "prior_reference_price",
+        "derivative_priced": "derivative_priced",
+        "qualified_contingent": "QCT",
+        "qct": "QCT",
+        "sold_out_of_sequence": "sold_out_of_seq",
+        "sold_out_of_seq": "sold_out_of_seq",
+        "canceled": "canceled",
+        "cancelled": "canceled",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if "vwap" in normalized:
+        return "vwap_plumbing"
+    if "settlement" in normalized:
+        return "settlement_plumbing"
+    return None
+
+
+def _dark_pool_plumbing_reason(
+    rec: dict[str, Any], sale_cond_codes: tuple[str, ...]
+) -> str | None:
+    """Return the canonical plumbing reason when a print should be stripped."""
+    if _truthy_flag(rec.get("canceled")):
+        return "canceled"
+    for code in sale_cond_codes:
+        reason = _canonical_plumbing_reason(code)
+        if reason is not None:
+            return reason
+    return None
+
+
+def _reconcile_dark_pool(prints: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute raw/stripped/kept reconciliation and classified kept-flow totals."""
+    raw_notional = 0.0
+    stripped_notional = 0.0
+    kept_notional = 0.0
+    strict_buy_notional = 0.0
+    strict_sell_notional = 0.0
+    midpoint_buy_notional = 0.0
+    midpoint_sell_notional = 0.0
+    net_classified_flow = 0.0
+    kept_count = 0
+    large_buys = 0
+    largest_kept_buy = 0.0
+    largest_stripped_print = 0.0
+    stripped_by_reason: dict[str, float] = defaultdict(float)
+
+    for rec in prints:
+        premium = _print_premium_usd(rec)
+        if premium <= 0:
+            continue
+
+        raw_notional += premium
+
+        bid = _safe_float(rec.get("nbbo_bid"))
+        ask = _safe_float(rec.get("nbbo_ask"))
+        codes = _parse_sale_cond_codes(rec.get("sale_cond_codes"))
+
+        plumbing_reason = _dark_pool_plumbing_reason(rec, codes)
+        if plumbing_reason is not None:
+            stripped_notional += premium
+            stripped_by_reason[plumbing_reason] += premium
+            if premium > largest_stripped_print:
+                largest_stripped_print = premium
+            continue
+
+        kept_notional += premium
+
+        price = _safe_float(rec.get("price"))
+        if price is None:
+            continue
+
+        side, is_strict = _dark_pool_strict_side(price=price, bid=bid, ask=ask)
+        kept_count += 1
+        if side == "BUY":
+            midpoint_buy_notional += premium
+            net_classified_flow += premium
+            if is_strict:
+                strict_buy_notional += premium
+            if premium > largest_kept_buy:
+                largest_kept_buy = premium
+            if premium >= _F4_LARGE_DP_BUY_USD:
+                large_buys += 1
+        else:
+            midpoint_sell_notional += premium
+            net_classified_flow -= premium
+            if is_strict:
+                strict_sell_notional += premium
+
+    total_classified = midpoint_buy_notional + midpoint_sell_notional
+    buy_share = (midpoint_buy_notional / total_classified) if total_classified > 0 else None
+
+    return {
+        "raw_notional": raw_notional,
+        "stripped_notional": stripped_notional,
+        "kept_notional": kept_notional,
+        "strict_buy_notional": strict_buy_notional,
+        "strict_sell_notional": strict_sell_notional,
+        "midpoint_buy_notional": midpoint_buy_notional,
+        "midpoint_sell_notional": midpoint_sell_notional,
+        "net_classified_flow": net_classified_flow,
+        "buy_share": buy_share,
+        "kept_count": kept_count,
+        "large_buys": large_buys,
+        "largest_kept_buy": (largest_kept_buy if largest_kept_buy > 0 else None),
+        "largest_stripped_print": (
+            largest_stripped_print if largest_stripped_print > 0 else None
+        ),
+        "stripped_by_reason": dict(stripped_by_reason),
+    }
 
 
 def _aggregate_options(
@@ -1367,14 +1529,15 @@ def _dark_pool_settlement_ratio(prints: list[dict[str, Any]]) -> float | None:
             continue
         bid = _safe_float(rec.get("nbbo_bid"))
         ask = _safe_float(rec.get("nbbo_ask"))
-        codes_raw = rec.get("sale_cond_codes") or ()
-        codes: tuple[str, ...] = (
-            tuple(c for c in codes_raw if isinstance(c, str))
-            if isinstance(codes_raw, (list, tuple))
-            else ()
-        )
+        codes = _parse_sale_cond_codes(rec.get("sale_cond_codes"))
         total += 1
-        if _classify_dark_pool_print(price, bid, ask, codes) == "SETTLEMENT":
+        if _classify_dark_pool_print(
+            price,
+            bid,
+            ask,
+            codes,
+            is_canceled=_truthy_flag(rec.get("canceled")),
+        ) == "SETTLEMENT":
             settlements += 1
     if total == 0:
         return None
@@ -1530,6 +1693,22 @@ def _build_response_v2(
     dp_large_buys = 0
     largest_dp_buy: float | None = None
     windowed_dp: list[dict[str, Any]] = []
+    dp_recon: dict[str, Any] = {
+        "raw_notional": 0.0,
+        "stripped_notional": 0.0,
+        "kept_notional": 0.0,
+        "strict_buy_notional": 0.0,
+        "strict_sell_notional": 0.0,
+        "midpoint_buy_notional": 0.0,
+        "midpoint_sell_notional": 0.0,
+        "net_classified_flow": 0.0,
+        "buy_share": None,
+        "kept_count": 0,
+        "large_buys": 0,
+        "largest_kept_buy": None,
+        "largest_stripped_print": None,
+        "stripped_by_reason": {},
+    }
     dp_sessions_covered: int | None = None
     dp_truncated = False
     if dp_prints is None:
@@ -1537,7 +1716,11 @@ def _build_response_v2(
         dp_net_flow = None
     else:
         windowed_dp = _filter_to_recent_sessions(dp_prints)
-        dp_net_flow, dp_count, dp_large_buys, largest_dp_buy = _aggregate_dark_pool(windowed_dp)
+        dp_recon = _reconcile_dark_pool(windowed_dp)
+        dp_net_flow = float(dp_recon["net_classified_flow"])
+        dp_count = int(dp_recon["kept_count"])
+        dp_large_buys = int(dp_recon["large_buys"])
+        largest_dp_buy = dp_recon["largest_kept_buy"]
         dp_score = _map_net_flow_to_score(dp_net_flow, tier)
         dp_sessions_covered = len(
             {str(p.get("executed_at", ""))[:10] for p in windowed_dp if p.get("executed_at")}
@@ -1680,6 +1863,20 @@ def _build_response_v2(
         dark_pool_truncated=dp_truncated,
         dark_pool_large_buy_count=dp_large_buys,
         largest_dark_pool_buy_usd=largest_dp_buy,
+        largest_kept_buy_usd=largest_dp_buy,
+        largest_stripped_print_usd=dp_recon["largest_stripped_print"],
+        raw_dark_pool_notional_usd=dp_recon["raw_notional"],
+        stripped_plumbing_notional_usd=dp_recon["stripped_notional"],
+        kept_dark_pool_notional_usd=dp_recon["kept_notional"],
+        strict_buy_notional_usd=dp_recon["strict_buy_notional"],
+        strict_sell_notional_usd=dp_recon["strict_sell_notional"],
+        midpoint_lean_buy_notional_usd=dp_recon["midpoint_buy_notional"],
+        midpoint_lean_sell_notional_usd=dp_recon["midpoint_sell_notional"],
+        net_classified_flow_usd=dp_recon["net_classified_flow"],
+        buy_share=dp_recon["buy_share"],
+        stripped_notional_by_reason=dp_recon["stripped_by_reason"],
+        session_coverage=dp_sessions_covered,
+        confidence=dark_pool_confidence,
         largest_options_buy_usd=largest_opt_buy,
         dark_pool_settlement_ratio=dp_settlement_ratio,
         options_strategy_type=None,
@@ -2022,14 +2219,18 @@ def _classify_dark_pool_print(
     bid: float | None,
     ask: float | None,
     sale_cond_codes: tuple[str, ...] = (),
+    *,
+    is_canceled: bool = False,
 ) -> DPClassification:
     """Classify a single dark pool print as BUY / SELL / SETTLEMENT.
 
     Settlement codes win first; then NBBO-anchored BUY/SELL bands; then
     midpoint-relative fallback. Missing bid/ask falls back to BUY.
     """
-    # 1. Settlement code overrides everything.
-    if any(code in _F4_SETTLEMENT_CODES for code in sale_cond_codes):
+    # 1. Plumbing/canceled overrides everything.
+    if is_canceled:
+        return "SETTLEMENT"
+    if any(_canonical_plumbing_reason(code) is not None for code in sale_cond_codes):
         return "SETTLEMENT"
     # 4/5. No NBBO data — conservative fallback.
     if bid is None or ask is None:

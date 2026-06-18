@@ -38,6 +38,7 @@ import yfinance as yf  # type: ignore[import-untyped]
 from atlas.schemas.fundamental import (
     AltmanZScoreIndicator,
     DebtEquityIndicator,
+    F5DebugBridge,
     F5Grade,
     FreeCashFlowIndicator,
     FundamentalResponse,
@@ -551,6 +552,15 @@ class FundamentalService:
             f5_score=f5_score,
             f5_grade=_grade_from_score(f5_score),
             data_available=av_data_available,
+            f5_debug_bridge=self._build_f5_debug_bridge(
+                bs_raw=bs_raw,
+                inc_raw=inc_raw,
+                ov_raw=ov_raw,
+                bs=bs,
+                inc=inc,
+                altman=altman_ind,
+                debt_equity=de_ind,
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1046,9 +1056,12 @@ class FundamentalService:
 
         # Total debt: prefer shortLongTermDebtTotal, then sum of parts
         total_debt = _f("shortLongTermDebtTotal")
+        short_term_debt = _f("shortTermDebt") or _f("currentLongTermDebt")
+        deferred_revenue_current = _f("deferredRevenueCurrent") or _f("currentDeferredRevenue")
+        cash = _f("cashAndCashEquivalentsAtCarryingValue") or _f("cashAndShortTermInvestments")
         if total_debt is None:
             ltd = _f("longTermDebt") or 0.0
-            std = _f("shortTermDebt") or _f("currentLongTermDebt") or 0.0
+            std = short_term_debt or 0.0
             sum_debt = ltd + std
             total_debt = sum_debt if sum_debt > 0 else None
         # If still None fall back to total liabilities (conservative)
@@ -1063,6 +1076,9 @@ class FundamentalService:
             "total_liabilities": total_liab,
             "total_equity": equity,
             "total_debt": total_debt,
+            "short_term_debt": short_term_debt,
+            "deferred_revenue_current": deferred_revenue_current,
+            "cash": cash,
         }
 
     @staticmethod
@@ -1071,6 +1087,7 @@ class FundamentalService:
         reports: list[dict[str, Any]] = data.get("quarterlyReports", [])
         ttm_rev: float = 0.0
         ttm_op: float = 0.0
+        ttm_interest_expense: float = 0.0
         ttm_gross: float = 0.0
         count = 0
         # Gross margin uses only the most recent quarter (reports[0]) not TTM.
@@ -1083,12 +1100,15 @@ class FundamentalService:
             rev = _safe_float(rec.get("totalRevenue"))
             # Use ebit if available, else operatingIncome
             op = _safe_float(rec.get("ebit")) or _safe_float(rec.get("operatingIncome"))
+            interest_expense = _safe_float(rec.get("interestExpense"))
             gp = _safe_float(rec.get("grossProfit"))
             if rev is not None:
                 ttm_rev += rev
                 count += 1
             if op is not None:
                 ttm_op += op
+            if interest_expense is not None:
+                ttm_interest_expense += abs(interest_expense)
             if i == 0:
                 # Capture most recent quarter gross profit and revenue.
                 gm_rev = rev
@@ -1127,8 +1147,139 @@ class FundamentalService:
         return {
             "ttm_revenue": ttm_rev if count > 0 else None,
             "ttm_operating_income": ttm_op if count > 0 else None,
+            "ttm_interest_expense": ttm_interest_expense if ttm_interest_expense > 0 else None,
             "gross_margin": gross_margin,
         }
+
+    @staticmethod
+    def _debt_from_balance_sheet_report(report: dict[str, Any]) -> float | None:
+        """Extract total debt from one quarterly balance-sheet report."""
+        def _f(key: str) -> float | None:
+            return _safe_float(report.get(key))
+
+        total_debt = _f("shortLongTermDebtTotal")
+        if total_debt is not None:
+            return total_debt
+        long_term = _f("longTermDebt") or 0.0
+        short_term = _f("shortTermDebt") or _f("currentLongTermDebt") or 0.0
+        sum_debt = long_term + short_term
+        return sum_debt if sum_debt > 0 else None
+
+    def _build_f5_debug_bridge(
+        self,
+        *,
+        bs_raw: dict[str, Any],
+        inc_raw: dict[str, Any],
+        ov_raw: dict[str, Any],
+        bs: dict[str, float | None],
+        inc: dict[str, float | None],
+        altman: AltmanZScoreIndicator,
+        debt_equity: DebtEquityIndicator,
+    ) -> F5DebugBridge:
+        """Build the expanded F5 debug bridge for balance-sheet transparency."""
+        current_assets = bs.get("current_assets")
+        current_liabilities = bs.get("current_liabilities")
+        deferred_revenue_current = bs.get("deferred_revenue_current")
+        working_capital = (
+            current_assets - current_liabilities
+            if current_assets is not None and current_liabilities is not None
+            else None
+        )
+        cash_claim_working_capital = (
+            current_assets - (current_liabilities - deferred_revenue_current)
+            if current_assets is not None
+            and current_liabilities is not None
+            and deferred_revenue_current is not None
+            else None
+        )
+
+        total_debt = bs.get("total_debt")
+        cash = bs.get("cash")
+        net_debt = (
+            total_debt - cash
+            if total_debt is not None and cash is not None
+            else None
+        )
+
+        ttm_ebit = inc.get("ttm_operating_income")
+        ttm_interest_expense = inc.get("ttm_interest_expense")
+        ebit_interest_coverage = (
+            ttm_ebit / ttm_interest_expense
+            if ttm_ebit is not None and ttm_interest_expense not in (None, 0)
+            else None
+        )
+
+        reports: list[dict[str, Any]] = bs_raw.get("quarterlyReports", [])
+        qoq_working_capital_change: float | None = None
+        qoq_working_capital_trend: str | None = None
+        qoq_debt_change: float | None = None
+        qoq_debt_trend: str | None = None
+
+        if len(reports) >= 2:
+            latest = reports[0]
+            prior = reports[1]
+
+            latest_ca = _safe_float(latest.get("totalCurrentAssets"))
+            latest_cl = _safe_float(latest.get("totalCurrentLiabilities"))
+            prior_ca = _safe_float(prior.get("totalCurrentAssets"))
+            prior_cl = _safe_float(prior.get("totalCurrentLiabilities"))
+
+            if None not in (latest_ca, latest_cl, prior_ca, prior_cl):
+                latest_wc = float(latest_ca) - float(latest_cl)
+                prior_wc = float(prior_ca) - float(prior_cl)
+                qoq_working_capital_change = latest_wc - prior_wc
+                if qoq_working_capital_change > 0:
+                    qoq_working_capital_trend = "IMPROVING"
+                elif qoq_working_capital_change < 0:
+                    qoq_working_capital_trend = "DETERIORATING"
+                else:
+                    qoq_working_capital_trend = "FLAT"
+
+            latest_debt = self._debt_from_balance_sheet_report(latest)
+            prior_debt = self._debt_from_balance_sheet_report(prior)
+            if latest_debt is not None and prior_debt is not None:
+                qoq_debt_change = latest_debt - prior_debt
+                if qoq_debt_change > 0:
+                    qoq_debt_trend = "INCREASING"
+                elif qoq_debt_change < 0:
+                    qoq_debt_trend = "DECREASING"
+                else:
+                    qoq_debt_trend = "FLAT"
+
+        piotroski_raw = ov_raw.get("PiotroskiScore") or ov_raw.get("piotroskiScore")
+        piotroski_score: int | None = None
+        try:
+            if piotroski_raw not in (None, "", "None", "N/A"):
+                piotroski_score = int(float(piotroski_raw))
+        except (TypeError, ValueError):
+            piotroski_score = None
+
+        return F5DebugBridge(
+            altman_z_score=altman.z_score,
+            altman_variant_used="Altman Z (public manufacturing 5-factor)",
+            x1_working_capital_to_assets=altman.x1_working_capital_ratio,
+            x2_retained_earnings_to_assets=altman.x2_retained_earnings_ratio,
+            x3_ebit_to_assets=altman.x3_ebit_ratio,
+            x4_market_equity_to_liabilities=altman.x4_market_cap_to_liabilities,
+            x5_sales_to_assets=altman.x5_revenue_to_assets,
+            current_assets_usd=current_assets,
+            current_liabilities_usd=current_liabilities,
+            deferred_revenue_current_usd=deferred_revenue_current,
+            working_capital_usd=working_capital,
+            cash_claim_working_capital_usd=cash_claim_working_capital,
+            cash_usd=cash,
+            short_term_debt_usd=bs.get("short_term_debt"),
+            total_debt_usd=total_debt,
+            net_debt_usd=net_debt,
+            ebit_interest_coverage=ebit_interest_coverage,
+            interest_expense_ttm_usd=ttm_interest_expense,
+            qoq_working_capital_change_usd=qoq_working_capital_change,
+            qoq_working_capital_trend=qoq_working_capital_trend,
+            qoq_debt_change_usd=qoq_debt_change,
+            qoq_debt_trend=qoq_debt_trend,
+            piotroski_score=piotroski_score,
+            piotroski_is_supporting_vendor_signal=piotroski_score is not None,
+        )
 
     @staticmethod
     def _extract_cash_flows(data: dict[str, Any]) -> dict[str, float | None]:

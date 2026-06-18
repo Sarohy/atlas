@@ -5,6 +5,7 @@ import { useFundamental } from '@/lib/hooks/use-fundamental';
 import type {
   AltmanZScoreIndicator,
   DebtEquityIndicator,
+  F5DebugBridge,
   FreeCashFlowIndicator,
   FundamentalResponse,
   InsiderActivityIndicator,
@@ -95,9 +96,7 @@ export function F5FundamentalPanel({ ticker }: F5FundamentalPanelProps) {
         {!isFetching && !isError && data && data.data_available === false && (
           <DegradedBanner reason="Alpha Vantage rate limit reached — balance sheet, income statement, cash flow, and overview data unavailable. Fundamental score is a neutral fallback (not computed from real data). Try again in ~1 minute." />
         )}
-        {!isFetching && !isError && data && (
-          <FundamentalContent data={data} />
-        )}
+        {!isFetching && !isError && data && <FundamentalContent data={data} />}
         {!isFetching && !isError && !data && ticker && <EmptyState ticker={ticker} />}
       </div>
     </section>
@@ -167,7 +166,6 @@ function FundamentalContent({ data }: { data: FundamentalResponse }) {
             {data.f5_grade}
           </span>
           <span className="atlas-f5-label-sub">Fundamental Quality</span>
-
         </div>
       </div>
 
@@ -182,6 +180,8 @@ function FundamentalContent({ data }: { data: FundamentalResponse }) {
         <DebtEquityCard de={data.debt_equity} />
         <InstitutionalOwnershipCard inst={data.institutional_ownership} />
       </div>
+
+      {data.f5_debug_bridge && <F5DebugBridgeCard bridge={data.f5_debug_bridge} />}
     </div>
   );
 }
@@ -412,6 +412,124 @@ function InstitutionalOwnershipCard({ inst }: { inst: InstitutionalOwnershipIndi
   );
 }
 
+function F5DebugBridgeCard({ bridge }: { bridge: F5DebugBridge }) {
+  return (
+    <article className="atlas-f5-indicator" data-testid="f5-debug-bridge">
+      <header className="atlas-f5-indicator-header">
+        <span className="atlas-f5-indicator-label">F5 Debug Bridge</span>
+        <span className="atlas-frameworks-pill atlas-f4-tier-pill is-muted">
+          liquidity / refinance
+        </span>
+      </header>
+      <div className="atlas-f5-indicator-body">
+        <dl className="atlas-f5-dl">
+          <div className="atlas-f5-dl-row">
+            <dt>Altman Z (variant)</dt>
+            <dd>{bridge.altman_variant_used}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Altman Z score</dt>
+            <dd>{formatNullableNumber(bridge.altman_z_score, 3)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Working capital / assets (X1)</dt>
+            <dd>{formatNullableNumber(bridge.x1_working_capital_to_assets, 4)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Retained earnings / assets (X2)</dt>
+            <dd>{formatNullableNumber(bridge.x2_retained_earnings_to_assets, 4)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>EBIT / assets (X3)</dt>
+            <dd>{formatNullableNumber(bridge.x3_ebit_to_assets, 4)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Market equity / liabilities (X4)</dt>
+            <dd>{formatNullableNumber(bridge.x4_market_equity_to_liabilities, 4)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Sales / assets (X5)</dt>
+            <dd>{formatNullableNumber(bridge.x5_sales_to_assets, 4)}</dd>
+          </div>
+
+          <div className="atlas-f5-dl-row">
+            <dt>Current assets</dt>
+            <dd>{formatNullableUsd(bridge.current_assets_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Current liabilities</dt>
+            <dd>{formatNullableUsd(bridge.current_liabilities_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Deferred revenue (current)</dt>
+            <dd>{formatNullableUsd(bridge.deferred_revenue_current_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Working-capital deficit</dt>
+            <dd>{formatNullableUsd(bridge.working_capital_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Cash-claim working capital</dt>
+            <dd>{formatNullableUsd(bridge.cash_claim_working_capital_usd)}</dd>
+          </div>
+
+          <div className="atlas-f5-dl-row">
+            <dt>Cash</dt>
+            <dd>{formatNullableUsd(bridge.cash_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Short-term/current debt</dt>
+            <dd>{formatNullableUsd(bridge.short_term_debt_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Total debt</dt>
+            <dd>{formatNullableUsd(bridge.total_debt_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Net debt</dt>
+            <dd>{formatNullableUsd(bridge.net_debt_usd)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>EBIT interest coverage</dt>
+            <dd>{formatNullableNumber(bridge.ebit_interest_coverage, 3)}</dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Interest expense (TTM)</dt>
+            <dd>{formatNullableUsd(bridge.interest_expense_ttm_usd)}</dd>
+          </div>
+
+          <div className="atlas-f5-dl-row">
+            <dt>QoQ working-capital trend</dt>
+            <dd>
+              {bridge.qoq_working_capital_trend ?? '—'}
+              {bridge.qoq_working_capital_change_usd !== null &&
+              bridge.qoq_working_capital_change_usd !== undefined
+                ? ` (${formatUsd(bridge.qoq_working_capital_change_usd)})`
+                : ''}
+            </dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>QoQ debt trend</dt>
+            <dd>
+              {bridge.qoq_debt_trend ?? '—'}
+              {bridge.qoq_debt_change_usd !== null && bridge.qoq_debt_change_usd !== undefined
+                ? ` (${formatUsd(bridge.qoq_debt_change_usd)})`
+                : ''}
+            </dd>
+          </div>
+          <div className="atlas-f5-dl-row">
+            <dt>Piotroski</dt>
+            <dd>
+              {bridge.piotroski_score ?? '—'}
+              {bridge.piotroski_is_supporting_vendor_signal ? ' (supporting, vendor-sourced)' : ''}
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </article>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
@@ -423,6 +541,16 @@ function formatUsd(value: number): string {
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
   return `${sign}$${abs.toFixed(0)}`;
+}
+
+function formatNullableUsd(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return formatUsd(value);
+}
+
+function formatNullableNumber(value: number | null | undefined, precision: number): string {
+  if (value === null || value === undefined) return '—';
+  return value.toFixed(precision);
 }
 
 // ---------------------------------------------------------------------------

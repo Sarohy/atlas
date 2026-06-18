@@ -5,6 +5,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAnalyst } from '@/lib/hooks/use-analyst';
 import { useEarnings } from '@/lib/hooks/use-earnings';
+import { useExtensionOverlay } from '@/lib/hooks/use-extension-overlay';
+import { useExtensionWashout } from '@/lib/hooks/use-extension-washout';
 import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
@@ -12,6 +14,9 @@ import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import { useFramework8 } from '@/lib/hooks/use-framework8';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
+import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
+import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
+import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,11 +26,11 @@ import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/fram
 const SCORE_BAR_SEGMENTS = 10;
 
 /** Inclusive lower bounds for Framework 3 / Score Action Map bands (v7.3.5). */
-const ACTION_T1_ELITE_MIN = 85;    // >= 85  → T1 ELITE / LEAPS ELIGIBLE
-const ACTION_T1_MIN = 80;          // 80-84  → T1 CORE
-const ACTION_TIER2_MIN = 70;       // 70-79  → GTC ADDS PERMITTED
-const ACTION_TIER3_MIN = 50;       // 50-69  → SMALL POSITION ONLY
-                                   // < 50   → BELOW GATE
+const ACTION_T1_ELITE_MIN = 85; // >= 85  → T1 ELITE / LEAPS ELIGIBLE
+const ACTION_T1_MIN = 80; // 80-84  → T1 CORE
+const ACTION_TIER2_MIN = 70; // 70-79  → GTC ADDS PERMITTED
+const ACTION_TIER3_MIN = 50; // 50-69  → SMALL POSITION ONLY
+// < 50   → BELOW GATE
 
 /** CSS tone class for each action_tone string from the backend. */
 const ACTION_TONE_CLASS: Record<string, string> = {
@@ -58,15 +63,18 @@ type FrameworkScorePanelProps = {
  * Displayed above the individual factor panels (F1-F5) in the Frameworks
  * screen so the investor sees the combined verdict first.
  */
-export function FrameworkScorePanel({
-  ticker,
-  onPreviewDetails,
-}: FrameworkScorePanelProps) {
+export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScorePanelProps) {
   const { data: rawData, isLoading, isError, error } = useFrameworkScore(ticker);
   const { data: rawMomentum } = useMomentum(ticker);
   const { data: rawEarnings } = useEarnings(ticker);
   const { data: rawAnalyst } = useAnalyst(ticker);
   const { data: rawOptionsFlow } = useOptionsFlow(ticker);
+  const { data: rawExtensionOverlay } = useExtensionOverlay(
+    ticker,
+    rawData?.final_score ?? null,
+    rawOptionsFlow?.f4_score ?? null,
+  );
+  const { data: rawExtensionWashout } = useExtensionWashout(ticker);
   const { data: rawFundamental } = useFundamental(ticker);
   const { data: rawFramework8 } = useFramework8(ticker);
 
@@ -87,6 +95,8 @@ export function FrameworkScorePanel({
   const earningsData = matchesActive(rawEarnings);
   const analystData = matchesActive(rawAnalyst);
   const optionsFlowData = matchesActive(rawOptionsFlow);
+  const extensionOverlayData = matchesActive(rawExtensionOverlay);
+  const extensionWashoutData = matchesActive(rawExtensionWashout);
   const fundamentalData = matchesActive(rawFundamental);
   const framework8Data = matchesActive(rawFramework8);
 
@@ -146,16 +156,7 @@ export function FrameworkScorePanel({
     if (numericChanged || f8Changed) {
       void queryClient.invalidateQueries({ queryKey: ['framework-score', ticker] });
     }
-  }, [
-    f1Score,
-    f2Score,
-    f3Score,
-    f4Score,
-    f5Score,
-    f8BuyingBonus,
-    ticker,
-    queryClient,
-  ]);
+  }, [f1Score, f2Score, f3Score, f4Score, f5Score, f8BuyingBonus, ticker, queryClient]);
 
   // F5 display uses the raw score — no cap applied.
   const f5DisplayOverride = f5Score;
@@ -178,10 +179,7 @@ export function FrameworkScorePanel({
     : undefined;
 
   return (
-    <section
-      className="atlas-frameworks-panel atlas-fws-panel"
-      data-testid="framework-score-panel"
-    >
+    <section className="atlas-frameworks-panel atlas-fws-panel" data-testid="framework-score-panel">
       <div className="atlas-fws-hover-overlay" data-testid="framework-score-hover-overlay">
         <button
           aria-label="Preview framework score details"
@@ -220,14 +218,14 @@ export function FrameworkScorePanel({
           />
         )}
         {!isLoading && !isError && data && data.degraded && (
-          <DegradedBanner
-            flags={data.flags}
-            factors={data.factors.filter((f) => !f.available)}
-          />
+          <DegradedBanner flags={data.flags} factors={data.factors.filter((f) => !f.available)} />
         )}
         {!isLoading && !isError && displayData && (
           <FrameworkScoreContent
             data={displayData}
+            optionsFlowData={optionsFlowData}
+            extensionOverlayData={extensionOverlayData}
+            extensionWashoutData={extensionWashoutData}
             f4GapBadge={data?.f4_data_gap_badge ?? null}
             f4GapMessage={data?.f4_data_gap_message ?? null}
           />
@@ -266,13 +264,7 @@ function EmptyState({ ticker }: { ticker: string }) {
   );
 }
 
-function DegradedBanner({
-  flags,
-  factors,
-}: {
-  flags: string[];
-  factors: FactorBreakdown[];
-}) {
+function DegradedBanner({ flags, factors }: { flags: string[]; factors: FactorBreakdown[] }) {
   const affectedNames = factors.map((f) => `${f.key.toUpperCase()} ${f.name}`).join(', ');
   return (
     <div className="atlas-fws-degraded-banner" data-testid="fws-degraded">
@@ -280,12 +272,10 @@ function DegradedBanner({
       <div className="atlas-fws-degraded-body">
         <p className="atlas-fws-degraded-title">Score degraded — partial data</p>
         <p className="atlas-fws-degraded-msg">
-          One or more factors could not be computed from live data. The conviction
-          score shown is unreliable and will not be cached.
+          One or more factors could not be computed from live data. The conviction score shown is
+          unreliable and will not be cached.
         </p>
-        {affectedNames && (
-          <p className="atlas-fws-degraded-affected">Affected: {affectedNames}</p>
-        )}
+        {affectedNames && <p className="atlas-fws-degraded-affected">Affected: {affectedNames}</p>}
         {flags.map((flag, i) => (
           <p key={i} className="atlas-fws-degraded-flag">
             {flag}
@@ -302,10 +292,16 @@ function DegradedBanner({
 
 function FrameworkScoreContent({
   data,
+  optionsFlowData,
+  extensionOverlayData,
+  extensionWashoutData,
   f4GapBadge,
   f4GapMessage,
 }: {
   data: FrameworkScoreResponse;
+  optionsFlowData?: OptionsFlowResponse;
+  extensionOverlayData?: ExtensionOverlayResponse;
+  extensionWashoutData?: ExtensionWashoutResponse;
   f4GapBadge: string | null;
   f4GapMessage: string | null;
 }) {
@@ -323,15 +319,25 @@ function FrameworkScoreContent({
   useEffect(() => {
     setF1DisplayScore(displayScore);
   }, [displayScore, setF1DisplayScore]);
-  const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
+  const headlineAction = deriveHeadlineAction(
+    displayScore,
+    data,
+    optionsFlowData,
+    extensionOverlayData,
+    extensionWashoutData,
+  );
+  const [, scoreTone] = mapAction(displayScore);
+  const scoreToneCss = ACTION_TONE_CLASS[scoreTone] ?? 'is-yellow';
+  const actionToneCss = ACTION_TONE_CLASS[headlineAction.tone] ?? 'is-yellow';
   const filledSegs = Math.round(displayScore / SCORE_BAR_SEGMENTS);
+  const f4Summary = buildF4Summary(data, optionsFlowData);
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
       {/* ── Hero ── */}
       <div className="atlas-fws-hero">
         <div className="atlas-fws-score-ring">
-          <span className={cn('atlas-fws-score-number', toneCss)} data-testid="fws-score">
+          <span className={cn('atlas-fws-score-number', scoreToneCss)} data-testid="fws-score">
             {displayScore}
           </span>
           <span className="atlas-fws-score-denom">/100</span>
@@ -339,11 +345,17 @@ function FrameworkScoreContent({
 
         <div className="atlas-fws-hero-meta">
           <span
-            className={cn('atlas-frameworks-pill atlas-fws-action-pill', toneCss)}
+            className={cn('atlas-frameworks-pill atlas-fws-action-pill', actionToneCss)}
             data-testid="fws-action"
           >
-            {data.action}
+            {headlineAction.label}
           </span>
+
+          {f4Summary && (
+            <span className="atlas-fws-f4-summary" data-testid="fws-f4-summary">
+              {f4Summary}
+            </span>
+          )}
 
           {data.f5_blocked && (
             <span
@@ -361,7 +373,7 @@ function FrameworkScoreContent({
         {Array.from({ length: SCORE_BAR_SEGMENTS }).map((_, i) => (
           <span
             key={i}
-            className={cn('atlas-fws-score-seg', i < filledSegs ? toneCss : 'is-empty')}
+            className={cn('atlas-fws-score-seg', i < filledSegs ? scoreToneCss : 'is-empty')}
           />
         ))}
       </div>
@@ -412,7 +424,10 @@ function FrameworkScoreContent({
         )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
           <span className="atlas-fws-calc-label">Framework score</span>
-          <span className={cn('atlas-fws-calc-value', toneCss)} data-testid="fws-final-score-calc">
+          <span
+            className={cn('atlas-fws-calc-value', scoreToneCss)}
+            data-testid="fws-final-score-calc"
+          >
             {data.final_score}
           </span>
         </div>
@@ -436,7 +451,9 @@ function buildDisplayFrameworkScore(
   data: FrameworkScoreResponse,
   scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
 ): FrameworkScoreResponse {
-  const factors = data.factors.map((factor) => buildDisplayFactor(factor, scoreOverrides[factor.key]));
+  const factors = data.factors.map((factor) =>
+    buildDisplayFactor(factor, scoreOverrides[factor.key]),
+  );
   const rawTotal = calculateRawTotal(factors);
   // Mirror the backend: the F8 insider-buying bonus is added to the raw total
   // before rounding/clamping (atlas/services/framework_score_service.py —
@@ -451,7 +468,8 @@ function buildDisplayFrameworkScore(
 
   // When the individual-hook F5 score is used as an override, keep f5_raw_score in sync.
   const f5Override = scoreOverrides['f5'];
-  const f5RawScore = f5Override !== undefined && f5Override !== null ? f5Override : data.f5_raw_score;
+  const f5RawScore =
+    f5Override !== undefined && f5Override !== null ? f5Override : data.f5_raw_score;
 
   return {
     ...data,
@@ -538,6 +556,148 @@ function mapAction(finalScore: number): [string, string] {
   return ['BELOW GATE', 'tone-red'];
 }
 
+function shortFlowMonitorLabel(action: string | null | undefined): string {
+  switch (action) {
+    case 'ADD_ELIGIBLE':
+      return 'Add Eligible';
+    case 'ADD_PENDING_GATES':
+      return 'Add Pending Gates';
+    case 'STARTER':
+      return 'Starter';
+    case 'WATCH':
+      return 'Watch';
+    case 'CONFLICT':
+      return 'Conflict';
+    case 'MIXED_ABSORPTION':
+      return 'Watch';
+    case 'TRIM_WATCH':
+      return 'Trim-Watch';
+    case 'AVOID':
+      return 'Avoid';
+    default:
+      return 'Watch';
+  }
+}
+
+function buildF4Summary(
+  data: FrameworkScoreResponse,
+  optionsFlowData?: OptionsFlowResponse,
+): string | null {
+  const f4Factor = data.factors.find((factor) => factor.key === 'f4');
+  if (!f4Factor || !f4Factor.available) {
+    return null;
+  }
+  const band = formatF4Band(optionsFlowData?.f4_state ?? f4Factor.grade);
+  const flowGate = shortFlowMonitorLabel(
+    optionsFlowData?.flow_monitor_action ?? f4Factor.flow_monitor_action,
+  );
+  return `F4: ${f4Factor.score} - ${band} / ${flowGate}`;
+}
+
+function formatF4Band(value: string): string {
+  return value
+    .split('-')
+    .map((part) => {
+      const trimmed = part.trim();
+      if (trimmed.length === 0) {
+        return trimmed;
+      }
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    })
+    .join('-');
+}
+
+function hasMajorFlowGap(
+  data: FrameworkScoreResponse,
+  extensionOverlayData?: ExtensionOverlayResponse,
+  extensionWashoutData?: ExtensionWashoutResponse,
+): boolean {
+  return (
+    Boolean(data.f4_data_gap_badge) ||
+    (extensionOverlayData?.data_gaps.length ?? 0) > 0 ||
+    (extensionWashoutData?.data_gaps.length ?? 0) > 0
+  );
+}
+
+function hasFlowConfirmation(optionsFlowData?: OptionsFlowResponse): boolean {
+  if (!optionsFlowData) {
+    return false;
+  }
+  const action = optionsFlowData.flow_monitor_action;
+  return (
+    optionsFlowData.f4_score >= 60 && (action === 'ADD_ELIGIBLE' || action === 'ADD_PENDING_GATES')
+  );
+}
+
+function hasEliteExtensionBlock(
+  extensionOverlayData?: ExtensionOverlayResponse,
+  extensionWashoutData?: ExtensionWashoutResponse,
+): boolean {
+  if (extensionOverlayData?.action && extensionOverlayData.action !== 'ADD') {
+    return true;
+  }
+  return Boolean(extensionWashoutData?.negative_catalyst);
+}
+
+function deriveHeadlineAction(
+  finalScore: number,
+  data: FrameworkScoreResponse,
+  optionsFlowData?: OptionsFlowResponse,
+  extensionOverlayData?: ExtensionOverlayResponse,
+  extensionWashoutData?: ExtensionWashoutResponse,
+): { label: string; tone: string } {
+  if (data.f5_blocked) {
+    const flowAction = optionsFlowData?.flow_monitor_action;
+    const flowDeteriorating =
+      flowAction === 'TRIM_WATCH' ||
+      flowAction === 'AVOID' ||
+      (optionsFlowData?.f4_score ?? 100) < 45;
+
+    if (flowDeteriorating) {
+      return {
+        label: 'TRIM / REDUCE',
+        tone: 'tone-red',
+      };
+    }
+
+    if (finalScore >= ACTION_TIER3_MIN) {
+      return {
+        label: 'HOLD / WATCH - F5 HARD BLOCK / NO NEW CAPITAL',
+        tone: 'tone-yellow',
+      };
+    }
+
+    return {
+      label: 'AVOID / NO NEW CAPITAL',
+      tone: 'tone-red',
+    };
+  }
+
+  if (
+    finalScore >= ACTION_T1_ELITE_MIN &&
+    hasEliteExtensionBlock(extensionOverlayData, extensionWashoutData)
+  ) {
+    return {
+      label: 'T1 ELITE / CORE HOLD - LEAPS ONLY ON RESET',
+      tone: 'tone-yellow',
+    };
+  }
+
+  if (
+    finalScore >= ACTION_TIER2_MIN &&
+    (!hasFlowConfirmation(optionsFlowData) ||
+      hasMajorFlowGap(data, extensionOverlayData, extensionWashoutData))
+  ) {
+    return {
+      label: 'WATCH / STARTER ONLY - FLOW CONFIRMATION REQUIRED',
+      tone: 'tone-yellow',
+    };
+  }
+
+  const [label, tone] = mapAction(finalScore);
+  return { label, tone };
+}
+
 // ---------------------------------------------------------------------------
 // Factor row
 // ---------------------------------------------------------------------------
@@ -581,8 +741,8 @@ function FactorRow({
             title="Flow Monitor — the only layer that clears an add."
           >
             {' '}
-            · Flow Monitor: {FLOW_MONITOR_SHORT[factor.flow_monitor_action] ??
-              factor.flow_monitor_action}
+            · Flow Monitor:{' '}
+            {FLOW_MONITOR_SHORT[factor.flow_monitor_action] ?? factor.flow_monitor_action}
           </span>
         )}
         {!factor.available && <span className="atlas-fws-unavailable-tag"> (unavail.)</span>}

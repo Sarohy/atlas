@@ -254,6 +254,48 @@ class GrossMarginIndicator(BaseModel):
     weight: float = Field(default=0.10, description="Weight in F5 formula.")
 
 
+class F5DebugBridge(BaseModel):
+    """Expanded F5 transparency fields for liquidity/refinancing diagnostics."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    altman_z_score: float | None = Field(
+        default=None,
+        description="Computed Altman Z score used by the hard-block gate.",
+    )
+    altman_variant_used: str = Field(
+        default="Altman Z (public manufacturing 5-factor)",
+        description="Altman variant used for the reported Z score.",
+    )
+    x1_working_capital_to_assets: float | None = Field(default=None)
+    x2_retained_earnings_to_assets: float | None = Field(default=None)
+    x3_ebit_to_assets: float | None = Field(default=None)
+    x4_market_equity_to_liabilities: float | None = Field(default=None)
+    x5_sales_to_assets: float | None = Field(default=None)
+
+    current_assets_usd: float | None = Field(default=None)
+    current_liabilities_usd: float | None = Field(default=None)
+    deferred_revenue_current_usd: float | None = Field(default=None)
+    working_capital_usd: float | None = Field(default=None)
+    cash_claim_working_capital_usd: float | None = Field(default=None)
+
+    cash_usd: float | None = Field(default=None)
+    short_term_debt_usd: float | None = Field(default=None)
+    total_debt_usd: float | None = Field(default=None)
+    net_debt_usd: float | None = Field(default=None)
+
+    ebit_interest_coverage: float | None = Field(default=None)
+    interest_expense_ttm_usd: float | None = Field(default=None)
+
+    qoq_working_capital_change_usd: float | None = Field(default=None)
+    qoq_working_capital_trend: str | None = Field(default=None)
+    qoq_debt_change_usd: float | None = Field(default=None)
+    qoq_debt_trend: str | None = Field(default=None)
+
+    piotroski_score: int | None = Field(default=None)
+    piotroski_is_supporting_vendor_signal: bool = Field(default=False)
+
+
 class FundamentalResponse(BaseModel):
     """Complete F5 Fundamental Quality analysis for a single ticker.
 
@@ -315,4 +357,8 @@ class FundamentalResponse(BaseModel):
     data_available: bool = Field(
         default=True,
         description="False when Alpha Vantage returned no data (rate-limited); scores are fallback-only.",
+    )
+    f5_debug_bridge: F5DebugBridge | None = Field(
+        default=None,
+        description="Expanded F5 debug bridge for liquidity/refinancing transparency.",
     )

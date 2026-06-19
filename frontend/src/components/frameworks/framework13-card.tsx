@@ -8,9 +8,6 @@ import type { Framework13Result } from '@/lib/schemas/framework13';
 // Named constants
 // ---------------------------------------------------------------------------
 
-/** Bar scale max — 5% NAV (highest permitted weight for moderate beta). */
-const BAR_SCALE_MAX = 0.05;
-
 /** AAOI beta threshold — beta >= 3.0 triggers special display. */
 const AAOI_BETA_THRESHOLD = 3.0;
 
@@ -74,11 +71,8 @@ type StatRowProps = {
 };
 
 function StatRow({ data }: StatRowProps) {
-  const betaTone = data.beta >= AAOI_BETA_THRESHOLD
-    ? 'is-f13-red'
-    : data.beta >= 2.0
-      ? 'is-f13-amber'
-      : '';
+  const betaTone =
+    data.beta >= AAOI_BETA_THRESHOLD ? 'is-f13-red' : data.beta >= 2.0 ? 'is-f13-amber' : '';
 
   const addsTone = data.adds_permitted ? 'is-f13-green' : 'is-f13-red';
 
@@ -86,10 +80,7 @@ function StatRow({ data }: StatRowProps) {
     <div className="atlas-f13-stats-row" data-testid="f13-stats-row">
       <div className="atlas-f13-stat-cell">
         <span className="atlas-f13-stat-label">Beta</span>
-        <span
-          className={cn('atlas-f13-stat-value', betaTone)}
-          data-testid="f13-stat-beta"
-        >
+        <span className={cn('atlas-f13-stat-value', betaTone)} data-testid="f13-stat-beta">
           {fmtBeta(data.beta)}
         </span>
       </div>
@@ -110,10 +101,7 @@ function StatRow({ data }: StatRowProps) {
       </div>
       <div className="atlas-f13-stat-cell">
         <span className="atlas-f13-stat-label">Adds</span>
-        <span
-          className={cn('atlas-f13-stat-value', addsTone)}
-          data-testid="f13-stat-adds"
-        >
+        <span className={cn('atlas-f13-stat-value', addsTone)} data-testid="f13-stat-adds">
           {data.adds_permitted ? 'YES' : 'NO'}
         </span>
       </div>
@@ -278,10 +266,7 @@ export function Framework13Card({ ticker }: Framework13CardProps) {
           <span className="atlas-fws-subtitle">Beta Management</span>
         </div>
         {hasData && (
-          <span
-            className={cn('atlas-f13-chip', chipTone)}
-            data-testid="f13-status-chip"
-          >
+          <span className={cn('atlas-f13-chip', chipTone)} data-testid="f13-status-chip">
             {chipLabel}
           </span>
         )}

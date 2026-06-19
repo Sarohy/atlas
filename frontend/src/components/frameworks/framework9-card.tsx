@@ -2,12 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { useFramework9 } from '@/lib/hooks/use-framework9';
-import type {
-  DataSourceStatus,
-  FlowDirection,
-  Framework9Result,
-  SignalTier,
-} from '@/lib/schemas/framework9';
+import type { DataSourceStatus, FlowDirection, SignalTier } from '@/lib/schemas/framework9';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -101,13 +96,7 @@ type Framework9CardProps = {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SourceChip({
-  label,
-  status,
-}: {
-  label: string;
-  status: DataSourceStatus;
-}) {
+function SourceChip({ label, status }: { label: string; status: DataSourceStatus }) {
   return (
     <span
       className={cn('atlas-f9-src-chip', SOURCE_CHIP_CLASS[status])}
@@ -118,13 +107,7 @@ function SourceChip({
   );
 }
 
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="atlas-f9-stat-card">
       <span className="atlas-f9-stat-label">{label}</span>
@@ -153,8 +136,7 @@ function StatCard({
 export function Framework9Card({ ticker }: Framework9CardProps) {
   const { data, isLoading, isError, error } = useFramework9(ticker);
   const hasData = ticker.trim().length > 0 && data !== undefined;
-  const errorMsg =
-    error instanceof Error ? error.message : 'Failed to load options flow data.';
+  const errorMsg = error instanceof Error ? error.message : 'Failed to load options flow data.';
 
   return (
     <section
@@ -203,10 +185,7 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
             {/* ── Section 2: Data gap alert ── */}
             {data.data_gap_severity !== 'NONE' && (
               <div
-                className={cn(
-                  'atlas-f9-gap-alert',
-                  SEVERITY_CLASS[data.data_gap_severity],
-                )}
+                className={cn('atlas-f9-gap-alert', SEVERITY_CLASS[data.data_gap_severity])}
                 data-testid="f9-gap-alert"
               >
                 <span className="atlas-f9-gap-badge">
@@ -236,14 +215,9 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
                 <span className="atlas-f9-score-grade">{data.f4_grade}</span>
               </div>
               <div className="atlas-f9-tier-info">
-                <span className="atlas-f9-tier-label">
-                  {TIER_LABEL[data.signal_tier]}
-                </span>
+                <span className="atlas-f9-tier-label">{TIER_LABEL[data.signal_tier]}</span>
                 <span
-                  className={cn(
-                    'atlas-f9-severity-chip',
-                    SEVERITY_CLASS[data.data_gap_severity],
-                  )}
+                  className={cn('atlas-f9-severity-chip', SEVERITY_CLASS[data.data_gap_severity])}
                 >
                   {data.data_gap_severity}
                 </span>
@@ -253,22 +227,12 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
             {/* ── Section 4: Stat cards ── */}
             <div className="atlas-f9-stats-grid" data-testid="f9-stats-grid">
               <StatCard label="F4 Score" value={data.f4_score.toFixed(0)} />
-              <StatCard
-                label="Flow Direction"
-                value={FLOW_LABEL[data.flow_direction]}
-              />
+              <StatCard label="Flow Direction" value={FLOW_LABEL[data.flow_direction]} />
               <StatCard
                 label="Largest Print"
-                value={
-                  data.largest_print_usd !== null
-                    ? formatUsd(data.largest_print_usd)
-                    : '—'
-                }
+                value={data.largest_print_usd !== null ? formatUsd(data.largest_print_usd) : '—'}
               />
-              <StatCard
-                label="Call / Put Ratio"
-                value={formatRatio(data.put_call_ratio)}
-              />
+              <StatCard label="Call / Put Ratio" value={formatRatio(data.put_call_ratio)} />
             </div>
 
             {/* ── Section 5: Dark pool panel ── */}
@@ -282,16 +246,12 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
               </div>
               <div className="atlas-f9-dp-row">
                 <span className="atlas-f9-dp-label">Direction</span>
-                <span className="atlas-f9-dp-value">
-                  {data.dark_pool_direction ?? '—'}
-                </span>
+                <span className="atlas-f9-dp-value">{data.dark_pool_direction ?? '—'}</span>
               </div>
               {data.options_volume_vs_adv !== null && (
                 <div className="atlas-f9-dp-row">
                   <span className="atlas-f9-dp-label">Volume vs ADV</span>
-                  <span className="atlas-f9-dp-value">
-                    {formatPct(data.options_volume_vs_adv)}
-                  </span>
+                  <span className="atlas-f9-dp-value">{formatPct(data.options_volume_vs_adv)}</span>
                 </div>
               )}
             </div>
@@ -308,9 +268,7 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
               <div className="atlas-f9-breakdown-row">
                 <span>Put/Call modifier</span>
                 <span
-                  className={cn(
-                    data.modifiers_skipped.includes('put_call') && 'atlas-f9-skipped',
-                  )}
+                  className={cn(data.modifiers_skipped.includes('put_call') && 'atlas-f9-skipped')}
                 >
                   {data.modifiers_skipped.includes('put_call')
                     ? 'skipped'
@@ -320,9 +278,7 @@ export function Framework9Card({ ticker }: Framework9CardProps) {
               <div className="atlas-f9-breakdown-row">
                 <span>Dark pool modifier</span>
                 <span
-                  className={cn(
-                    data.modifiers_skipped.includes('dark_pool') && 'atlas-f9-skipped',
-                  )}
+                  className={cn(data.modifiers_skipped.includes('dark_pool') && 'atlas-f9-skipped')}
                 >
                   {data.modifiers_skipped.includes('dark_pool')
                     ? 'skipped'

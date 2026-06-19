@@ -156,15 +156,13 @@ class OptionsFlowResponse(BaseModel):
     adjusted_bull_premium_usd: float | None = Field(
         default=None,
         description=(
-            "Adjusted bullish options premium after ATLAS "
-            "weighting/declassification (USD)."
+            "Adjusted bullish options premium after ATLAS weighting/declassification (USD)."
         ),
     )
     adjusted_bear_premium_usd: float | None = Field(
         default=None,
         description=(
-            "Adjusted bearish options premium after ATLAS "
-            "weighting/declassification (USD)."
+            "Adjusted bearish options premium after ATLAS weighting/declassification (USD)."
         ),
     )
     adjusted_bullish_share: float | None = Field(
@@ -174,6 +172,55 @@ class OptionsFlowResponse(BaseModel):
     adjusted_largest_bullish_print_usd: float | None = Field(
         default=None,
         description="Largest adjusted bullish print after ATLAS weighting/declassification (USD).",
+    )
+    f4b_score_input_source: str = Field(
+        default="NONE",
+        description="Final F4b score input source: ADJUSTED | RAW_TAPE | NONE.",
+    )
+    f4b_universe_source: str = Field(
+        default="NONE",
+        description="Universe source used for F4b scoring diagnostics.",
+    )
+    f4b_universe_total_alerts: int = Field(
+        default=0,
+        description="Total candidate options alerts in the active F4b universe window.",
+    )
+    f4b_universe_directional_alerts: int = Field(
+        default=0,
+        description="Directional (call/put) options alerts used in raw bucket aggregation.",
+    )
+    f4b_universe_excluded_alerts: int = Field(
+        default=0,
+        description="Universe alerts excluded from directional F4b scoring diagnostics.",
+    )
+    raw_call_ask_premium_usd: float | None = Field(
+        default=None,
+        description="Raw call ask-side premium bucket before weighting/declassification (USD).",
+    )
+    raw_call_bid_premium_usd: float | None = Field(
+        default=None,
+        description="Raw call bid-side premium bucket before weighting/declassification (USD).",
+    )
+    raw_put_ask_premium_usd: float | None = Field(
+        default=None,
+        description="Raw put ask-side premium bucket before weighting/declassification (USD).",
+    )
+    raw_put_bid_premium_usd: float | None = Field(
+        default=None,
+        description="Raw put bid-side premium bucket before weighting/declassification (USD).",
+    )
+    live_pulse_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Current-session tactical pulse score (1-day, unscored into F4b).",
+    )
+    live_pulse_state: str = Field(
+        default="DATA_GAP",
+        description=(
+            "Current-session tactical pulse state, separate from persistence score: "
+            "TACTICAL_BULLISH_TRIGGER | TACTICAL_BEARISH_TRIGGER | TACTICAL_NEUTRAL | DATA_GAP."
+        ),
     )
 
     # ---- F4a reconciliation (raw vs stripped vs kept) ---------------------
@@ -224,8 +271,7 @@ class OptionsFlowResponse(BaseModel):
     confidence: str = Field(
         default="No dark-pool data",
         description=(
-            "F4a confidence label mirrored from dark_pool_confidence "
-            "for UI reconciliation."
+            "F4a confidence label mirrored from dark_pool_confidence for UI reconciliation."
         ),
     )
 

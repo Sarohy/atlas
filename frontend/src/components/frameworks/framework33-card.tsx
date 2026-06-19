@@ -27,10 +27,6 @@ const COND_STATUS_CLASS: Record<EntryConditionStatus, string> = {
   NOT_APPLICABLE: 'is-f33-cond-na',
 };
 
-// Standard size per F33 spec.
-const STANDARD_MAX_PCT = 1.0; // 1.0% per name — no F30 gate
-const CARVEOUT_MAX_PCT = 0.5; // 0.5% per name — F30 drawdown gate active
-const BASELINE_PCT = 0.3; // 0.3% baseline
 const BUCKET_TOTAL_CAP_PCT = 4.0; // 4% NAV hard cap (Bucket 2)
 const AND_GATE_THRESHOLD_USD = 10_000; // Entries above this require AND gate
 
@@ -107,17 +103,12 @@ export function Framework33Card({ ticker }: Framework33CardProps) {
         )}
 
         {hasTicker && isError && (
-          <p
-            className="atlas-fws-state-msg atlas-fws-state-msg--error"
-            data-testid="f33-error"
-          >
+          <p className="atlas-fws-state-msg atlas-fws-state-msg--error" data-testid="f33-error">
             {errorMsg}
           </p>
         )}
 
-        {hasTicker && !isLoading && !isError && data !== undefined && (
-          <F33Content data={data} />
-        )}
+        {hasTicker && !isLoading && !isError && data !== undefined && <F33Content data={data} />}
       </div>
     </section>
   );
@@ -169,15 +160,9 @@ function F33Content({ data }: { data: LeapsEligibility }) {
   const size = sizeGuidance(data);
 
   // Extract F33-specific conditions by name prefix.
-  const condA = data.entry_conditions.find((c) =>
-    c.condition_name.includes('Condition A'),
-  );
-  const condB = data.entry_conditions.find((c) =>
-    c.condition_name.includes('Condition B'),
-  );
-  const condC = data.entry_conditions.find((c) =>
-    c.condition_name.includes('Condition C'),
-  );
+  const condA = data.entry_conditions.find((c) => c.condition_name.includes('Condition A'));
+  const condB = data.entry_conditions.find((c) => c.condition_name.includes('Condition B'));
+  const condC = data.entry_conditions.find((c) => c.condition_name.includes('Condition C'));
 
   return (
     <div className="atlas-f33-content" data-testid="f33-content">
@@ -218,9 +203,7 @@ function F33Content({ data }: { data: LeapsEligibility }) {
           <p className="atlas-f33-condition-rule">
             ≥20% drawdown from high AND VIX 15–18 (calm window)
           </p>
-          {condA?.detail && (
-            <p className="atlas-f33-condition-detail">{condA.detail}</p>
-          )}
+          {condA?.detail && <p className="atlas-f33-condition-detail">{condA.detail}</p>}
         </div>
       )}
 
@@ -251,9 +234,7 @@ function F33Content({ data }: { data: LeapsEligibility }) {
           <p className="atlas-f33-condition-rule">
             ≥25% sector drawdown + confirmed cap. volume + VIX elevated but declining
           </p>
-          {condB?.detail && (
-            <p className="atlas-f33-condition-detail">{condB.detail}</p>
-          )}
+          {condB?.detail && <p className="atlas-f33-condition-detail">{condB.detail}</p>}
         </div>
       )}
 
@@ -284,9 +265,7 @@ function F33Content({ data }: { data: LeapsEligibility }) {
           <p className="atlas-f33-condition-rule">
             T1E ≥85 + dark pool bullish + options flow confirmed + no gap day
           </p>
-          {condC?.detail && (
-            <p className="atlas-f33-condition-detail">{condC.detail}</p>
-          )}
+          {condC?.detail && <p className="atlas-f33-condition-detail">{condC.detail}</p>}
         </div>
       )}
 
@@ -327,8 +306,8 @@ function F33Content({ data }: { data: LeapsEligibility }) {
       <div className="atlas-f33-and-gate" data-testid="f33-and-gate-note">
         <span className="atlas-f33-and-gate-icon">⚠</span>
         <span className="atlas-f33-and-gate-text">
-          Entries above ${AND_GATE_THRESHOLD_USD.toLocaleString()} require{' '}
-          <strong>AND gate</strong> — CLEAR regime + F29 3-of-5 signals
+          Entries above ${AND_GATE_THRESHOLD_USD.toLocaleString()} require <strong>AND gate</strong>{' '}
+          — CLEAR regime + F29 3-of-5 signals
         </span>
       </div>
 

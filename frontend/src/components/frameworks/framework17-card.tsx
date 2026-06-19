@@ -2,8 +2,12 @@
 
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
-import { useFramework17, useSetFramework17Flag, useFramework17History } from '@/lib/hooks/use-framework17';
-import type { F17Severity, Framework17Result, GeoFlagState } from '@/lib/schemas/framework17';
+import {
+  useFramework17,
+  useSetFramework17Flag,
+  useFramework17History,
+} from '@/lib/hooks/use-framework17';
+import type { F17Severity, GeoFlagState } from '@/lib/schemas/framework17';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -76,7 +80,15 @@ function DataSourceBadge({ label, available }: { label: string; available: boole
   );
 }
 
-function StatRow({ label, value, highlight }: { label: string; value: string; highlight?: string }) {
+function StatRow({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: string;
+}) {
   return (
     <div className="atlas-f17-stat-row">
       <span className="atlas-f17-stat-label">{label}</span>
@@ -104,9 +116,7 @@ function SetFlagForm({ onClose }: { onClose: () => void }) {
     setSubmitError(null);
 
     if (overrideReason.trim().length < MIN_OVERRIDE_REASON_LEN) {
-      setSubmitError(
-        `Override reason must be at least ${MIN_OVERRIDE_REASON_LEN} characters.`,
-      );
+      setSubmitError(`Override reason must be at least ${MIN_OVERRIDE_REASON_LEN} characters.`);
       return;
     }
 
@@ -196,24 +206,14 @@ function SetFlagForm({ onClose }: { onClose: () => void }) {
       </div>
 
       {(submitError ?? (isError && error?.message)) && (
-        <p className="atlas-f17-form-error">
-          {submitError ?? error?.message}
-        </p>
+        <p className="atlas-f17-form-error">{submitError ?? error?.message}</p>
       )}
 
       <div className="atlas-f17-form-actions">
-        <button
-          type="button"
-          className="atlas-f17-btn-cancel"
-          onClick={onClose}
-        >
+        <button type="button" className="atlas-f17-btn-cancel" onClick={onClose}>
           Cancel
         </button>
-        <button
-          type="submit"
-          className="atlas-f17-btn-submit"
-          disabled={isPending}
-        >
+        <button type="submit" className="atlas-f17-btn-submit" disabled={isPending}>
           {isPending ? 'Saving…' : 'Set Flag'}
         </button>
       </div>
@@ -225,20 +225,20 @@ function SetFlagForm({ onClose }: { onClose: () => void }) {
 // Main card
 // ---------------------------------------------------------------------------
 
-export function Framework17Card(_props: Framework17CardProps) {
+export function Framework17Card() {
   const { data, isLoading, isError } = useFramework17();
   const { data: history } = useFramework17History(14);
   const [showSetFlagForm, setShowSetFlagForm] = useState(false);
 
   if (isLoading) {
-    return <div className="atlas-f17-card atlas-f17-loading">Loading F17 Geopolitical Monitor…</div>;
+    return (
+      <div className="atlas-f17-card atlas-f17-loading">Loading F17 Geopolitical Monitor…</div>
+    );
   }
 
   if (isError || !data) {
     return (
-      <div className="atlas-f17-card atlas-f17-error">
-        F17 Geopolitical Monitor unavailable.
-      </div>
+      <div className="atlas-f17-card atlas-f17-error">F17 Geopolitical Monitor unavailable.</div>
     );
   }
 
@@ -257,9 +257,7 @@ export function Framework17Card(_props: Framework17CardProps) {
           <span className={cn('atlas-f17-flag-chip', chipClass)}>
             {FLAG_LABEL[data.flag_state]}
           </span>
-          <span className={cn('atlas-f17-sev-badge', sevClass)}>
-            {data.severity}
-          </span>
+          <span className={cn('atlas-f17-sev-badge', sevClass)}>{data.severity}</span>
         </div>
       </div>
 
@@ -282,34 +280,36 @@ export function Framework17Card(_props: Framework17CardProps) {
       {/* ── Section 3: Flag panel ─────────────────────────────────────── */}
       <div className="atlas-f17-flag-panel">
         <StatRow label="Flag State" value={FLAG_LABEL[data.flag_state]} />
-        <StatRow
-          label="Set By"
-          value={data.set_by ?? '—'}
-        />
+        <StatRow label="Set By" value={data.set_by ?? '—'} />
         <StatRow
           label="Set At"
           value={data.set_at ? new Date(data.set_at).toLocaleString() : '—'}
         />
-        {data.notes && (
-          <StatRow label="Notes" value={data.notes} />
-        )}
+        {data.notes && <StatRow label="Notes" value={data.notes} />}
       </div>
 
       {/* ── Section 4: Conflict details ───────────────────────────────── */}
       <div className="atlas-f17-conflict-panel">
-        <StatRow
-          label="Conflict Start"
-          value={formatDate(data.conflict_start_date)}
-        />
+        <StatRow label="Conflict Start" value={formatDate(data.conflict_start_date)} />
         <StatRow
           label="Duration"
           value={formatDuration(data.conflict_duration_days)}
-          highlight={data.conflict_duration_days !== null && data.conflict_duration_days > 30 ? 'is-f17-value-warn' : undefined}
+          highlight={
+            data.conflict_duration_days !== null && data.conflict_duration_days > 30
+              ? 'is-f17-value-warn'
+              : undefined
+          }
         />
         <StatRow
           label="Brent Crude"
           value={formatBrent(data.brent_price)}
-          highlight={data.brent_price !== null && data.brent_price > 110 ? 'is-f17-value-critical' : data.brent_price !== null && data.brent_price > 95 ? 'is-f17-value-warn' : undefined}
+          highlight={
+            data.brent_price !== null && data.brent_price > 110
+              ? 'is-f17-value-critical'
+              : data.brent_price !== null && data.brent_price > 95
+                ? 'is-f17-value-warn'
+                : undefined
+          }
         />
       </div>
 
@@ -334,10 +334,7 @@ export function Framework17Card(_props: Framework17CardProps) {
       {/* ── Section 6: Operator action ───────────────────────────────── */}
       <div className="atlas-f17-operator-section">
         {!showSetFlagForm ? (
-          <button
-            className="atlas-f17-set-flag-btn"
-            onClick={() => setShowSetFlagForm(true)}
-          >
+          <button className="atlas-f17-set-flag-btn" onClick={() => setShowSetFlagForm(true)}>
             Update Geopolitical Flag
           </button>
         ) : (
@@ -352,17 +349,10 @@ export function Framework17Card(_props: Framework17CardProps) {
           <div className="atlas-f17-history-list">
             {history.slice(0, 7).map((entry) => (
               <div key={entry.id} className="atlas-f17-history-row">
-                <span
-                  className={cn(
-                    'atlas-f17-history-state',
-                    FLAG_CHIP_CLASS[entry.flag_state],
-                  )}
-                >
+                <span className={cn('atlas-f17-history-state', FLAG_CHIP_CLASS[entry.flag_state])}>
                   {FLAG_LABEL[entry.flag_state]}
                 </span>
-                <span className="atlas-f17-history-date">
-                  {entry.session_date}
-                </span>
+                <span className="atlas-f17-history-date">{entry.session_date}</span>
                 <span className="atlas-f17-history-by">{entry.set_by}</span>
               </div>
             ))}

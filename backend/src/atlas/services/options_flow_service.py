@@ -346,11 +346,7 @@ def _normalize_tape_record(rec: dict[str, Any]) -> dict[str, Any]:
 
     # option_type (call/put) — explicit field, else the OCC chain symbol's C/P.
     if not (rec.get("option_type") or rec.get("type")):
-        chain = (
-            rec.get("option_chain")
-            or rec.get("option_chain_id")
-            or rec.get("option_symbol")
-        )
+        chain = rec.get("option_chain") or rec.get("option_chain_id") or rec.get("option_symbol")
         if isinstance(chain, str):
             m = _OCC_TYPE_RE.search(chain)
             if m:
@@ -420,9 +416,7 @@ async def _fetch_option_trades_tape(
         if not batch:
             break
 
-        all_trades.extend(
-            _normalize_tape_record(rec) for rec in batch if isinstance(rec, dict)
-        )
+        all_trades.extend(_normalize_tape_record(rec) for rec in batch if isinstance(rec, dict))
 
         distinct_days = {
             str(r.get("executed_at", ""))[:10] for r in all_trades if r.get("executed_at")
@@ -667,9 +661,7 @@ def _canonical_plumbing_reason(code: str) -> str | None:
     return None
 
 
-def _dark_pool_plumbing_reason(
-    rec: dict[str, Any], sale_cond_codes: tuple[str, ...]
-) -> str | None:
+def _dark_pool_plumbing_reason(rec: dict[str, Any], sale_cond_codes: tuple[str, ...]) -> str | None:
     """Return the canonical plumbing reason when a print should be stripped."""
     if _truthy_flag(rec.get("canceled")):
         return "canceled"
@@ -754,9 +746,7 @@ def _reconcile_dark_pool(prints: list[dict[str, Any]]) -> dict[str, Any]:
         "kept_count": kept_count,
         "large_buys": large_buys,
         "largest_kept_buy": (largest_kept_buy if largest_kept_buy > 0 else None),
-        "largest_stripped_print": (
-            largest_stripped_print if largest_stripped_print > 0 else None
-        ),
+        "largest_stripped_print": (largest_stripped_print if largest_stripped_print > 0 else None),
         "stripped_by_reason": dict(stripped_by_reason),
     }
 
@@ -978,7 +968,7 @@ def _f4_add_impact(score: int) -> str:
     if score >= 85:
         return "Add confirmation only if all other gates pass"
     if score >= 70:
-        return "Add allowed only if F4a, VWAP, cluster, size & regime gates clear"
+        return "Add allowed only if F4a, VWAP, cluster & size gates clear"
     if score >= 65:
         return "Starter / watch — F4b supportive, no full add from F4b alone"
     if score >= 60:
@@ -1024,9 +1014,11 @@ def _moneyness_weight(opt_type: str, strike: float | None, underlying: float | N
     if strike is None or underlying is None or underlying <= 0:
         return _F4_MW_ATM
     # dist > 0 = out-of-the-money for this option type.
-    dist = (strike - underlying) / underlying if opt_type == "call" else (
-        underlying - strike
-    ) / underlying
+    dist = (
+        (strike - underlying) / underlying
+        if opt_type == "call"
+        else (underlying - strike) / underlying
+    )
     if abs(dist) <= _F4_MW_ATM_BAND:
         return _F4_MW_ATM
     if dist > 0:  # OTM
@@ -1093,6 +1085,12 @@ def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
     raw_largest_bull = 0.0
     raw_largest_call_ask = 0.0
     adjusted_largest_bull = 0.0
+    raw_call_ask = 0.0
+    raw_call_bid = 0.0
+    raw_put_ask = 0.0
+    raw_put_bid = 0.0
+    total_alerts = len(alerts)
+    directional_alerts = 0
     declassified_by_reason: dict[str, float] = defaultdict(float)
 
     def _record_loss(
@@ -1115,6 +1113,7 @@ def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
         opt_type = str(rec.get("type", "")).lower()
         if opt_type not in ("call", "put"):
             continue
+        directional_alerts += 1
         ask = _safe_float(rec.get("total_ask_side_prem")) or 0.0
         bid = _safe_float(rec.get("total_bid_side_prem")) or 0.0
         strike = _safe_float(rec.get("strike"))
@@ -1127,6 +1126,8 @@ def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
         e_reason = _expiry_reason(dte)
 
         if opt_type == "call":
+            raw_call_ask += ask
+            raw_call_bid += bid
             raw_bull += ask
             adjusted_bull += ask * weight
             raw_bear += bid
@@ -1137,6 +1138,8 @@ def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
             _record_loss(ask, mw, ew, m_reason, e_reason)
             _record_loss(bid, mw, ew, m_reason, e_reason)
         else:
+            raw_put_ask += ask
+            raw_put_bid += bid
             raw_bear += ask
             adjusted_bear += ask * weight
             raw_bull += bid
@@ -1155,9 +1158,14 @@ def _directional_premium_debug(alerts: list[dict[str, Any]]) -> dict[str, Any]:
         "adjusted_bull": adjusted_bull,
         "adjusted_bear": adjusted_bear,
         "adjusted_share": _bullish_share(adjusted_bull, adjusted_bear),
-        "adjusted_largest_bull": (
-            adjusted_largest_bull if adjusted_largest_bull > 0 else None
-        ),
+        "adjusted_largest_bull": (adjusted_largest_bull if adjusted_largest_bull > 0 else None),
+        "raw_call_ask": raw_call_ask,
+        "raw_call_bid": raw_call_bid,
+        "raw_put_ask": raw_put_ask,
+        "raw_put_bid": raw_put_bid,
+        "total_alerts": total_alerts,
+        "directional_alerts": directional_alerts,
+        "excluded_alerts": max(total_alerts - directional_alerts, 0),
         "declassified_by_reason": dict(declassified_by_reason),
     }
 
@@ -1239,6 +1247,11 @@ _F4_LIVE_BEAR_REVERSAL: Final[str] = "Bearish reversal"
 _F4_LIVE_MIXED: Final[str] = "Mixed / structured"
 _F4_LIVE_DATA_GAP: Final[str] = "Data gap"
 
+_F4_PULSE_BULL_TRIGGER: Final[str] = "TACTICAL_BULLISH_TRIGGER"
+_F4_PULSE_BEAR_TRIGGER: Final[str] = "TACTICAL_BEARISH_TRIGGER"
+_F4_PULSE_NEUTRAL: Final[str] = "TACTICAL_NEUTRAL"
+_F4_PULSE_DATA_GAP: Final[str] = "DATA_GAP"
+
 
 def _window_score(sessions: list[list[dict[str, Any]]], start: int, end: int) -> int | None:
     """Classified options score over sessions[start:end]; None if no flow there."""
@@ -1284,6 +1297,17 @@ def _live_tape_state(current: int | None, baseline: int | None) -> str:
     if delta <= -_F4_LIVE_DELTA:
         return _F4_LIVE_DETERIORATING
     return _F4_LIVE_MIXED
+
+
+def _live_pulse_state(current: int | None) -> str:
+    """Classify the current-session tactical pulse (separate from F4b persistence)."""
+    if current is None:
+        return _F4_PULSE_DATA_GAP
+    if current >= 70:
+        return _F4_PULSE_BULL_TRIGGER
+    if current <= 30:
+        return _F4_PULSE_BEAR_TRIGGER
+    return _F4_PULSE_NEUTRAL
 
 
 def _otm_ask_split(alerts: list[dict[str, Any]]) -> tuple[float, float]:
@@ -1624,13 +1648,16 @@ def _dark_pool_settlement_ratio(prints: list[dict[str, Any]]) -> float | None:
         ask = _safe_float(rec.get("nbbo_ask"))
         codes = _parse_sale_cond_codes(rec.get("sale_cond_codes"))
         total += 1
-        if _classify_dark_pool_print(
-            price,
-            bid,
-            ask,
-            codes,
-            is_canceled=_truthy_flag(rec.get("canceled")),
-        ) == "SETTLEMENT":
+        if (
+            _classify_dark_pool_print(
+                price,
+                bid,
+                ask,
+                codes,
+                is_canceled=_truthy_flag(rec.get("canceled")),
+            )
+            == "SETTLEMENT"
+        ):
             settlements += 1
     if total == 0:
         return None
@@ -1840,6 +1867,15 @@ def _build_response_v2(
     raw_bullish_share: float | None = None
     raw_largest_bullish_print: float | None = None
     raw_largest_call_ask_print: float | None = None
+    raw_call_ask_premium: float | None = None
+    raw_call_bid_premium: float | None = None
+    raw_put_ask_premium: float | None = None
+    raw_put_bid_premium: float | None = None
+    f4b_universe_total_alerts = 0
+    f4b_universe_directional_alerts = 0
+    f4b_universe_excluded_alerts = 0
+    f4b_universe_source = "NONE"
+    f4b_score_input_source = "NONE"
     declassified_premium_by_reason: dict[str, float] = {}
     adjusted_bull_premium: float | None = None
     adjusted_bear_premium: float | None = None
@@ -1851,12 +1887,15 @@ def _build_response_v2(
     live_tape_state: str = _F4_LIVE_DATA_GAP
     persistence_state: str = _F4_STATE_NEUTRAL
     current_session_net: float | None = None
+    live_pulse_score: int | None = None
+    live_pulse_state: str = _F4_PULSE_DATA_GAP
     otm_call_ask: float | None = None
     otm_put_ask: float | None = None
     # Equity accumulation (dark-pool net buying) only LABELS the hedge context here;
     # the dark-pool CONFIRMATION upgrade/downgrade is applied to the score below.
     equity_bullish = dp_net_flow is not None and dp_net_flow > 0
     if opt_trades is not None:
+        f4b_universe_source = "UW_ALERTS_2_SESSION"
         windowed_opts = _filter_to_recent_sessions(
             opt_trades, timestamp_key="created_at", n=_F4_OPTIONS_MAX_SESSIONS
         )
@@ -1874,12 +1913,20 @@ def _build_response_v2(
             raw_bullish_share = debug["raw_share"]
             raw_largest_bullish_print = debug["raw_largest_bull"]
             raw_largest_call_ask_print = debug["raw_largest_call_ask"]
+            raw_call_ask_premium = float(debug["raw_call_ask"])
+            raw_call_bid_premium = float(debug["raw_call_bid"])
+            raw_put_ask_premium = float(debug["raw_put_ask"])
+            raw_put_bid_premium = float(debug["raw_put_bid"])
+            f4b_universe_total_alerts = int(debug["total_alerts"])
+            f4b_universe_directional_alerts = int(debug["directional_alerts"])
+            f4b_universe_excluded_alerts = int(debug["excluded_alerts"])
             declassified_premium_by_reason = debug["declassified_by_reason"]
             adjusted_bull_premium = float(debug["adjusted_bull"])
             adjusted_bear_premium = float(debug["adjusted_bear"])
             adjusted_bullish_share = debug["adjusted_share"]
             adjusted_largest_bullish_print = debug["adjusted_largest_bull"]
             largest_opt_buy = raw_largest_bullish_print
+            f4b_score_input_source = "ADJUSTED"
         # Full-window share + net premium for display.
         bullish_prem = adjusted_bull_premium or 0.0
         bearish_prem = adjusted_bear_premium or 0.0
@@ -1887,6 +1934,8 @@ def _build_response_v2(
         opt_net_flow = bullish_prem - bearish_prem
         # Live tape state: today vs the 2-session baseline.
         current_score = _window_score(sessions, 0, 1)
+        live_pulse_score = current_score
+        live_pulse_state = _live_pulse_state(current_score)
         persistence_score = _window_score(sessions, 0, _F4_LOOKBACK_SESSIONS)
         live_tape_state = _live_tape_state(current_score, persistence_score)
         persistence_state = _f4_state_label(
@@ -1899,6 +1948,8 @@ def _build_response_v2(
             windowed_opts, equity_accumulation_bullish=equity_bullish
         )
     elif opt_tape is not None:
+        f4b_universe_source = "UW_TAPE_2_SESSION"
+        f4b_score_input_source = "RAW_TAPE"
         windowed_tape = _filter_to_recent_sessions(opt_tape, timestamp_key="executed_at")
         opt_window_empty = not windowed_tape
         opt_net_flow, largest_opt_buy = _decay_weighted_tape(windowed_tape)
@@ -2005,6 +2056,17 @@ def _build_response_v2(
         adjusted_bear_premium_usd=adjusted_bear_premium,
         adjusted_bullish_share=adjusted_bullish_share,
         adjusted_largest_bullish_print_usd=adjusted_largest_bullish_print,
+        f4b_score_input_source=f4b_score_input_source,
+        f4b_universe_source=f4b_universe_source,
+        f4b_universe_total_alerts=f4b_universe_total_alerts,
+        f4b_universe_directional_alerts=f4b_universe_directional_alerts,
+        f4b_universe_excluded_alerts=f4b_universe_excluded_alerts,
+        raw_call_ask_premium_usd=raw_call_ask_premium,
+        raw_call_bid_premium_usd=raw_call_bid_premium,
+        raw_put_ask_premium_usd=raw_put_ask_premium,
+        raw_put_bid_premium_usd=raw_put_bid_premium,
+        live_pulse_score=live_pulse_score,
+        live_pulse_state=live_pulse_state,
         dark_pool_settlement_ratio=dp_settlement_ratio,
         options_strategy_type=None,
         dark_pool_state=dp_state,
@@ -2098,9 +2160,7 @@ class OptionsFlowService:
                         client, ticker, self._uw_headers
                     )
                 if opt_alerts is None:
-                    opt_alerts = await _fetch_option_flow_alerts(
-                        client, ticker, self._uw_headers
-                    )
+                    opt_alerts = await _fetch_option_flow_alerts(client, ticker, self._uw_headers)
 
         # Fallback: only when the alerts feed hard-errored do we reach for the
         # raw per-trade tape (undersampled/uncalibrated) so a transient alerts
@@ -2108,9 +2168,7 @@ class OptionsFlowService:
         opt_tape: list[dict[str, Any]] | None = None
         if opt_alerts is None:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                opt_tape = await _fetch_option_trades_tape_cached(
-                    client, ticker, self._uw_headers
-                )
+                opt_tape = await _fetch_option_trades_tape_cached(client, ticker, self._uw_headers)
 
         # Step 3: aggregate + score + build response.
         result = _build_response_v2(
@@ -2416,9 +2474,7 @@ def _combine_f4_scores(
             dp_score >= _F4_DP_DOMINANT_SCORE_MIN
             and _F4_OPT_NEUTRAL_BAND_LOW <= opt_score <= _F4_OPT_NEUTRAL_BAND_HIGH
         ):
-            blended = round(
-                dp_score * _F4_DP_DOMINANT_WEIGHT + opt_score * _F4_OPT_DOMINANT_WEIGHT
-            )
+            blended = round(dp_score * _F4_DP_DOMINANT_WEIGHT + opt_score * _F4_OPT_DOMINANT_WEIGHT)
             return (blended, _F4_SOURCE_BOTH)
         return (round((dp_score + opt_score) / 2), _F4_SOURCE_BOTH)
     if dp_score is not None:

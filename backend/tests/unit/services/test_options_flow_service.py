@@ -216,8 +216,106 @@ def test_build_response_v2_exposes_f4b_debug_fields_for_clean_bullish_tape() -> 
     assert response.flow_direction == "BULLISH"
 
 
-def test_build_response_v2_surfaces_f4b_declassified_premium_and_scores_from_adjusted_share(
-) -> None:
+def test_build_response_v2_exposes_score_input_source_and_universe_diagnostics() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            _atm("call", ask=10_000_000.0),
+            _atm("call", bid=1_000_000.0),
+            _atm("put", ask=2_000_000.0),
+            _atm("put", bid=4_000_000.0),
+        ],
+    )
+
+    assert response.f4b_score_input_source == "ADJUSTED"
+    assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
+    assert response.f4b_universe_total_alerts == 4
+    assert response.f4b_universe_directional_alerts == 4
+    assert response.f4b_universe_excluded_alerts == 0
+    assert response.raw_call_ask_premium_usd == pytest.approx(10_000_000.0)
+    assert response.raw_call_bid_premium_usd == pytest.approx(1_000_000.0)
+    assert response.raw_put_ask_premium_usd == pytest.approx(2_000_000.0)
+    assert response.raw_put_bid_premium_usd == pytest.approx(4_000_000.0)
+
+
+def test_build_response_v2_exposes_tactical_live_pulse_as_separate_chip() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            {
+                "type": "call",
+                "created_at": "2026-06-15T15:00:00Z",
+                "expiry": "2026-08-15",
+                "strike": 50,
+                "underlying_price": 50,
+                "total_ask_side_prem": 1_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 1_000_000.0,
+            },
+            {
+                "type": "put",
+                "created_at": "2026-06-14T15:00:00Z",
+                "expiry": "2026-08-15",
+                "strike": 50,
+                "underlying_price": 50,
+                "total_ask_side_prem": 20_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 20_000_000.0,
+            },
+        ],
+    )
+
+    assert response.live_pulse_score is not None
+    assert response.live_pulse_score != response.f4_score
+    assert response.live_pulse_score > response.f4_score
+    assert response.live_pulse_state == "TACTICAL_BULLISH_TRIGGER"
+
+
+def test_build_response_v2_dram_etf_proxy_path_surfaces_bearish_live_pulse_diagnostics() -> None:
+    """MRVL/SOXX-style check: keep persistence scored, surface bearish same-day pulse."""
+    response = _build_response_v2(
+        ticker="MRVL",
+        market_cap=85_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            {
+                "type": "put",
+                "created_at": "2026-06-15T15:10:00Z",
+                "expiry": "2026-08-15",
+                "strike": 60,
+                "underlying_price": 60,
+                "total_ask_side_prem": 12_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 12_000_000.0,
+            },
+            {
+                "type": "call",
+                "created_at": "2026-06-14T15:10:00Z",
+                "expiry": "2026-08-15",
+                "strike": 60,
+                "underlying_price": 60,
+                "total_ask_side_prem": 6_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 6_000_000.0,
+            },
+        ],
+    )
+
+    assert response.f4b_score_input_source == "ADJUSTED"
+    assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
+    assert response.f4b_universe_total_alerts == 2
+    assert response.live_pulse_score is not None
+    assert response.live_pulse_score < response.f4_score
+    assert response.live_pulse_state == "TACTICAL_BEARISH_TRIGGER"
+
+
+def test_build_response_v2_surfaces_f4b_declassified_premium_and_scores_from_adjusted_share() -> (
+    None
+):
     response = _build_response_v2(
         ticker="ABC",
         market_cap=10_000_000_000.0,
@@ -287,6 +385,27 @@ def test_build_response_v2_suppresses_f4b_debug_bridge_on_tape_fallback() -> Non
     assert response.adjusted_bullish_share is None
     assert response.adjusted_largest_bullish_print_usd is None
     assert response.declassified_premium_by_reason == {}
+    assert response.f4b_score_input_source == "RAW_TAPE"
+    assert response.f4b_universe_source == "UW_TAPE_2_SESSION"
+    assert response.f4b_universe_total_alerts == 0
+    assert response.f4b_universe_directional_alerts == 0
+    assert response.f4b_universe_excluded_alerts == 0
+
+
+def test_build_response_v2_sets_none_input_source_when_no_options_source_exists() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=None,
+        opt_tape=None,
+    )
+
+    assert response.f4b_score_input_source == "NONE"
+    assert response.f4b_universe_source == "NONE"
+    assert response.f4b_universe_total_alerts == 0
+    assert response.f4b_universe_directional_alerts == 0
+    assert response.f4b_universe_excluded_alerts == 0
 
 
 def test_build_response_v2_keeps_legacy_largest_options_buy_raw() -> None:
@@ -316,14 +435,30 @@ def test_build_response_v2_keeps_legacy_largest_options_buy_raw() -> None:
 def _structure_legs(*, put_ask: float) -> list[dict[str, object]]:
     """Two protective put legs + a near-dated covered-call overwrite + a LEAP."""
     return [
-        {"type": "put", "expiry": "2026-09-19", "total_ask_side_prem": put_ask / 2,
-         "total_bid_side_prem": 1_000_000.0},
-        {"type": "put", "expiry": "2026-09-19", "total_ask_side_prem": put_ask / 2,
-         "total_bid_side_prem": 1_000_000.0},
-        {"type": "call", "expiry": "2026-08-21", "total_ask_side_prem": 1_000_000.0,
-         "total_bid_side_prem": 2_000_000.0},  # near-dated overwrite (bid-dominant)
-        {"type": "call", "expiry": "2028-01-21", "total_ask_side_prem": 5_000_000.0,
-         "total_bid_side_prem": 500_000.0},  # LEAP accumulation (ask-dominant)
+        {
+            "type": "put",
+            "expiry": "2026-09-19",
+            "total_ask_side_prem": put_ask / 2,
+            "total_bid_side_prem": 1_000_000.0,
+        },
+        {
+            "type": "put",
+            "expiry": "2026-09-19",
+            "total_ask_side_prem": put_ask / 2,
+            "total_bid_side_prem": 1_000_000.0,
+        },
+        {
+            "type": "call",
+            "expiry": "2026-08-21",
+            "total_ask_side_prem": 1_000_000.0,
+            "total_bid_side_prem": 2_000_000.0,
+        },  # near-dated overwrite (bid-dominant)
+        {
+            "type": "call",
+            "expiry": "2028-01-21",
+            "total_ask_side_prem": 5_000_000.0,
+            "total_bid_side_prem": 500_000.0,
+        },  # LEAP accumulation (ask-dominant)
     ]
 
 
@@ -424,16 +559,22 @@ def test_build_response_v2_dark_pool_does_not_enter_f4_score() -> None:
 def _dp_buy(prem: float) -> dict:
     return {
         "executed_at": "2026-06-15T20:00:00Z",
-        "price": 250.2, "nbbo_bid": 249.6, "nbbo_ask": 250.0,
-        "premium": prem, "sale_cond_codes": [],
+        "price": 250.2,
+        "nbbo_bid": 249.6,
+        "nbbo_ask": 250.0,
+        "premium": prem,
+        "sale_cond_codes": [],
     }
 
 
 def _dp_sell(prem: float) -> dict:
     return {
         "executed_at": "2026-06-15T20:00:00Z",
-        "price": 248.0, "nbbo_bid": 249.6, "nbbo_ask": 250.0,
-        "premium": prem, "sale_cond_codes": [],
+        "price": 248.0,
+        "nbbo_bid": 249.6,
+        "nbbo_ask": 250.0,
+        "premium": prem,
+        "sale_cond_codes": [],
     }
 
 

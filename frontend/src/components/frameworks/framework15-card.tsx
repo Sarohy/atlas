@@ -77,13 +77,7 @@ function StatCard({
   );
 }
 
-function DataSourceBadge({
-  label,
-  available,
-}: {
-  label: string;
-  available: boolean;
-}) {
+function DataSourceBadge({ label, available }: { label: string; available: boolean }) {
   return (
     <span
       className={cn(
@@ -97,13 +91,7 @@ function DataSourceBadge({
   );
 }
 
-function ActionChip({
-  label,
-  blocked,
-}: {
-  label: string;
-  blocked: boolean;
-}) {
+function ActionChip({ label, blocked }: { label: string; blocked: boolean }) {
   return (
     <span
       className={cn(
@@ -186,16 +174,29 @@ function OverrideForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="atlas-f15-override-form" data-testid="f15-override-form">
+    <form
+      onSubmit={handleSubmit}
+      className="atlas-f15-override-form"
+      data-testid="f15-override-form"
+    >
       <label className="atlas-f15-override-label" htmlFor="f15-override-reason">
         Override Justification
-        <span className={cn('atlas-f15-char-count', isValid ? 'is-f15-char-valid' : 'is-f15-char-invalid')}>
-          {' '}({charCount}/{MIN_OVERRIDE_REASON_LEN} min)
+        <span
+          className={cn(
+            'atlas-f15-char-count',
+            isValid ? 'is-f15-char-valid' : 'is-f15-char-invalid',
+          )}
+        >
+          {' '}
+          ({charCount}/{MIN_OVERRIDE_REASON_LEN} min)
         </span>
       </label>
       <textarea
         id="f15-override-reason"
-        className={cn('atlas-f15-override-textarea', !isValid && reason.length > 0 ? 'is-f15-textarea-invalid' : '')}
+        className={cn(
+          'atlas-f15-override-textarea',
+          !isValid && reason.length > 0 ? 'is-f15-textarea-invalid' : '',
+        )}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Provide detailed justification for overriding the F15 VIX session halt..."
@@ -217,7 +218,10 @@ function OverrideForm({
       />
       <button
         type="submit"
-        className={cn('atlas-f15-override-submit', !isValid || isPending ? 'is-f15-submit-disabled' : '')}
+        className={cn(
+          'atlas-f15-override-submit',
+          !isValid || isPending ? 'is-f15-submit-disabled' : '',
+        )}
         disabled={!isValid || isPending}
         data-testid="f15-override-submit"
       >
@@ -298,11 +302,12 @@ function Framework15Content({ data }: { data: Framework15Result }) {
               VIX spike of <strong>{spikeDisplay} points</strong> exceeded threshold of{' '}
               <strong>{thresholdDisplay} points</strong>.
               {data.severity && (
-                <> Severity: <strong>{data.severity}</strong>.</>
+                <>
+                  {' '}
+                  Severity: <strong>{data.severity}</strong>.
+                </>
               )}
-              {data.halt_triggered_at && (
-                <> Halt triggered at {data.halt_triggered_at}.</>
-              )}
+              {data.halt_triggered_at && <> Halt triggered at {data.halt_triggered_at}.</>}
             </p>
             <div className="atlas-f15-action-chips" data-testid="f15-action-chips">
               <ActionChip label="New Market Orders" blocked={data.new_market_orders_blocked} />
@@ -314,8 +319,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
 
         {f15Status === 'CLEAR' && (
           <p className="atlas-f15-status-headline">
-            VIX within normal range — session open:{' '}
-            <strong>{sessionOpenDisplay}</strong>, current:{' '}
+            VIX within normal range — session open: <strong>{sessionOpenDisplay}</strong>, current:{' '}
             <strong>{currentVixDisplay}</strong>. No halt active.
           </p>
         )}
@@ -324,8 +328,8 @@ function Framework15Content({ data }: { data: Framework15Result }) {
           <p className="atlas-f15-status-headline">
             VIX data unavailable.
             {!data.polygon_available && ' Polygon.io feed offline.'}
-            {!data.regime_available && ' Framework 2 regime unavailable.'}
-            {' '}Orders blocked for safety.
+            {!data.regime_available && ' Framework 2 regime unavailable.'} Orders blocked for
+            safety.
           </p>
         )}
 
@@ -339,9 +343,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       {/* ── Section 4: Paused orders (only when halt active) ───────────── */}
       {data.f15_active === true && data.paused_orders.length > 0 && (
         <div className="atlas-f15-paused-orders" data-testid="f15-paused-orders">
-          <h4 className="atlas-f15-section-heading">
-            Paused Orders ({data.paused_orders_count})
-          </h4>
+          <h4 className="atlas-f15-section-heading">Paused Orders ({data.paused_orders_count})</h4>
           <table className="atlas-f15-orders-table">
             <thead>
               <tr>
@@ -354,11 +356,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
             </thead>
             <tbody>
               {data.paused_orders.map((order) => (
-                <PausedOrderRow
-                  key={order.order_id}
-                  order={order}
-                  onReview={handleReviewOrder}
-                />
+                <PausedOrderRow key={order.order_id} order={order} onReview={handleReviewOrder} />
               ))}
             </tbody>
           </table>
@@ -370,13 +368,10 @@ function Framework15Content({ data }: { data: Framework15Result }) {
         <div className="atlas-f15-override-panel" data-testid="f15-override-panel">
           <h4 className="atlas-f15-section-heading">Human Override</h4>
           <p className="atlas-f15-override-warning">
-            ⚠ Override does not clear the halt alert. It only allows specified
-            order types to proceed for this session.
+            ⚠ Override does not clear the halt alert. It only allows specified order types to
+            proceed for this session.
           </p>
-          <OverrideForm
-            onSubmit={handleOverrideSubmit}
-            isPending={addOverrideMutation.isPending}
-          />
+          <OverrideForm onSubmit={handleOverrideSubmit} isPending={addOverrideMutation.isPending} />
           {addOverrideMutation.isError && (
             <p className="atlas-f15-override-error" data-testid="f15-override-error">
               Override failed: {addOverrideMutation.error?.message ?? 'Unknown error'}
@@ -390,9 +385,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
         <div className="atlas-f15-override-applied" data-testid="f15-override-applied">
           <span className="atlas-f15-override-badge">OVERRIDE APPLIED</span>
           {data.override_reason && (
-            <p className="atlas-f15-override-reason">
-              Reason: {data.override_reason}
-            </p>
+            <p className="atlas-f15-override-reason">Reason: {data.override_reason}</p>
           )}
         </div>
       )}
@@ -406,8 +399,8 @@ function Framework15Content({ data }: { data: Framework15Result }) {
         </div>
         {data.f15_active === true && (
           <p className="atlas-f15-f25-note">
-            F25 Liquidity Protocol is receiving a live VIX spike signal from F15.
-            Thin-market order rules apply.
+            F25 Liquidity Protocol is receiving a live VIX spike signal from F15. Thin-market order
+            rules apply.
           </p>
         )}
       </div>
@@ -417,8 +410,14 @@ function Framework15Content({ data }: { data: Framework15Result }) {
       {/* or F2 — those sources aren't offline, they were just not needed.   */}
       {/* Show ONLINE when market is closed to avoid a misleading OFFLINE.   */}
       <div className="atlas-f15-sources" data-testid="f15-sources">
-        <DataSourceBadge label="POLYGON" available={data.market_open ? data.polygon_available : true} />
-        <DataSourceBadge label="F2 REGIME" available={data.market_open ? data.regime_available : true} />
+        <DataSourceBadge
+          label="POLYGON"
+          available={data.market_open ? data.polygon_available : true}
+        />
+        <DataSourceBadge
+          label="F2 REGIME"
+          available={data.market_open ? data.regime_available : true}
+        />
       </div>
 
       {/* ── Warnings ───────────────────────────────────────────────────── */}
@@ -439,7 +438,7 @@ function Framework15Content({ data }: { data: Framework15Result }) {
 // Main card
 // ---------------------------------------------------------------------------
 
-export function Framework15Card(_props: Framework15CardProps) {
+export function Framework15Card() {
   const { data, isLoading, isError } = useFramework15();
 
   const f15Status = data?.f15_status ?? 'UNKNOWN';
@@ -447,10 +446,7 @@ export function Framework15Card(_props: Framework15CardProps) {
 
   return (
     <div
-      className={cn(
-        'atlas-f15-card',
-        data ? STATUS_CHIP_CLASS[f15Status] : 'is-f15-loading',
-      )}
+      className={cn('atlas-f15-card', data ? STATUS_CHIP_CLASS[f15Status] : 'is-f15-loading')}
       data-testid="f15-card"
     >
       {/* ── Header ──────────────────────────────────────────────────────── */}

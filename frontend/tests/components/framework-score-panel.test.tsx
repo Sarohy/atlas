@@ -448,6 +448,43 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-score')).toHaveClass('is-blue');
   });
 
+  it('keeps no-fresh-add headline when extension overlay blocks despite flow confirmation', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'MRVL',
+      final_score: 76,
+      raw_total: 76,
+    });
+    mockState.momentumData = { ticker: 'MRVL', f1_score: 86 };
+    mockState.earningsData = { ticker: 'MRVL', f2_score: 78 };
+    mockState.analystData = { ticker: 'MRVL', f3_score: 74 };
+    mockState.fundamentalData = { ticker: 'MRVL', f5_score: 82, f5_grade: 'BUY' };
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'MRVL',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+      live_tape_state: 'Bullish persistent',
+      persistence_state: 'Bullish',
+    });
+    mockState.extensionOverlayData = makeExtensionOverlayData({
+      ticker: 'MRVL',
+      action: 'HOLD_TRIM',
+    });
+    mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+
+    render(<FrameworkScorePanel ticker="MRVL" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+      'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
+    );
+    expect(screen.getByTestId('fws-action')).not.toHaveTextContent('GTC ADDS PERMITTED');
+  });
+
   it('caps an elite headline to core hold when extension and event-risk blocks are active', async () => {
     mockState.frameworkScoreData = makeFrameworkScoreData({
       ticker: 'MU',

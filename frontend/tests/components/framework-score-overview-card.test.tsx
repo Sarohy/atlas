@@ -301,6 +301,31 @@ describe('FrameworkScoreOverviewCard', () => {
     expect(screen.getByTestId('fws-overview-card')).not.toHaveTextContent('GTC ADDS PERMITTED');
   });
 
+  it('keeps overview no-fresh-add headline when extension overlay blocks despite flow confirmation', () => {
+    mockState.activeTicker = 'MRVL';
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'MRVL',
+      final_score: 76,
+      raw_total: 76,
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'MRVL',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+    });
+    mockState.extensionOverlayData = makeExtensionOverlayData({
+      ticker: 'MRVL',
+      action: 'HOLD_TRIM',
+    });
+    mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+
+    render(<FrameworkScoreOverviewCard />);
+
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
+      'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
+    );
+  });
+
   it('caps the overview elite headline when extension and event-risk blocks are active', () => {
     mockState.activeTicker = 'MU';
     mockState.frameworkScoreData = makeFrameworkScoreData({

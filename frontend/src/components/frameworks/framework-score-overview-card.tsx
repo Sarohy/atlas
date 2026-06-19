@@ -113,7 +113,6 @@ function OverviewCardContent({
   extensionOverlayData?: ExtensionOverlayResponse;
   extensionWashoutData?: ExtensionWashoutResponse;
 }) {
-  const toneCss = ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow';
   const headlineAction = deriveHeadlineAction(
     data.final_score,
     data,
@@ -215,6 +214,16 @@ function hasEliteExtensionBlock(
   return Boolean(extensionWashoutData?.negative_catalyst);
 }
 
+function hasExtensionBlock(
+  extensionOverlayData?: ExtensionOverlayResponse,
+  extensionWashoutData?: ExtensionWashoutResponse,
+): boolean {
+  if (extensionOverlayData?.action && extensionOverlayData.action !== 'ADD') {
+    return true;
+  }
+  return Boolean(extensionWashoutData?.negative_catalyst);
+}
+
 function deriveHeadlineAction(
   finalScore: number,
   data: FrameworkScoreResponse,
@@ -255,6 +264,16 @@ function deriveHeadlineAction(
   ) {
     return {
       label: 'T1 ELITE / CORE HOLD - LEAPS ONLY ON RESET',
+      tone: 'tone-yellow',
+    };
+  }
+
+  if (
+    finalScore >= ACTION_TIER2_MIN &&
+    hasExtensionBlock(extensionOverlayData, extensionWashoutData)
+  ) {
+    return {
+      label: 'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
       tone: 'tone-yellow',
     };
   }

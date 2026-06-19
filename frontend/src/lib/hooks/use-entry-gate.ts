@@ -1,4 +1,4 @@
-import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 
 import { fetchEntryGate } from '@/lib/api/entry-gate';
 import type { EntryGateResult } from '@/lib/schemas/entry-gate';

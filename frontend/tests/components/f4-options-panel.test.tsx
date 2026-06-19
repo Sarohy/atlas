@@ -51,6 +51,17 @@ function makeOptionsFlowData(overrides: Partial<OptionsFlowResponse> = {}): Opti
     adjusted_bear_premium_usd: 2_000_000,
     adjusted_bullish_share: 0.75,
     adjusted_largest_bullish_print_usd: 6_000_000,
+    f4b_score_input_source: 'ADJUSTED',
+    f4b_universe_source: 'UW_ALERTS_2_SESSION',
+    f4b_universe_total_alerts: 12,
+    f4b_universe_directional_alerts: 10,
+    f4b_universe_excluded_alerts: 2,
+    raw_call_ask_premium_usd: 10_000_000,
+    raw_call_bid_premium_usd: 1_000_000,
+    raw_put_ask_premium_usd: 2_000_000,
+    raw_put_bid_premium_usd: 4_000_000,
+    live_pulse_score: 88,
+    live_pulse_state: 'TACTICAL_BULLISH_TRIGGER',
     ...overrides,
   } as OptionsFlowResponse;
 }
@@ -87,8 +98,23 @@ describe('F4OptionsPanel', () => {
     expect(debug).toHaveTextContent('$6.00M');
     expect(debug).toHaveTextContent('Final F4b Score');
     expect(debug).toHaveTextContent('75');
+    expect(debug).toHaveTextContent('Final score input');
+    expect(debug).toHaveTextContent('ADJUSTED');
+    expect(debug).toHaveTextContent('Universe source');
+    expect(debug).toHaveTextContent('UW_ALERTS_2_SESSION');
+    expect(debug).toHaveTextContent('Universe alerts');
+    expect(debug).toHaveTextContent('12 total · 10 directional · 2 excluded');
+    expect(debug).toHaveTextContent('Raw Buckets');
+    expect(debug).toHaveTextContent('call ask $10.00M');
+    expect(debug).toHaveTextContent('call bid $1.00M');
+    expect(debug).toHaveTextContent('put ask $2.00M');
+    expect(debug).toHaveTextContent('put bid $4.00M');
     expect(debug).toHaveTextContent('expiry_0_3_dte');
     expect(debug).toHaveTextContent('$4.00M');
+
+    expect(screen.getByTestId('f4-live-pulse')).toHaveTextContent(
+      '1-day pulse: TACTICAL_BULLISH_TRIGGER (88)',
+    );
 
     const optionsCard = screen.getByTestId('f4-indicator-options');
     expect(within(optionsCard).getByText('Largest Buy')).toBeInTheDocument();
@@ -117,5 +143,63 @@ describe('F4OptionsPanel', () => {
     render(<F4OptionsPanel ticker="ASML" />);
 
     expect(screen.queryByTestId('f4b-debug')).not.toBeInTheDocument();
+  });
+
+  it('shows a low-confidence badge for F4a when dark-pool confidence is low', () => {
+    useOptionsFlowMock.mockReturnValue({
+      data: makeOptionsFlowData({ dark_pool_confidence: 'Low — 1 session only' }),
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
+
+    render(<F4OptionsPanel ticker="ASML" />);
+
+    expect(screen.getByTestId('f4a-low-confidence-badge')).toHaveTextContent('LOW CONFIDENCE');
+  });
+
+  it('does not show the low-confidence badge when dark-pool confidence is high', () => {
+    useOptionsFlowMock.mockReturnValue({
+      data: makeOptionsFlowData({ dark_pool_confidence: 'High - full coverage' }),
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
+
+    render(<F4OptionsPanel ticker="ASML" />);
+
+    expect(screen.queryByTestId('f4a-low-confidence-badge')).not.toBeInTheDocument();
+  });
+
+  it('renders DRAM ETF proxy diagnostics with bearish 1-day pulse kept separate from persistence', () => {
+    useOptionsFlowMock.mockReturnValue({
+      data: makeOptionsFlowData({
+        ticker: 'MRVL',
+        f4_score: 63,
+        live_pulse_score: 28,
+        live_pulse_state: 'TACTICAL_BEARISH_TRIGGER',
+        f4b_score_input_source: 'ADJUSTED',
+        f4b_universe_source: 'UW_ALERTS_2_SESSION',
+        f4b_universe_total_alerts: 18,
+        f4b_universe_directional_alerts: 14,
+        f4b_universe_excluded_alerts: 4,
+      }),
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
+
+    render(<F4OptionsPanel ticker="MRVL" />);
+
+    expect(screen.getByTestId('f4-score')).toHaveTextContent('63');
+    expect(screen.getByTestId('f4-live-pulse')).toHaveTextContent(
+      '1-day pulse: TACTICAL_BEARISH_TRIGGER (28)',
+    );
+    const debug = screen.getByTestId('f4b-debug');
+    expect(debug).toHaveTextContent('Final score input');
+    expect(debug).toHaveTextContent('ADJUSTED');
+    expect(debug).toHaveTextContent('Universe source');
+    expect(debug).toHaveTextContent('UW_ALERTS_2_SESSION');
+    expect(debug).toHaveTextContent('18 total · 14 directional · 4 excluded');
   });
 });

@@ -3,14 +3,8 @@
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 
-import {
-  useFramework27,
-  usePostFramework27ManualFlag,
-} from '@/lib/hooks/use-framework27';
-import type {
-  ContagionRuleResult,
-  Framework27Result,
-} from '@/lib/schemas/framework27';
+import { useFramework27, usePostFramework27ManualFlag } from '@/lib/hooks/use-framework27';
+import type { ContagionRuleResult, Framework27Result } from '@/lib/schemas/framework27';
 
 // ---------------------------------------------------------------------------
 // Named constants
@@ -61,10 +55,7 @@ function F27StatusChip({ triggered, total }: F27StatusChipProps) {
     <div className="atlas-f27-header-right">
       <span
         data-testid="f27-status-chip"
-        className={cn(
-          'atlas-f27-status-chip',
-          isActive ? 'is-f27-triggered' : 'is-f27-clear',
-        )}
+        className={cn('atlas-f27-status-chip', isActive ? 'is-f27-triggered' : 'is-f27-clear')}
       >
         {isActive ? 'TRIGGERED' : 'CLEAR'}
       </span>
@@ -79,10 +70,7 @@ function F27RuleRow({ rule }: { rule: ContagionRuleResult }) {
   return (
     <div
       data-testid={`f27-rule-row-${rule.rule_id}`}
-      className={cn(
-        'atlas-f27-rule-row',
-        rule.triggered ? 'is-f27-rule-triggered' : '',
-      )}
+      className={cn('atlas-f27-rule-row', rule.triggered ? 'is-f27-rule-triggered' : '')}
     >
       <span className="atlas-f27-rule-ticker">{rule.ticker}</span>
       <span className="atlas-f27-rule-risk">{rule.primary_risk}</span>
@@ -104,10 +92,7 @@ function F27F17Badge({ active }: { active: boolean | null }) {
     <div className="atlas-f27-context-row">
       <span
         data-testid="f27-f17-badge"
-        className={cn(
-          'atlas-f27-f17-badge',
-          active === true ? 'is-f27-f17-active' : '',
-        )}
+        className={cn('atlas-f27-f17-badge', active === true ? 'is-f27-f17-active' : '')}
       >
         F17 GEO: {active === true ? 'ACTIVE' : active === false ? 'CLEAR' : 'NOT SET'}
       </span>
@@ -121,18 +106,13 @@ function F27ContextRow({ data }: { data: Framework27Result }) {
       <F27F17Badge active={data.f17_active} />
       <div className="atlas-f27-stat-row">
         <span className="atlas-f27-stat-label">Brent</span>
-        <span
-          data-testid="f27-brent-price"
-          className="atlas-f27-stat-value"
-        >
+        <span data-testid="f27-brent-price" className="atlas-f27-stat-value">
           {formatBrent(data.brent_price)}
         </span>
       </div>
       <div className="atlas-f27-stat-row">
         <span className="atlas-f27-stat-label">Conflict duration</span>
-        <span className="atlas-f27-stat-value">
-          {formatDays(data.conflict_duration_days)}
-        </span>
+        <span className="atlas-f27-stat-value">{formatDays(data.conflict_duration_days)}</span>
       </div>
     </div>
   );
@@ -261,12 +241,9 @@ function F27FormFields({
 }
 
 function F27ManualFlagForm({ onClose }: { onClose: () => void }) {
-  const { mutateAsync, isPending, isError, error } =
-    usePostFramework27ManualFlag();
+  const { mutateAsync, isPending, isError, error } = usePostFramework27ManualFlag();
 
-  const [triggerType, setTriggerType] = useState<TriggerType>(
-    'ASIA_FREIGHT_DISRUPTION_PCT',
-  );
+  const [triggerType, setTriggerType] = useState<TriggerType>('ASIA_FREIGHT_DISRUPTION_PCT');
   const [flaggedBy, setFlaggedBy] = useState('');
   const [notes, setNotes] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
@@ -277,9 +254,7 @@ function F27ManualFlagForm({ onClose }: { onClose: () => void }) {
     setSubmitError(null);
 
     if (overrideReason.trim().length < MIN_OVERRIDE_REASON_LEN) {
-      setSubmitError(
-        `Override reason must be at least ${MIN_OVERRIDE_REASON_LEN} characters.`,
-      );
+      setSubmitError(`Override reason must be at least ${MIN_OVERRIDE_REASON_LEN} characters.`);
       return;
     }
 
@@ -299,11 +274,7 @@ function F27ManualFlagForm({ onClose }: { onClose: () => void }) {
   const displayError = submitError ?? (isError ? (error?.message ?? null) : null);
 
   return (
-    <form
-      data-testid="f27-flag-form"
-      className="atlas-f27-flag-form"
-      onSubmit={handleSubmit}
-    >
+    <form data-testid="f27-flag-form" className="atlas-f27-flag-form" onSubmit={handleSubmit}>
       <h4 className="atlas-f27-flag-form-title">Manual Disruption Flag</h4>
 
       <F27FormFields
@@ -317,23 +288,13 @@ function F27ManualFlagForm({ onClose }: { onClose: () => void }) {
         onOverrideReasonChange={setOverrideReason}
       />
 
-      {displayError !== null && (
-        <p className="atlas-f27-form-error">{displayError}</p>
-      )}
+      {displayError !== null && <p className="atlas-f27-form-error">{displayError}</p>}
 
       <div className="atlas-f27-form-actions">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="atlas-f27-submit-btn"
-        >
+        <button type="submit" disabled={isPending} className="atlas-f27-submit-btn">
           {isPending ? 'Submitting…' : 'Submit Flag'}
         </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="atlas-f27-cancel-btn"
-        >
+        <button type="button" onClick={onClose} className="atlas-f27-cancel-btn">
           Cancel
         </button>
       </div>
@@ -359,7 +320,7 @@ function F27CardHeader() {
   );
 }
 
-export function Framework27Card(_props: Framework27CardProps) {
+export function Framework27Card() {
   const { data, isLoading, isError, error } = useFramework27();
   const [formOpen, setFormOpen] = useState(false);
 
@@ -379,21 +340,14 @@ export function Framework27Card(_props: Framework27CardProps) {
       <div className="atlas-f27-card">
         <F27CardHeader />
         <div data-testid="f27-error" className="atlas-f27-error">
-          {error instanceof Error
-            ? error.message
-            : 'Failed to load Framework 27 data.'}
+          {error instanceof Error ? error.message : 'Failed to load Framework 27 data.'}
         </div>
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        'atlas-f27-card',
-        data.rules_triggered > 0 ? 'is-f27-card-triggered' : '',
-      )}
-    >
+    <div className={cn('atlas-f27-card', data.rules_triggered > 0 ? 'is-f27-card-triggered' : '')}>
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="atlas-f27-header">
         <div className="atlas-f27-header-left">
@@ -401,10 +355,7 @@ export function Framework27Card(_props: Framework27CardProps) {
           <span className="atlas-f27-title">Supply Chain Contagion Map</span>
         </div>
         <div className="atlas-f27-header-badges">
-          <F27StatusChip
-            triggered={data.rules_triggered}
-            total={data.rules_evaluated}
-          />
+          <F27StatusChip triggered={data.rules_triggered} total={data.rules_evaluated} />
           {data.cache_hit && (
             <span
               data-testid="f27-cache-badge"

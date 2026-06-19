@@ -28,13 +28,6 @@ const SIZE_STATUS_LABEL: Record<string, string> = {
   NO_POSITION: 'No Position',
 };
 
-const CONSENSUS_STATUS_LABEL: Record<string, string> = {
-  NOT_REQUIRED: 'Not Required',
-  PENDING: 'Pending',
-  CONFIRMED: 'Confirmed',
-  FAILED: 'Failed',
-};
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -92,7 +85,9 @@ export function ConvictionActionPanel({ ticker, adjustedScore }: ConvictionActio
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && <ConvictionContent data={data} leapsEligible={leapsEligible} />}
+        {!isLoading && !isError && hasData && (
+          <ConvictionContent data={data} leapsEligible={leapsEligible} />
+        )}
         {!isLoading && !isError && !hasData && activeTicker && (
           <p className="atlas-fws-state-msg" data-testid="conviction-empty">
             No conviction data available for {ticker}.
@@ -128,19 +123,20 @@ function ConvictionContent({
   leapsEligible: boolean | null;
 }) {
   const tierColorClass = TIER_COLOR_CLASS[data.tier] ?? '';
-  const bandLabel = data.score_band_max !== null
-    ? `${data.score_band_min}–${data.score_band_max}`
-    : `${data.score_band_min}+`;
-  const sizeLabel = data.size_min_pct === 0 && data.size_max_pct === 0
-    ? '0% NAV'
-    : `${data.size_min_pct}–${data.size_max_pct}% NAV`;
+  const bandLabel =
+    data.score_band_max !== null
+      ? `${data.score_band_min}–${data.score_band_max}`
+      : `${data.score_band_min}+`;
+  const sizeLabel =
+    data.size_min_pct === 0 && data.size_max_pct === 0
+      ? '0% NAV'
+      : `${data.size_min_pct}–${data.size_max_pct}% NAV`;
   const bottomMessage = data.adds_permitted
     ? getTierMessage(data.tier)
     : `Adds blocked — ${data.adds_blocked_reason}`;
 
   return (
     <div className="atlas-conviction-content" data-testid="conviction-content">
-
       {/* ── Section 1: Tier label ──────────────────────────────────────── */}
       <p
         className={cn('atlas-conviction-tier-label', tierColorClass)}
@@ -166,15 +162,21 @@ function ConvictionContent({
       <div className="atlas-conviction-position-panel" data-testid="conviction-position-panel">
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Current Weight</span>
-          <span className="atlas-conviction-position-row__value">{data.current_weight_pct.toFixed(2)}%</span>
+          <span className="atlas-conviction-position-row__value">
+            {data.current_weight_pct.toFixed(2)}%
+          </span>
         </div>
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Size Status</span>
-          <span className="atlas-conviction-position-row__value">{SIZE_STATUS_LABEL[data.position_size_status] ?? data.position_size_status}</span>
+          <span className="atlas-conviction-position-row__value">
+            {SIZE_STATUS_LABEL[data.position_size_status] ?? data.position_size_status}
+          </span>
         </div>
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Room to Add</span>
-          <span className="atlas-conviction-position-row__value">{data.room_to_add_pct.toFixed(2)}%</span>
+          <span className="atlas-conviction-position-row__value">
+            {data.room_to_add_pct.toFixed(2)}%
+          </span>
         </div>
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Adds Permitted</span>
@@ -195,7 +197,6 @@ function ConvictionContent({
         )}
       </div>
 
-
       {/* ── Section 5: Cluster panel ──────────────────────────────────────── */}
       <div className="atlas-conviction-cluster-panel" data-testid="conviction-cluster-panel">
         <div className="atlas-conviction-position-row">
@@ -204,7 +205,9 @@ function ConvictionContent({
         </div>
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Cluster Weight</span>
-          <span className="atlas-conviction-position-row__value">{data.cluster_weight_pct.toFixed(2)}%</span>
+          <span className="atlas-conviction-position-row__value">
+            {data.cluster_weight_pct.toFixed(2)}%
+          </span>
         </div>
         <div className="atlas-conviction-position-row">
           <span className="atlas-conviction-position-row__label">Cluster Status</span>
@@ -241,8 +244,13 @@ function ConvictionContent({
           </p>
           <div className="atlas-conviction-exit-bar">
             <div
-              className={cn('atlas-conviction-exit-fill', data.exit_triggered ? 'is-triggered' : '')}
-              style={{ width: `${Math.min(100, (data.exit_cycle_count / EXIT_CYCLE_TRIGGER) * 100)}%` }}
+              className={cn(
+                'atlas-conviction-exit-fill',
+                data.exit_triggered ? 'is-triggered' : '',
+              )}
+              style={{
+                width: `${Math.min(100, (data.exit_cycle_count / EXIT_CYCLE_TRIGGER) * 100)}%`,
+              }}
             />
           </div>
           {data.exit_triggered && (
@@ -260,4 +268,3 @@ function ConvictionContent({
     </div>
   );
 }
-

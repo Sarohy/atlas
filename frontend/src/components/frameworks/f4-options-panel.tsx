@@ -225,6 +225,12 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
           <span className="atlas-f4-label-sub" data-testid="f4-live-tape-state">
             live tape: {data.live_tape_state} · {data.persistence_state} (2d)
           </span>
+          <span className="atlas-f4-label-sub" data-testid="f4-live-pulse">
+            1-day pulse: {data.live_pulse_state ?? 'DATA_GAP'}
+            {data.live_pulse_score !== null && data.live_pulse_score !== undefined
+              ? ` (${data.live_pulse_score})`
+              : ''}
+          </span>
           <span className="atlas-f4-label-sub">
             options flow · {contribution}/{F4_DISPLAY_MAX} to F1
           </span>
@@ -360,6 +366,14 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
       <p className="atlas-f4-state-msg" data-testid="f4a-confidence">
         F4a dark-pool confidence: {data.dark_pool_confidence}
       </p>
+      {data.dark_pool_confidence.toLowerCase().includes('low') && (
+        <span
+          className="atlas-frameworks-pill atlas-f4-tier-pill is-orange"
+          data-testid="f4a-low-confidence-badge"
+        >
+          LOW CONFIDENCE
+        </span>
+      )}
 
       {data.market_cap_usd !== null && (
         <p className="atlas-f4-state-msg" data-testid="f4-market-cap">
@@ -574,6 +588,27 @@ function F4bDebugCard({ data }: { data: OptionsFlowResponse }) {
             value={formatNullableUsd(data.adjusted_largest_bullish_print_usd)}
           />
           <DebugRow label="Final F4b Score" value={String(data.f4_score)} />
+          <DebugRow label="Final score input" value={data.f4b_score_input_source ?? '—'} />
+          <DebugRow label="Universe source" value={data.f4b_universe_source ?? '—'} />
+          <DebugRow
+            label="Universe alerts"
+            value={
+              data.f4b_universe_total_alerts !== undefined
+                ? `${data.f4b_universe_total_alerts} total · ${data.f4b_universe_directional_alerts ?? 0} directional · ${data.f4b_universe_excluded_alerts ?? 0} excluded`
+                : '—'
+            }
+          />
+          <DebugRow
+            label="Raw Buckets"
+            value={
+              hasValue(data.raw_call_ask_premium_usd) ||
+              hasValue(data.raw_call_bid_premium_usd) ||
+              hasValue(data.raw_put_ask_premium_usd) ||
+              hasValue(data.raw_put_bid_premium_usd)
+                ? `call ask ${formatNullableUsd(data.raw_call_ask_premium_usd)} · call bid ${formatNullableUsd(data.raw_call_bid_premium_usd)} · put ask ${formatNullableUsd(data.raw_put_ask_premium_usd)} · put bid ${formatNullableUsd(data.raw_put_bid_premium_usd)}`
+                : '—'
+            }
+          />
           {declassifiedEntries.map(([reason, value]) => (
             <DebugRow key={reason} label={reason} value={formatMillions(value)} />
           ))}

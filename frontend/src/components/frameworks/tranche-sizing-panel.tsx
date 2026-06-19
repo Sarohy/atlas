@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useTrancheSizing, useConfirmTranche } from '@/lib/hooks/use-tranche-sizing';
 import type { SignalDetail, TrancheSizingResponse } from '@/lib/schemas/tranche-sizing';
@@ -17,12 +17,13 @@ const BLOCKED = 'Blocked';
 const CAP_THRESHOLD_PCT = '8%';
 
 /** Display label for each tranche key. */
-const TRANCHE_LABELS: Record<keyof Pick<TrancheSizingResponse, 't1' | 't2' | 't3' | 't4'>, string> = {
-  t1: 'T1 · Catalyst',
-  t2: 'T2 · Brent below $110',
-  t3: 'T3 · Clear+Gate',
-  t4: 'T4 · Iran',
-};
+const TRANCHE_LABELS: Record<keyof Pick<TrancheSizingResponse, 't1' | 't2' | 't3' | 't4'>, string> =
+  {
+    t1: 'T1 · Catalyst',
+    t2: 'T2 · Brent below $110',
+    t3: 'T3 · Clear+Gate',
+    t4: 'T4 · Iran',
+  };
 
 // ---------------------------------------------------------------------------
 // Props
@@ -86,7 +87,7 @@ export function TrancheSizingPanel({
   // BUG C fix: single source of truth for CATALYST display.
   // When API data is available, read catalyst state from data.catalyst_confirmed
   // (mirrors data.t1_fired). Fall back to local toggle only before first fetch.
-  const catalystActive = hasData ? data.catalyst_confirmed : (initialCatalyst === 'yes');
+  const catalystActive = hasData ? data.catalyst_confirmed : initialCatalyst === 'yes';
 
   return (
     <section
@@ -136,10 +137,7 @@ export function TrancheSizingPanel({
           </p>
         )}
         {isError && (
-          <p
-            className="atlas-fws-state-msg atlas-fws-state-msg--error"
-            data-testid="tranche-error"
-          >
+          <p className="atlas-fws-state-msg atlas-fws-state-msg--error" data-testid="tranche-error">
             {errorMsg}
           </p>
         )}
@@ -254,10 +252,7 @@ function AndGateSection({ andGatePassed, signalsConfirmed, signalsDetail }: AndG
             data-testid={`tranche-signal-dot-${signal.signal_index}`}
           />
           <span
-            className={cn(
-              'atlas-tranche-signal-name',
-              signal.confirmed && 'is-confirmed',
-            )}
+            className={cn('atlas-tranche-signal-name', signal.confirmed && 'is-confirmed')}
             data-testid={`tranche-signal-name-${signal.signal_index}`}
           >
             {signal.name}
@@ -306,10 +301,7 @@ function TrancheConfirmModal({
       aria-labelledby={`tranche-modal-title-${tranche}`}
     >
       <div className="atlas-tranche-modal">
-        <p
-          className="atlas-tranche-modal-title"
-          id={`tranche-modal-title-${tranche}`}
-        >
+        <p className="atlas-tranche-modal-title" id={`tranche-modal-title-${tranche}`}>
           {label} Auto-Triggered
         </p>
         <p className="atlas-tranche-modal-trigger">{trigger}</p>
@@ -353,44 +345,70 @@ type TrancheContentProps = {
   isConfirming: boolean;
 };
 
-function TrancheContent({ data, regimeRule, brentPrice, onConfirmTranche, isConfirming }: TrancheContentProps) {
+function PendingTrancheModal({
+  tranche,
+  amount,
+  brentPrice,
+  signalsConfirmed,
+  onConfirmTranche,
+  isConfirming,
+}: {
+  tranche: 't2' | 't3';
+  amount: string;
+  brentPrice?: number | null;
+  signalsConfirmed?: number;
+  onConfirmTranche: (tranche: 't2' | 't3') => void;
+  isConfirming: boolean;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+
+  if (dismissed) {
+    return null;
+  }
+
+  return (
+    <TrancheConfirmModal
+      tranche={tranche}
+      amount={amount}
+      brentPrice={brentPrice}
+      signalsConfirmed={signalsConfirmed}
+      onConfirm={() => {
+        onConfirmTranche(tranche);
+        setDismissed(true);
+      }}
+      onOverride={() => setDismissed(true)}
+      isConfirming={isConfirming}
+    />
+  );
+}
+
+function TrancheContent({
+  data,
+  regimeRule,
+  brentPrice,
+  onConfirmTranche,
+  isConfirming,
+}: TrancheContentProps) {
   const isClear = regimeRule.toUpperCase() === 'CLEAR';
-
-  // Local dismissed state so override suppresses the modal for this session.
-  const [t2Dismissed, setT2Dismissed] = useState(false);
-  const [t3Dismissed, setT3Dismissed] = useState(false);
-
-  // Re-open modal if pending state changes (e.g. after query refresh changes conditions).
-  useEffect(() => {
-    if (!data.t2_pending) setT2Dismissed(false);
-  }, [data.t2_pending]);
-  useEffect(() => {
-    if (!data.t3_pending) setT3Dismissed(false);
-  }, [data.t3_pending]);
-
-  const showT2Modal = data.t2_pending && !t2Dismissed;
-  const showT3Modal = data.t3_pending && !t3Dismissed;
 
   return (
     <div className="atlas-tranche-content" data-testid="tranche-content">
       {/* Auto-trigger confirmation modals (Framework 17) */}
-      {showT2Modal && (
-        <TrancheConfirmModal
+      {data.t2_pending && (
+        <PendingTrancheModal
           tranche="t2"
           amount={data.t2 ?? '20-25% of available cash'}
           brentPrice={brentPrice}
-          onConfirm={() => { onConfirmTranche('t2'); setT2Dismissed(true); }}
-          onOverride={() => setT2Dismissed(true)}
+          onConfirmTranche={onConfirmTranche}
           isConfirming={isConfirming}
         />
       )}
-      {showT3Modal && (
-        <TrancheConfirmModal
+      {data.t3_pending && (
+        <PendingTrancheModal
           tranche="t3"
           amount={data.t3 ?? '30-40% of available cash'}
           signalsConfirmed={data.signals_confirmed}
-          onConfirm={() => { onConfirmTranche('t3'); setT3Dismissed(true); }}
-          onOverride={() => setT3Dismissed(true)}
+          onConfirmTranche={onConfirmTranche}
           isConfirming={isConfirming}
         />
       )}
@@ -413,10 +431,7 @@ function TrancheContent({ data, regimeRule, brentPrice, onConfirmTranche, isConf
       {/* Regime badge - only shown when neither cap is active */}
       {!data.cap_active && !data.beta_cap_active && (
         <div className="atlas-regime-rule-row" data-testid="tranche-regime-row">
-          <span
-            className="atlas-regime-rule-badge is-muted"
-            data-testid="tranche-regime-badge"
-          >
+          <span className="atlas-regime-rule-badge is-muted" data-testid="tranche-regime-badge">
             REGIME: {regimeRule}
           </span>
         </div>
@@ -443,9 +458,7 @@ function TrancheContent({ data, regimeRule, brentPrice, onConfirmTranche, isConf
         <div className="atlas-regime-cash-block">
           <p className="atlas-regime-cash-title">DEPLOYMENT TRANCHES</p>
 
-          {(
-            ['t1', 't2', 't3', 't4'] as const
-          ).map((key) => {
+          {(['t1', 't2', 't3', 't4'] as const).map((key) => {
             const value = data[key];
             const label = TRANCHE_LABELS[key];
             const isActive = value !== null && value !== BLOCKED;
@@ -462,11 +475,7 @@ function TrancheContent({ data, regimeRule, brentPrice, onConfirmTranche, isConf
             const isPendingT3 = key === 't3' && data.t3_pending;
 
             return (
-              <div
-                className="atlas-regime-cash-row"
-                data-testid={`tranche-row-${key}`}
-                key={key}
-              >
+              <div className="atlas-regime-cash-row" data-testid={`tranche-row-${key}`} key={key}>
                 <span className="atlas-regime-cash-label">{label}</span>
                 <div className="atlas-tranche-value-group">
                   {isFired ? (
@@ -519,4 +528,3 @@ function TrancheContent({ data, regimeRule, brentPrice, onConfirmTranche, isConf
     </div>
   );
 }
-

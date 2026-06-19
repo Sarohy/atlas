@@ -57,13 +57,6 @@ function formatPct(val: number | null): string {
   return `${(val * 100).toFixed(1)}%`;
 }
 
-function formatUsd(val: number | null): string {
-  if (val === null) return '—';
-  if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(val) >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
-  return `$${val.toFixed(0)}`;
-}
-
 /** Tristate eligibility chip class. */
 function eligibilityChipClass(eligible: boolean | null, undetermined: boolean): string {
   if (undetermined || eligible === null) return 'is-leaps-elig-unknown';
@@ -152,17 +145,12 @@ export function LeapsCard({ ticker, score }: LeapsCardProps) {
         )}
 
         {hasTicker && isError && (
-          <p
-            className="atlas-fws-state-msg atlas-fws-state-msg--error"
-            data-testid="leaps-error"
-          >
+          <p className="atlas-fws-state-msg atlas-fws-state-msg--error" data-testid="leaps-error">
             {errorMsg}
           </p>
         )}
 
-        {hasTicker && !isLoading && !isError && data !== undefined && (
-          <LeapsContent data={data} />
-        )}
+        {hasTicker && !isLoading && !isError && data !== undefined && <LeapsContent data={data} />}
       </div>
     </section>
   );
@@ -194,11 +182,7 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
         <div className="atlas-leaps-context-cell">
           <span className="atlas-leaps-context-label">Dark Pool Flow</span>
           <span className="atlas-leaps-context-value">
-            {data.flow_confirmed === null
-              ? '—'
-              : data.flow_confirmed
-                ? 'CONFIRMED'
-                : 'NOT MET'}
+            {data.flow_confirmed === null ? '—' : data.flow_confirmed ? 'CONFIRMED' : 'NOT MET'}
           </span>
         </div>
       </div>
@@ -221,21 +205,18 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
         {data.entry_conditions.map((cond, idx) => (
           <div
             key={idx}
-            className={cn(
-              'atlas-leaps-condition-card',
-              CONDITION_STATUS_CLASS[cond.status],
-            )}
+            className={cn('atlas-leaps-condition-card', CONDITION_STATUS_CLASS[cond.status])}
             data-testid={`leaps-condition-${idx}`}
           >
             <div className="atlas-leaps-condition-header">
               <span className="atlas-leaps-condition-name">{cond.condition_name}</span>
-              <span className={cn('atlas-leaps-condition-chip', CONDITION_STATUS_CLASS[cond.status])}>
+              <span
+                className={cn('atlas-leaps-condition-chip', CONDITION_STATUS_CLASS[cond.status])}
+              >
                 {CONDITION_STATUS_LABEL[cond.status]}
               </span>
             </div>
-            {cond.detail && (
-              <p className="atlas-leaps-condition-detail">{cond.detail}</p>
-            )}
+            {cond.detail && <p className="atlas-leaps-condition-detail">{cond.detail}</p>}
           </div>
         ))}
       </div>
@@ -349,13 +330,7 @@ function LeapsContent({ data }: { data: LeapsEligibility }) {
 }
 
 // ---------------------------------------------------------------------------
-function GateCell({
-  label,
-  passed,
-}: {
-  label: string;
-  passed: boolean | null;
-}) {
+function GateCell({ label, passed }: { label: string; passed: boolean | null }) {
   const cls =
     passed === null
       ? 'is-leaps-gate-unknown'
@@ -376,17 +351,11 @@ function GateCell({
 // Expiry guidance panel
 // ---------------------------------------------------------------------------
 
-function ExpiryGuidancePanel({
-  guidance,
-}: {
-  guidance: LeapsExpiryGuidance;
-}) {
+function ExpiryGuidancePanel({ guidance }: { guidance: LeapsExpiryGuidance }) {
   return (
     <div className="atlas-leaps-expiry-panel" data-testid="leaps-expiry-guidance">
       <span className="atlas-leaps-expiry-label">Preferred expiry</span>
-      <span className="atlas-leaps-expiry-value">
-        {guidance.preferred_expiries.join(' / ')}
-      </span>
+      <span className="atlas-leaps-expiry-value">{guidance.preferred_expiries.join(' / ')}</span>
       <span className="atlas-leaps-expiry-otm">
         OTM {guidance.otm_pct_low.toFixed(0)}–{guidance.otm_pct_high.toFixed(0)}%
       </span>
@@ -400,10 +369,9 @@ function ExpiryGuidancePanel({
 
 function SizeGuidancePanel({ guidance }: { guidance: SizeGuidance }) {
   const label = guidance.carveout_active ? 'Carveout sizing' : 'Standard sizing';
-  const baselineRange =
-    guidance.carveout_active
-      ? `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`
-      : `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`;
+  const baselineRange = guidance.carveout_active
+    ? `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`
+    : `${guidance.baseline_pct.toFixed(1)}\u2013${guidance.baseline_max_pct.toFixed(2)}% baseline`;
   return (
     <div
       className={cn(
@@ -415,9 +383,7 @@ function SizeGuidancePanel({ guidance }: { guidance: SizeGuidance }) {
     >
       <span className="atlas-leaps-size-label">{label}</span>
       <span className="atlas-leaps-size-baseline">{baselineRange}</span>
-      <span className="atlas-leaps-size-max">
-        max {guidance.standard_max_pct.toFixed(1)}% NAV
-      </span>
+      <span className="atlas-leaps-size-max">max {guidance.standard_max_pct.toFixed(1)}% NAV</span>
     </div>
   );
 }

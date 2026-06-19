@@ -4,9 +4,6 @@ import React from 'react';
 import { useFramework18, useRefreshFramework18 } from '@/lib/hooks/use-framework18';
 import type { Framework18Result, F18Status } from '@/lib/schemas/framework18';
 
-// Framework 18 is portfolio-level — no ticker prop.
-type Framework18CardProps = Record<string, never>;
-
 // ── Status chip colours ───────────────────────────────────────────────────────
 
 function statusClass(status: F18Status): string {
@@ -61,18 +58,12 @@ function CloseStat({ close, date, prevClose, label }: CloseStatProps) {
       <span
         className={[
           'atlas-f18-close-stat-arrow',
-          direction === 'down'
-            ? 'is-down'
-            : direction === 'up'
-              ? 'is-up'
-              : 'is-flat',
+          direction === 'down' ? 'is-down' : direction === 'up' ? 'is-up' : 'is-flat',
         ].join(' ')}
       >
         {direction === 'down' ? '↓' : direction === 'up' ? '↑' : '—'}
       </span>
-      <span className="atlas-f18-close-stat-date">
-        {date ?? '—'}
-      </span>
+      <span className="atlas-f18-close-stat-date">{date ?? '—'}</span>
     </div>
   );
 }
@@ -104,7 +95,7 @@ function StreakBar({ streak, threshold }: StreakBarProps) {
 
 // ── Main card ─────────────────────────────────────────────────────────────────
 
-export function Framework18Card(_props: Framework18CardProps) {
+export function Framework18Card() {
   const { data, isLoading, isError, error } = useFramework18();
   const refresh = useRefreshFramework18();
 
@@ -152,7 +143,10 @@ export function Framework18Card(_props: Framework18CardProps) {
             {statusLabel(d.f18_status)}
           </span>
           {d.cache_hit && (
-            <span className="atlas-f18-cache-badge" title={`Cached. Last evaluated: ${d.last_updated}`}>
+            <span
+              className="atlas-f18-cache-badge"
+              title={`Cached. Last evaluated: ${d.last_updated}`}
+            >
               CACHED
             </span>
           )}
@@ -260,9 +254,7 @@ export function Framework18Card(_props: Framework18CardProps) {
           >
             POLYGON
           </span>
-          {d.spy_data_stale && (
-            <span className="atlas-f18-source-badge is-stale">STALE CACHE</span>
-          )}
+          {d.spy_data_stale && <span className="atlas-f18-source-badge is-stale">STALE CACHE</span>}
           {!d.spy_data_available && (
             <span className="atlas-f18-source-badge is-unavailable">NO DATA</span>
           )}

@@ -38,8 +38,7 @@ export type Framework11CardProps = Record<string, never>;
 
 function formatUsd(val: number | null): string {
   if (val === null) return '—';
-  if (Math.abs(val) >= 1_000_000)
-    return `$${(val / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
   if (Math.abs(val) >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
   return `$${val.toFixed(0)}`;
 }
@@ -47,11 +46,6 @@ function formatUsd(val: number | null): string {
 function formatPct(val: number | null, decimals = 1): string {
   if (val === null) return '—';
   return `${val.toFixed(decimals)}%`;
-}
-
-function formatNumber(val: number | null): string {
-  if (val === null) return '—';
-  return val.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
 // ---------------------------------------------------------------------------
@@ -75,13 +69,7 @@ function StatCard({
   );
 }
 
-function DataSourceBadge({
-  label,
-  available,
-}: {
-  label: string;
-  available: boolean;
-}) {
+function DataSourceBadge({ label, available }: { label: string; available: boolean }) {
   return (
     <span
       className={cn(
@@ -115,10 +103,7 @@ function GTCRow({ item }: { item: GTCItem }) {
       : 'EXEMPT';
 
   return (
-    <tr
-      className={cn('atlas-f11-gtc-row', rowClass)}
-      data-testid={`f11-gtc-row-${item.ticker}`}
-    >
+    <tr className={cn('atlas-f11-gtc-row', rowClass)} data-testid={`f11-gtc-row-${item.ticker}`}>
       <td className="atlas-f11-gtc-cell">{item.ticker}</td>
       <td className="atlas-f11-gtc-cell">${item.limit_price.toFixed(2)}</td>
       <td className="atlas-f11-gtc-cell">{item.quantity.toLocaleString()}</td>
@@ -142,12 +127,9 @@ function Framework11Content({ data }: { data: Framework11Result }) {
   const cashUsdDisplay = formatUsd(data.cash_usd);
   const navDisplay = formatUsd(data.current_nav);
 
-  const shortfallOrBufferLabel =
-    data.floor_status === 'VIOLATED' ? 'Shortfall' : 'Buffer';
+  const shortfallOrBufferLabel = data.floor_status === 'VIOLATED' ? 'Shortfall' : 'Buffer';
   const shortfallOrBufferValue =
-    data.floor_status === 'VIOLATED'
-      ? formatUsd(data.shortfall_usd)
-      : formatUsd(data.buffer_usd);
+    data.floor_status === 'VIOLATED' ? formatUsd(data.shortfall_usd) : formatUsd(data.buffer_usd);
   const shortfallHighlight =
     data.floor_status === 'VIOLATED' ? 'is-f11-shortfall' : 'is-f11-buffer';
 
@@ -178,9 +160,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
         <StatCard
           label="Required Floor %"
           value={floorPctDisplay}
-          highlight={
-            data.using_conservative_default ? 'is-f11-conservative' : undefined
-          }
+          highlight={data.using_conservative_default ? 'is-f11-conservative' : undefined}
         />
         <StatCard
           label={shortfallOrBufferLabel}
@@ -224,23 +204,18 @@ function Framework11Content({ data }: { data: Framework11Result }) {
 
         {data.floor_status === 'VIOLATED' && (
           <>
-            <p className="atlas-f11-panel-title is-f11-violated-title">
-              CASH FLOOR VIOLATED
-            </p>
+            <p className="atlas-f11-panel-title is-f11-violated-title">CASH FLOOR VIOLATED</p>
             <p className="atlas-f11-panel-line">
               Cash {cashPctDisplay} below {floorPctDisplay} floor.
             </p>
-            <p className="atlas-f11-panel-line">
-              Shortfall: {formatUsd(data.shortfall_usd)}
-            </p>
+            <p className="atlas-f11-panel-line">Shortfall: {formatUsd(data.shortfall_usd)}</p>
             <p className="atlas-f11-panel-line">
               All buy signals queued. Restore cash via sells or distributions.
             </p>
             {data.queued_signals_count > 0 && (
               <p className="atlas-f11-panel-detail is-f11-queued-note">
                 {data.queued_signals_count} signal
-                {data.queued_signals_count !== 1 ? 's' : ''} queued — pending
-                cash restoration
+                {data.queued_signals_count !== 1 ? 's' : ''} queued — pending cash restoration
               </p>
             )}
           </>
@@ -248,19 +223,16 @@ function Framework11Content({ data }: { data: Framework11Result }) {
 
         {data.floor_status === 'UNKNOWN' && (
           <>
-            <p className="atlas-f11-panel-title is-f11-unknown-title">
-              Cannot verify floor
-            </p>
+            <p className="atlas-f11-panel-title is-f11-unknown-title">Cannot verify floor</p>
             {!data.f30_available && (
               <p className="atlas-f11-panel-line">
-                NAV unavailable — cannot determine floor status. Verify
-                manually before any buy.
+                NAV unavailable — cannot determine floor status. Verify manually before any buy.
               </p>
             )}
             {!data.cash_db_available && (
               <p className="atlas-f11-panel-line">
-                Cash balance unavailable — cannot verify floor compliance. No
-                buys permitted until cash data is restored.
+                Cash balance unavailable — cannot verify floor compliance. No buys permitted until
+                cash data is restored.
               </p>
             )}
             <p className="atlas-f11-panel-detail">All buys blocked as precaution.</p>
@@ -278,9 +250,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
       <div className="atlas-f11-detail-grid" data-testid="f11-detail-grid">
         <div className="atlas-f11-detail-row">
           <span className="atlas-f11-detail-label">Regime</span>
-          <span className="atlas-f11-detail-value">
-            {data.regime ?? 'Unknown'}
-          </span>
+          <span className="atlas-f11-detail-value">{data.regime ?? 'Unknown'}</span>
         </div>
         <div className="atlas-f11-detail-row">
           <span className="atlas-f11-detail-label">Floor source</span>
@@ -293,9 +263,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
         <div className="atlas-f11-detail-row">
           <span className="atlas-f11-detail-label">Days in CLEAR</span>
           <span className="atlas-f11-detail-value">
-            {data.clear_transition_days !== null
-              ? `${data.clear_transition_days}`
-              : 'N/A'}
+            {data.clear_transition_days !== null ? `${data.clear_transition_days}` : 'N/A'}
           </span>
         </div>
         <div className="atlas-f11-detail-row">
@@ -308,8 +276,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
       <div className="atlas-f11-section" data-testid="f11-gtc-window-section">
         <h4 className="atlas-f11-section-title">GTC Aggregate Window</h4>
         <p className="atlas-f11-formula">
-          Window = Cash − (
-          {GTC_WINDOW_BUFFER_MULTIPLIER}× Floor × NAV)
+          Window = Cash − ({GTC_WINDOW_BUFFER_MULTIPLIER}× Floor × NAV)
         </p>
 
         {data.gtc_window_usd !== null &&
@@ -317,8 +284,8 @@ function Framework11Content({ data }: { data: Framework11Result }) {
           data.floor_pct !== null &&
           data.current_nav !== null && (
             <p className="atlas-f11-formula-expanded">
-              {formatUsd(data.cash_usd)} − ({GTC_WINDOW_BUFFER_MULTIPLIER} ×{' '}
-              {floorPctDisplay} × {navDisplay}) = {gtcWindowDisplay}
+              {formatUsd(data.cash_usd)} − ({GTC_WINDOW_BUFFER_MULTIPLIER} × {floorPctDisplay} ×{' '}
+              {navDisplay}) = {gtcWindowDisplay}
             </p>
           )}
 
@@ -327,8 +294,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
             className="atlas-f11-gtc-panel is-f11-gtc-unknown"
             data-testid="f11-gtc-window-unknown"
           >
-            GTC window unknown — {!data.f30_available ? 'NAV' : 'cash balance'}{' '}
-            unavailable.
+            GTC window unknown — {!data.f30_available ? 'NAV' : 'cash balance'} unavailable.
           </div>
         ) : data.gtc_window_negative ? (
           <div
@@ -348,19 +314,12 @@ function Framework11Content({ data }: { data: Framework11Result }) {
             <p className="atlas-f11-panel-line">
               Near-money GTCs: {formatUsd(data.gtc_near_money_total_usd)}
             </p>
-            <p className="atlas-f11-panel-line">
-              Window: {gtcWindowDisplay}
-            </p>
+            <p className="atlas-f11-panel-line">Window: {gtcWindowDisplay}</p>
             <p className="atlas-f11-panel-line">Reduce shares or raise cash.</p>
           </div>
         ) : (
-          <div
-            className="atlas-f11-gtc-panel is-f11-gtc-ok"
-            data-testid="f11-gtc-ok"
-          >
-            <p className="atlas-f11-panel-line">
-              GTC within window.
-            </p>
+          <div className="atlas-f11-gtc-panel is-f11-gtc-ok" data-testid="f11-gtc-ok">
+            <p className="atlas-f11-panel-line">GTC within window.</p>
             <p className="atlas-f11-panel-line">
               Near-money: {formatUsd(data.gtc_near_money_total_usd)}
             </p>
@@ -376,26 +335,19 @@ function Framework11Content({ data }: { data: Framework11Result }) {
         <h4 className="atlas-f11-section-title">
           Open GTC Buy Orders
           <span className="atlas-f11-gtc-counts">
-            Near-money: {data.gtc_near_money_count} | Exempt:{' '}
-            {data.gtc_exempt_count} | Price missing:{' '}
-            {data.gtc_price_missing_count}
+            Near-money: {data.gtc_near_money_count} | Exempt: {data.gtc_exempt_count} | Price
+            missing: {data.gtc_price_missing_count}
           </span>
         </h4>
 
         {!data.gtc_db_available && (
-          <p
-            className="atlas-f11-warning-item"
-            data-testid="f11-gtc-db-unavailable"
-          >
+          <p className="atlas-f11-warning-item" data-testid="f11-gtc-db-unavailable">
             GTC order database unavailable — proximity check incomplete.
           </p>
         )}
 
         {hasGtcOrders ? (
-          <table
-            className="atlas-f11-gtc-table"
-            data-testid="f11-gtc-table"
-          >
+          <table className="atlas-f11-gtc-table" data-testid="f11-gtc-table">
             <thead>
               <tr>
                 <th className="atlas-f11-gtc-th">Ticker</th>
@@ -416,10 +368,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
             </tbody>
           </table>
         ) : (
-          <p
-            className="atlas-f11-no-orders"
-            data-testid="f11-no-gtc-orders"
-          >
+          <p className="atlas-f11-no-orders" data-testid="f11-no-gtc-orders">
             No open GTC buy orders.
           </p>
         )}
@@ -427,14 +376,10 @@ function Framework11Content({ data }: { data: Framework11Result }) {
 
       {/* ── Section 7: Queued signals ───────────────────────────────────── */}
       {data.queued_signals_count > 0 && (
-        <div
-          className="atlas-f11-section atlas-f11-queue-section"
-          data-testid="f11-queue-section"
-        >
+        <div className="atlas-f11-section atlas-f11-queue-section" data-testid="f11-queue-section">
           <h4 className="atlas-f11-section-title is-f11-queue-title">
             {data.queued_signals_count} signal
-            {data.queued_signals_count !== 1 ? 's' : ''} queued pending cash
-            floor restoration
+            {data.queued_signals_count !== 1 ? 's' : ''} queued pending cash floor restoration
           </h4>
           <ul className="atlas-f11-queue-list">
             {data.signal_queue.map((sig) => {
@@ -445,7 +390,9 @@ function Framework11Content({ data }: { data: Framework11Result }) {
                 typeof sig['queued_at'] === 'string' ? (sig['queued_at'] as string) : null;
               return (
                 <li
-                  key={typeof sig['id'] === 'number' ? (sig['id'] as number) : `${ticker}-${queuedAt}`}
+                  key={
+                    typeof sig['id'] === 'number' ? (sig['id'] as number) : `${ticker}-${queuedAt}`
+                  }
                   className="atlas-f11-queue-item"
                 >
                   {ticker} — {action}
@@ -477,9 +424,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
         <DataSourceBadge label="GTC DB" available={data.gtc_db_available} />
         <span className="atlas-f11-source-age">
           Last updated:{' '}
-          {data.data_age_minutes === 0
-            ? 'just now'
-            : `${data.data_age_minutes} min ago`}
+          {data.data_age_minutes === 0 ? 'just now' : `${data.data_age_minutes} min ago`}
         </span>
       </div>
     </div>
@@ -490,7 +435,7 @@ function Framework11Content({ data }: { data: Framework11Result }) {
 // Main exported component
 // ---------------------------------------------------------------------------
 
-export function Framework11Card(_props: Framework11CardProps) {
+export function Framework11Card() {
   const { data, isLoading, isError } = useFramework11();
 
   const hasData = data !== undefined;
@@ -504,10 +449,7 @@ export function Framework11Card(_props: Framework11CardProps) {
   }
 
   return (
-    <div
-      className="atlas-f11-card atlas-framework-card"
-      data-testid="framework11-card"
-    >
+    <div className="atlas-f11-card atlas-framework-card" data-testid="framework11-card">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="atlas-f11-header">
         <div className="atlas-f11-header-left">
@@ -517,10 +459,7 @@ export function Framework11Card(_props: Framework11CardProps) {
         <div className="atlas-f11-header-right">
           {hasData && (
             <span
-              className={cn(
-                'atlas-f11-status-chip',
-                FLOOR_STATUS_CHIP_CLASS[data.floor_status],
-              )}
+              className={cn('atlas-f11-status-chip', FLOOR_STATUS_CHIP_CLASS[data.floor_status])}
               data-testid="f11-status-chip"
             >
               {FLOOR_STATUS_LABEL[data.floor_status]}
@@ -539,28 +478,20 @@ export function Framework11Card(_props: Framework11CardProps) {
 
       {/* ── Loading ─────────────────────────────────────────────────────── */}
       {isLoading && (
-        <div
-          className="atlas-f11-loading"
-          data-testid="f11-loading"
-        >
+        <div className="atlas-f11-loading" data-testid="f11-loading">
           Evaluating cash floor…
         </div>
       )}
 
       {/* ── Error ───────────────────────────────────────────────────────── */}
       {isError && !isLoading && (
-        <div
-          className="atlas-f11-error"
-          data-testid="f11-error"
-        >
+        <div className="atlas-f11-error" data-testid="f11-error">
           Framework 11 data unavailable. All buys blocked as precaution.
         </div>
       )}
 
       {/* ── Content ─────────────────────────────────────────────────────── */}
-      {!isLoading && !isError && hasData && (
-        <Framework11Content data={data} />
-      )}
+      {!isLoading && !isError && hasData && <Framework11Content data={data} />}
     </div>
   );
 }

@@ -175,7 +175,7 @@ class OptionsFlowResponse(BaseModel):
     )
     f4b_score_input_source: str = Field(
         default="NONE",
-        description="Final F4b score input source: ADJUSTED | RAW_TAPE | NONE.",
+        description="Final F4b score input source: DEDUP_ALERTS | RAW_TAPE | NONE.",
     )
     f4b_universe_source: str = Field(
         default="NONE",
@@ -208,6 +208,14 @@ class OptionsFlowResponse(BaseModel):
     raw_put_bid_premium_usd: float | None = Field(
         default=None,
         description="Raw put bid-side premium bucket before weighting/declassification (USD).",
+    )
+    full_tape_bullish_share: float | None = Field(
+        default=None,
+        description="Bullish share from the full options tape when that tape is available.",
+    )
+    f4b_coverage_warning: str | None = Field(
+        default=None,
+        description="Warning when F4b covers 2 sessions but F4a/dark-pool coverage is partial.",
     )
     live_pulse_score: int | None = Field(
         default=None,

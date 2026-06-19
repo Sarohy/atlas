@@ -896,6 +896,15 @@ _F4_EW_SWING: Final[float] = 0.85  # 91-270 DTE (3-9mo)
 _F4_EW_LEAPS: Final[float] = 0.78  # >270 DTE
 _F4_EW_UNKNOWN: Final[float] = 0.85
 
+# F4 alert dedupe: repeated hits inside a short window should not overweight a
+# single working order. Price bands are coarse so tiny refresh noise collapses.
+_F4_ALERT_DEDUPE_WINDOW_MINUTES: Final[int] = 5
+_F4_ALERT_PRICE_BAND_USD: Final[float] = 250_000.0
+
+# Alert-universe dedupe: collapse repeated hits on the same working order.
+_F4_ALERT_DEDUPE_WINDOW_MINUTES: Final[int] = 5
+_F4_ALERT_PRICE_BAND_USD: Final[float] = 250_000.0
+
 # F4a equity / dark-pool is NOT scored into F4b (final scoring rule). Dark-pool
 # confirmation belongs to the (deferred) Flow Monitor action gate, not the score,
 # so it surfaces only via the dark_pool_state chip / clearance / dark_pool_net_flow.

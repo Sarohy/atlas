@@ -229,7 +229,7 @@ def test_build_response_v2_exposes_score_input_source_and_universe_diagnostics()
         ],
     )
 
-    assert response.f4b_score_input_source == "ADJUSTED"
+    assert response.f4b_score_input_source == "DEDUP_ALERTS"
     assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
     assert response.f4b_universe_total_alerts == 4
     assert response.f4b_universe_directional_alerts == 4
@@ -275,6 +275,99 @@ def test_build_response_v2_exposes_tactical_live_pulse_as_separate_chip() -> Non
     assert response.live_pulse_state == "TACTICAL_BULLISH_TRIGGER"
 
 
+def test_build_response_v2_dedupes_repeated_alert_clusters_before_scoring() -> None:
+    repeated_call = {
+        "type": "call",
+        "created_at": "2026-06-15T15:00:00Z",
+        "expiry": "2026-09-18",
+        "strike": 340,
+        "underlying_price": 340,
+        "total_ask_side_prem": 10_000_000.0,
+        "total_bid_side_prem": 0.0,
+        "total_premium": 10_000_000.0,
+    }
+    repeated_call_followup = {
+        "type": "call",
+        "created_at": "2026-06-15T15:03:00Z",
+        "expiry": "2026-09-18",
+        "strike": 340,
+        "underlying_price": 340,
+        "total_ask_side_prem": 10_200_000.0,
+        "total_bid_side_prem": 0.0,
+        "total_premium": 10_200_000.0,
+    }
+
+    response = _build_response_v2(
+        ticker="MRVL",
+        market_cap=85_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[
+            repeated_call,
+            repeated_call_followup,
+            repeated_call,
+            {
+                "type": "put",
+                "created_at": "2026-06-15T15:04:00Z",
+                "expiry": "2026-09-18",
+                "strike": 340,
+                "underlying_price": 340,
+                "total_ask_side_prem": 10_000_000.0,
+                "total_bid_side_prem": 0.0,
+                "total_premium": 10_000_000.0,
+            },
+        ],
+    )
+
+    assert response.raw_bullish_share == pytest.approx(30_200_000.0 / 40_200_000.0)
+    assert response.adjusted_bullish_share == pytest.approx(0.5)
+    assert response.f4_score == 50
+    assert response.f4b_score_input_source == "DEDUP_ALERTS"
+
+
+def test_build_response_v2_surfaces_full_tape_share_when_tape_is_used() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=None,
+        opt_tape=[
+            {
+                "executed_at": "2026-06-17T15:00:00Z",
+                "side": "ask",
+                "option_type": "call",
+                "expiry": "2026-08-15",
+                "premium": 5_000_000.0,
+            },
+            {
+                "executed_at": "2026-06-17T15:01:00Z",
+                "side": "ask",
+                "option_type": "put",
+                "expiry": "2026-08-15",
+                "premium": 2_000_000.0,
+            },
+        ],
+    )
+
+    assert response.f4b_score_input_source == "RAW_TAPE"
+    assert response.full_tape_bullish_share is not None
+    assert response.full_tape_bullish_share == pytest.approx(5_000_000.0 / 7_000_000.0)
+
+
+def test_build_response_v2_warns_when_f4b_has_two_sessions_but_dark_pool_has_one() -> None:
+    response = _build_response_v2(
+        ticker="MRVL",
+        market_cap=85_000_000_000.0,
+        dp_prints=[_dp_print("2026-06-15")],
+        opt_trades=[
+            _atm("call", ask=10_000_000.0),
+            _atm("put", ask=2_000_000.0),
+        ],
+    )
+
+    assert response.f4b_coverage_warning is not None
+    assert "1 of 2" in response.f4b_coverage_warning
+
+
 def test_build_response_v2_dram_etf_proxy_path_surfaces_bearish_live_pulse_diagnostics() -> None:
     """MRVL/SOXX-style check: keep persistence scored, surface bearish same-day pulse."""
     response = _build_response_v2(
@@ -305,7 +398,7 @@ def test_build_response_v2_dram_etf_proxy_path_surfaces_bearish_live_pulse_diagn
         ],
     )
 
-    assert response.f4b_score_input_source == "ADJUSTED"
+    assert response.f4b_score_input_source == "DEDUP_ALERTS"
     assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
     assert response.f4b_universe_total_alerts == 2
     assert response.live_pulse_score is not None

@@ -121,3 +121,76 @@ it is the correct home.
 
 *Amendment authored from the v2.2 finding; mirrors the v2.1 (Overshoot Elasticity)
 amendment structure. Internal framework specification — not investment advice.*
+
+---
+
+## 6. Ali Ticket Addendum — F4b Universe Governance + DRAM Treatment
+
+### 6.1 Official framing for audit responses
+
+Use this exact language in reviews and incident notes:
+
+**The formula is likely reproducing the app's selected universe. The unresolved issue is whether that selected universe is appropriate for official F4b scoring.**
+
+This avoids over-claiming "confirmed good" when the core dispute is universe construction.
+
+### 6.2 F4b universe-construction policy (alerts vs tape)
+
+If `UW_ALERTS_2_SESSION` remains the official F4b scoring universe, it must be deduped
+before scoring to reduce repeated-hit cluster overweight.
+
+Dedup key (minimum):
+- ticker
+- expiry
+- strike
+- option type
+- side
+- price band
+- short time window
+
+Diagnostic transparency must expose all three side by side:
+- raw-alert bull share
+- dedup-alert bull share
+- full-tape bull share
+
+If official scoring later migrates to full tape, keep alert-based shares as secondary
+diagnostics only.
+
+### 6.3 Coverage mismatch warning
+
+When F4b uses a 2-session options window while F4a dark-pool coverage spans only 1 of 2
+sessions, surface an explicit coverage-warning badge/message. This is a confidence warning,
+not a formula override.
+
+### 6.4 DRAM instrument treatment
+
+DRAM is a real ETF/fund instrument, not a dead symbol and not an operating company.
+Do not run DRAM through the normal equity F1-F5 engine.
+
+Treat DRAM as:
+- memory/HBM proxy exposure
+- lower-confidence ETF flow pulse for F4
+- portfolio overlap risk with existing memory names
+
+Current action posture under extreme extension:
+- no fresh add
+- hold small only
+- protect / wait for reset
+
+### 6.5 Portfolio overlap rule (required)
+
+ETF/fund instruments must map holdings/exposure back to existing portfolio clusters.
+For DRAM, count overlap into the Memory/HBM cluster and MU/SNDK/Samsung/SK Hynix exposure.
+Do not treat DRAM as independent diversification.
+
+### 6.6 ETF F4 rule (required)
+
+ETF/fund options flow is hedge/overlay-heavy and lower-confidence.
+It may be displayed as a pulse, but must not satisfy an add gate by itself.
+
+### 6.7 Leveraged ETF rule (required)
+
+If a leveraged DRAM-linked product appears:
+- tag separately as leveraged fund exposure
+- do not run through standard equity scoring
+- apply dedicated leveraged-product controls

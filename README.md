@@ -63,6 +63,7 @@ lib/stores/    Zustand stores
 - **Regime modifier is a pure function.** No side effects, no I/O, no randomness.
 - **Conviction scores are read-only intraday.** No recomputation outside the post-close batch job.
 - **Framework 12 no-fly zone uses conservative defaults.** When any data source is unavailable, all sell-side actions (covered calls, partial sells, trims) are treated as BLOCKED.
+- **F4b universe governance + DRAM policy is documented in spec.** See `docs/extension-washout-spec-v2.2-amendment.md` §6 for official framing, alert-universe dedupe requirements, ETF-flow limits, and leveraged-product handling.
 
 ### Database tables
 

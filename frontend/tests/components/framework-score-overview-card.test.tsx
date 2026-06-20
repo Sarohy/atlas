@@ -6,6 +6,7 @@ import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
+import type { Section16Result } from '@/lib/schemas/section16';
 
 const mockState = vi.hoisted(() => ({
   activeTicker: 'AAPL',
@@ -13,6 +14,7 @@ const mockState = vi.hoisted(() => ({
   optionsFlowData: undefined as OptionsFlowResponse | undefined,
   extensionOverlayData: undefined as ExtensionOverlayResponse | undefined,
   extensionWashoutData: undefined as ExtensionWashoutResponse | undefined,
+  section16Data: undefined as Section16Result | undefined,
 }));
 
 vi.mock('@/lib/stores/framework-store', () => ({
@@ -47,6 +49,14 @@ vi.mock('@/lib/hooks/use-extension-overlay', () => ({
 vi.mock('@/lib/hooks/use-extension-washout', () => ({
   useExtensionWashout: () => ({
     data: mockState.extensionWashoutData,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+vi.mock('@/lib/hooks/use-section16', () => ({
+  useSection16: () => ({
+    data: mockState.section16Data,
     isLoading: false,
     isError: false,
   }),
@@ -212,6 +222,23 @@ function makeExtensionWashoutData(
   } as ExtensionWashoutResponse;
 }
 
+function makeSection16Data(overrides: Partial<Section16Result> = {}): Section16Result {
+  return {
+    ticker: 'AAPL',
+    track: 'UNASSIGNED',
+    gate: 'UNKNOWN',
+    rule1: null,
+    rule2: null,
+    rule3: null,
+    rule4: null,
+    override: null,
+    override_used: false,
+    evaluated_at: '2026-01-01T00:00:00Z',
+    notes: null,
+    ...overrides,
+  };
+}
+
 describe('FrameworkScoreOverviewCard', () => {
   it('keeps the normal tier headline when flow is confirmed and no major gaps exist', () => {
     mockState.activeTicker = 'AAPL';
@@ -318,11 +345,41 @@ describe('FrameworkScoreOverviewCard', () => {
       action: 'HOLD_TRIM',
     });
     mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+    mockState.section16Data = makeSection16Data({ ticker: 'MRVL', track: 'TRACK_B' });
 
     render(<FrameworkScoreOverviewCard />);
 
     expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
       'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
+    );
+  });
+
+  it('uses TREND extension headline for track A names in overview', () => {
+    mockState.activeTicker = 'MRVL';
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'MRVL',
+      final_score: 76,
+      raw_total: 76,
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'MRVL',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+    });
+    mockState.extensionOverlayData = makeExtensionOverlayData({
+      ticker: 'MRVL',
+      action: 'HOLD_TRIM',
+    });
+    mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+    mockState.section16Data = makeSection16Data({ ticker: 'MRVL', track: 'TRACK_A' });
+
+    render(<FrameworkScoreOverviewCard />);
+
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
+      'EXTENDED TREND - NO MARKET CHASE; LADDER/PROTECT/VWAP CONFIRM',
+    );
+    expect(screen.getByTestId('fws-overview-card')).not.toHaveTextContent(
+      'EXTENSION BLOCK / NO FRESH ADD',
     );
   });
 
@@ -453,5 +510,26 @@ describe('FrameworkScoreOverviewCard', () => {
     render(<FrameworkScoreOverviewCard />);
 
     expect(screen.getByTestId('fws-overview-card')).toHaveTextContent('TRIM / REDUCE');
+  });
+
+  it('shows degraded composite headline when score is degraded', () => {
+    mockState.activeTicker = 'DRAM';
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'DRAM',
+      final_score: 72,
+      raw_total: 72,
+      degraded: true,
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'DRAM',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+    });
+
+    render(<FrameworkScoreOverviewCard />);
+
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
+      'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',
+    );
   });
 });

@@ -7,6 +7,7 @@ import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
+import type { Section16Result } from '@/lib/schemas/section16';
 
 function makeWrapper() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -34,6 +35,7 @@ const mockState = vi.hoisted(() => ({
     | undefined,
   extensionOverlayData: undefined as ExtensionOverlayResponse | undefined,
   extensionWashoutData: undefined as ExtensionWashoutResponse | undefined,
+  section16Data: undefined as Section16Result | undefined,
 }));
 
 vi.mock('@/lib/hooks/use-framework-score', () => ({
@@ -94,6 +96,14 @@ vi.mock('@/lib/hooks/use-extension-overlay', () => ({
 vi.mock('@/lib/hooks/use-extension-washout', () => ({
   useExtensionWashout: () => ({
     data: mockState.extensionWashoutData,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+vi.mock('@/lib/hooks/use-section16', () => ({
+  useSection16: () => ({
+    data: mockState.section16Data,
     isLoading: false,
     isError: false,
   }),
@@ -259,6 +269,23 @@ function makeExtensionWashoutData(
   } as ExtensionWashoutResponse;
 }
 
+function makeSection16Data(overrides: Partial<Section16Result> = {}): Section16Result {
+  return {
+    ticker: 'AAPL',
+    track: 'UNASSIGNED',
+    gate: 'UNKNOWN',
+    rule1: null,
+    rule2: null,
+    rule3: null,
+    rule4: null,
+    override: null,
+    override_used: false,
+    evaluated_at: '2026-01-01T00:00:00Z',
+    notes: null,
+    ...overrides,
+  };
+}
+
 describe('FrameworkScorePanel', () => {
   beforeEach(() => {
     mockState.f8BuyingBonus = 0;
@@ -276,6 +303,7 @@ describe('FrameworkScorePanel', () => {
     };
     mockState.extensionOverlayData = makeExtensionOverlayData();
     mockState.extensionWashoutData = makeExtensionWashoutData();
+    mockState.section16Data = makeSection16Data();
   });
 
   it('renders factor rows from the same F1-F5 scores shown in the detailed cards', async () => {
@@ -470,6 +498,7 @@ describe('FrameworkScorePanel', () => {
       action: 'HOLD_TRIM',
     });
     mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+    mockState.section16Data = makeSection16Data({ ticker: 'MRVL', track: 'TRACK_B' });
 
     render(<FrameworkScorePanel ticker="MRVL" onPreviewDetails={() => {}} />, {
       wrapper: makeWrapper(),
@@ -483,6 +512,46 @@ describe('FrameworkScorePanel', () => {
       'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
     );
     expect(screen.getByTestId('fws-action')).not.toHaveTextContent('GTC ADDS PERMITTED');
+  });
+
+  it('uses TREND extension headline for track A names instead of hard extension block', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'MRVL',
+      final_score: 76,
+      raw_total: 76,
+    });
+    mockState.momentumData = { ticker: 'MRVL', f1_score: 86 };
+    mockState.earningsData = { ticker: 'MRVL', f2_score: 78 };
+    mockState.analystData = { ticker: 'MRVL', f3_score: 74 };
+    mockState.fundamentalData = { ticker: 'MRVL', f5_score: 82, f5_grade: 'BUY' };
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'MRVL',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+      live_tape_state: 'Bullish persistent',
+      persistence_state: 'Bullish',
+    });
+    mockState.extensionOverlayData = makeExtensionOverlayData({
+      ticker: 'MRVL',
+      action: 'HOLD_TRIM',
+    });
+    mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'MRVL' });
+    mockState.section16Data = makeSection16Data({ ticker: 'MRVL', track: 'TRACK_A' });
+
+    render(<FrameworkScorePanel ticker="MRVL" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+      'EXTENDED TREND - NO MARKET CHASE; LADDER/PROTECT/VWAP CONFIRM',
+    );
+    expect(screen.getByTestId('fws-action')).not.toHaveTextContent(
+      'EXTENSION BLOCK / NO FRESH ADD',
+    );
   });
 
   it('caps an elite headline to core hold when extension and event-risk blocks are active', async () => {
@@ -644,5 +713,87 @@ describe('FrameworkScorePanel', () => {
     });
 
     expect(screen.getByTestId('fws-action')).toHaveTextContent('TRIM / REDUCE');
+  });
+
+  it('shows degraded composite headline and non-authorizing F4 wording when degraded', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'DRAM',
+      final_score: 72,
+      raw_total: 72,
+      degraded: true,
+      factors: [
+        {
+          key: 'f1',
+          name: 'Momentum',
+          score: 50,
+          weight: 0.2,
+          contribution: 10,
+          grade: 'N/A',
+          available: false,
+        },
+        {
+          key: 'f2',
+          name: 'Earnings Quality',
+          score: 50,
+          weight: 0.25,
+          contribution: 12.5,
+          grade: 'N/A',
+          available: false,
+        },
+        {
+          key: 'f3',
+          name: 'Analyst Sentiment',
+          score: 50,
+          weight: 0.15,
+          contribution: 7.5,
+          grade: 'NO COVERAGE',
+          available: false,
+        },
+        {
+          key: 'f4',
+          name: 'Options Flow Persistence',
+          score: 72,
+          weight: 0.15,
+          contribution: 10.8,
+          grade: 'Bullish',
+          available: true,
+          flow_monitor_action: 'ADD_PENDING_GATES',
+        },
+        {
+          key: 'f5',
+          name: 'Fundamental Quality',
+          score: 77,
+          weight: 0.2,
+          contribution: 15.4,
+          grade: 'WEAK',
+          available: true,
+        },
+      ],
+    });
+    mockState.momentumData = { ticker: 'DRAM', f1_score: 50 };
+    mockState.earningsData = { ticker: 'DRAM', f2_score: 50 };
+    mockState.analystData = { ticker: 'DRAM', f3_score: 50 };
+    mockState.fundamentalData = { ticker: 'DRAM', f5_score: 77, f5_grade: 'WEAK' };
+    mockState.optionsFlowData = makeOptionsFlowData({
+      ticker: 'DRAM',
+      f4_score: 72,
+      flow_monitor_action: 'ADD_PENDING_GATES',
+      f4_state: 'Bullish',
+    });
+
+    render(<FrameworkScorePanel ticker="DRAM" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+      'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',
+    );
+    expect(screen.getByTestId('fws-f4-summary')).toHaveTextContent(
+      'F4: 72 - Bullish / F4 bullish, not independently add-authorizing',
+    );
   });
 });

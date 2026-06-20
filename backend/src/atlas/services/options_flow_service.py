@@ -832,6 +832,88 @@ def _aggregate_flow_alerts(
     return net_flow, (largest_bull if largest_bull > 0 else None)
 
 
+def _dedupe_alert_universe(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeated flow-alert hits on the same working order."""
+    if not alerts:
+        return []
+
+    kept: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, int, int]] = set()
+
+    for rec in alerts:
+        ts_raw = rec.get("created_at")
+        if not isinstance(ts_raw, str):
+            kept.append(rec)
+            continue
+
+        try:
+            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        except ValueError:
+            kept.append(rec)
+            continue
+
+        opt_type = str(rec.get("type", "")).lower()
+        expiry = str(rec.get("expiry", ""))
+        strike = _safe_float(rec.get("strike"))
+        total_premium = _safe_float(rec.get("total_premium")) or 0.0
+
+        bucket_minutes = (ts.hour * 60 + ts.minute) // _F4_ALERT_DEDUPE_WINDOW_MINUTES
+        premium_bucket = int(total_premium // _F4_ALERT_PRICE_BAND_USD)
+        key = (
+            ts.date().isoformat(),
+            opt_type,
+            expiry,
+            "" if strike is None else f"{strike:.4f}",
+            bucket_minutes,
+            premium_bucket,
+        )
+        if key in seen:
+            continue
+
+        seen.add(key)
+        kept.append(rec)
+
+    return kept
+
+
+def _full_tape_bullish_share(trades: list[dict[str, Any]]) -> float | None:
+    """Compute bullish share for the raw options-tape fallback path."""
+    bullish = 0.0
+    bearish = 0.0
+    today = datetime.now(UTC).date()
+
+    for rec in trades:
+        side = rec.get("side") if isinstance(rec.get("side"), str) else None
+        opt_type = rec.get("option_type") or rec.get("type") or ""
+        if not isinstance(opt_type, str):
+            continue
+
+        delta = _safe_float(rec.get("delta"))
+        dte: int | None = None
+        expiry = rec.get("expiry") or rec.get("expiration") or rec.get("expiry_date")
+        if isinstance(expiry, str):
+            try:
+                exp_date = datetime.fromisoformat(expiry.replace("Z", "+00:00")).date()
+                dte = (exp_date - today).days
+            except ValueError:
+                dte = None
+
+        cls = _classify_options_print(side=side, option_type=opt_type, dte=dte, delta=delta)
+        if cls in ("PROFIT_TAKING", "SPREAD_CROSS"):
+            continue
+
+        prem = _safe_float(rec.get("premium")) or 0.0
+        if prem <= 0:
+            continue
+
+        if cls in ("NEW_BULL", "PUT_SELL"):
+            bullish += prem
+        elif cls == "NEW_BEAR":
+            bearish += prem
+
+    return _bullish_share(bullish, bearish)
+
+
 # ---------------------------------------------------------------------------
 # Layer 1 — F4 score: options-only, time-decayed ("fading memory")
 # ---------------------------------------------------------------------------
@@ -898,10 +980,6 @@ _F4_EW_UNKNOWN: Final[float] = 0.85
 
 # F4 alert dedupe: repeated hits inside a short window should not overweight a
 # single working order. Price bands are coarse so tiny refresh noise collapses.
-_F4_ALERT_DEDUPE_WINDOW_MINUTES: Final[int] = 5
-_F4_ALERT_PRICE_BAND_USD: Final[float] = 250_000.0
-
-# Alert-universe dedupe: collapse repeated hits on the same working order.
 _F4_ALERT_DEDUPE_WINDOW_MINUTES: Final[int] = 5
 _F4_ALERT_PRICE_BAND_USD: Final[float] = 250_000.0
 
@@ -1890,6 +1968,9 @@ def _build_response_v2(
     adjusted_bear_premium: float | None = None
     adjusted_bullish_share: float | None = None
     adjusted_largest_bullish_print: float | None = None
+    full_tape_bullish_share: float | None = None
+    f4b_coverage_warning: str | None = None
+    used_alert_universe = False
     hedge_flag: str = _HEDGE_NONE
     hedge_reason: str | None = None
     # Multi-window display fields (Multi-Window Pull Spec §4/§7).
@@ -1904,10 +1985,12 @@ def _build_response_v2(
     # the dark-pool CONFIRMATION upgrade/downgrade is applied to the score below.
     equity_bullish = dp_net_flow is not None and dp_net_flow > 0
     if opt_trades is not None:
+        used_alert_universe = True
         f4b_universe_source = "UW_ALERTS_2_SESSION"
-        windowed_opts = _filter_to_recent_sessions(
+        raw_windowed_opts = _filter_to_recent_sessions(
             opt_trades, timestamp_key="created_at", n=_F4_OPTIONS_MAX_SESSIONS
         )
+        windowed_opts = _dedupe_alert_universe(raw_windowed_opts)
         opt_window_empty = not windowed_opts
         sessions = _group_by_session(windowed_opts, "created_at")  # newest first
         # F4b = WEIGHTED MULTI-WINDOW classified score (current session heaviest)
@@ -1915,27 +1998,29 @@ def _build_response_v2(
         opt_score = _multi_window_score(sessions)
         if opt_score is None:
             opt_score = _F4_NEUTRAL_SCORE
-        if windowed_opts:
-            debug = _directional_premium_debug(windowed_opts)
-            raw_bull_premium = float(debug["raw_bull"])
-            raw_bear_premium = float(debug["raw_bear"])
-            raw_bullish_share = debug["raw_share"]
-            raw_largest_bullish_print = debug["raw_largest_bull"]
-            raw_largest_call_ask_print = debug["raw_largest_call_ask"]
-            raw_call_ask_premium = float(debug["raw_call_ask"])
-            raw_call_bid_premium = float(debug["raw_call_bid"])
-            raw_put_ask_premium = float(debug["raw_put_ask"])
-            raw_put_bid_premium = float(debug["raw_put_bid"])
-            f4b_universe_total_alerts = int(debug["total_alerts"])
-            f4b_universe_directional_alerts = int(debug["directional_alerts"])
-            f4b_universe_excluded_alerts = int(debug["excluded_alerts"])
-            declassified_premium_by_reason = debug["declassified_by_reason"]
-            adjusted_bull_premium = float(debug["adjusted_bull"])
-            adjusted_bear_premium = float(debug["adjusted_bear"])
-            adjusted_bullish_share = debug["adjusted_share"]
-            adjusted_largest_bullish_print = debug["adjusted_largest_bull"]
+        if raw_windowed_opts:
+            raw_debug = _directional_premium_debug(raw_windowed_opts)
+            raw_bull_premium = float(raw_debug["raw_bull"])
+            raw_bear_premium = float(raw_debug["raw_bear"])
+            raw_bullish_share = raw_debug["raw_share"]
+            raw_largest_bullish_print = raw_debug["raw_largest_bull"]
+            raw_largest_call_ask_print = raw_debug["raw_largest_call_ask"]
+            raw_call_ask_premium = float(raw_debug["raw_call_ask"])
+            raw_call_bid_premium = float(raw_debug["raw_call_bid"])
+            raw_put_ask_premium = float(raw_debug["raw_put_ask"])
+            raw_put_bid_premium = float(raw_debug["raw_put_bid"])
+            f4b_universe_total_alerts = int(raw_debug["total_alerts"])
+            f4b_universe_directional_alerts = int(raw_debug["directional_alerts"])
+            f4b_universe_excluded_alerts = int(raw_debug["excluded_alerts"])
             largest_opt_buy = raw_largest_bullish_print
-            f4b_score_input_source = "ADJUSTED"
+        if windowed_opts:
+            dedup_debug = _directional_premium_debug(windowed_opts)
+            declassified_premium_by_reason = dedup_debug["declassified_by_reason"]
+            adjusted_bull_premium = float(dedup_debug["adjusted_bull"])
+            adjusted_bear_premium = float(dedup_debug["adjusted_bear"])
+            adjusted_bullish_share = dedup_debug["adjusted_share"]
+            adjusted_largest_bullish_print = dedup_debug["adjusted_largest_bull"]
+            f4b_score_input_source = "DEDUP_ALERTS"
         # Full-window share + net premium for display.
         bullish_prem = adjusted_bull_premium or 0.0
         bearish_prem = adjusted_bear_premium or 0.0
@@ -1962,6 +2047,7 @@ def _build_response_v2(
         windowed_tape = _filter_to_recent_sessions(opt_tape, timestamp_key="executed_at")
         opt_window_empty = not windowed_tape
         opt_net_flow, largest_opt_buy = _decay_weighted_tape(windowed_tape)
+        full_tape_bullish_share = _full_tape_bullish_share(windowed_tape)
         opt_score = _map_net_flow_to_score(opt_net_flow, tier)
     else:
         opt_score = None
@@ -2013,6 +2099,12 @@ def _build_response_v2(
             "(high-volume truncation); the chip understates the full window."
         )
         gap_reason = f"{gap_reason} {note}" if gap_reason else note
+
+    if used_alert_universe and dp_sessions_covered is not None and 0 < dp_sessions_covered < _F4_LOOKBACK_SESSIONS:
+        f4b_coverage_warning = (
+            f"F4b options window covers {_F4_LOOKBACK_SESSIONS} sessions while F4a dark-pool "
+            f"covers {dp_sessions_covered} of {_F4_LOOKBACK_SESSIONS}."
+        )
 
     # Settlement ratio — computed from the same windowed set used for the chips.
     dp_settlement_ratio: float | None = (
@@ -2074,6 +2166,8 @@ def _build_response_v2(
         raw_call_bid_premium_usd=raw_call_bid_premium,
         raw_put_ask_premium_usd=raw_put_ask_premium,
         raw_put_bid_premium_usd=raw_put_bid_premium,
+        full_tape_bullish_share=full_tape_bullish_share,
+        f4b_coverage_warning=f4b_coverage_warning,
         live_pulse_score=live_pulse_score,
         live_pulse_state=live_pulse_state,
         dark_pool_settlement_ratio=dp_settlement_ratio,

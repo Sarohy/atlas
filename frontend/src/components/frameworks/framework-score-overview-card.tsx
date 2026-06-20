@@ -240,6 +240,13 @@ function deriveHeadlineAction(
   extensionWashoutData?: ExtensionWashoutResponse,
   section16Track?: TrackType,
 ): { label: string; tone: string } {
+  if (data.etf_branch) {
+    return {
+      label: data.etf_branch.headline_label,
+      tone: data.action_tone,
+    };
+  }
+
   if (data.degraded) {
     return {
       label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',

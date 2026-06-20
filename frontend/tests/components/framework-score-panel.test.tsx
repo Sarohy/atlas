@@ -170,6 +170,7 @@ function makeFrameworkScoreData(
     f5_raw_score: null,
     f8_buying_bonus: mockState.f8BuyingBonus,
     f8_clustered_selling_note: null,
+    etf_branch: null,
     flags: [],
     degraded: false,
     f4_data_gap_badge: null,
@@ -795,5 +796,51 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-f4-summary')).toHaveTextContent(
       'F4: 72 - Bullish / F4 bullish, not independently add-authorizing',
     );
+  });
+
+  it('uses ETF branch headline metadata when router output is present', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'DRAM',
+      final_score: 70,
+      raw_total: 70,
+      degraded: true,
+      action_tone: 'tone-blue',
+      etf_branch: {
+        route: 'THEMATIC_PROXY_ETF',
+        label: 'Memory / HBM proxy basket',
+        headline_label:
+          'BULLISH PROXY - memory/HBM basket exposure. Direct company F1-F5 not applicable.',
+        timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
+        holdings_driver: 'MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia',
+        components: [],
+        hedge_inputs: null,
+      },
+      flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({ ticker: 'DRAM' });
+    mockState.momentumData = { ticker: 'DRAM', f1_score: 95 };
+    mockState.earningsData = { ticker: 'DRAM', f2_score: 50 };
+    mockState.analystData = { ticker: 'DRAM', f3_score: 50 };
+    mockState.fundamentalData = { ticker: 'DRAM', f5_score: 50, f5_grade: 'N/A' };
+    mockState.framework8Data = {
+      ticker: 'DRAM',
+      buying_bonus: 0,
+      clustered_selling_note: null,
+      source: 'default',
+    };
+
+    render(<FrameworkScorePanel ticker="DRAM" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('fws-action')).toHaveTextContent(
+      'BULLISH PROXY - memory/HBM basket exposure. Direct company F1-F5 not applicable.',
+    );
+    expect(screen.getByTestId('fws-score')).toHaveTextContent('70');
+    expect(screen.queryByTestId('fws-degraded')).not.toBeInTheDocument();
   });
 });

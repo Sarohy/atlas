@@ -221,7 +221,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             }
           />
         )}
-        {!isLoading && !isError && data && data.degraded && (
+        {!isLoading && !isError && data && data.degraded && !data.etf_branch && (
           <DegradedBanner flags={data.flags} factors={data.factors.filter((f) => !f.available)} />
         )}
         {!isLoading && !isError && displayData && (
@@ -460,6 +460,10 @@ function buildDisplayFrameworkScore(
   data: FrameworkScoreResponse,
   scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
 ): FrameworkScoreResponse {
+  if (data.etf_branch) {
+    return data;
+  }
+
   const factors = data.factors.map((factor) =>
     buildDisplayFactor(factor, scoreOverrides[factor.key]),
   );
@@ -514,18 +518,6 @@ function buildDisplayFactor(
 // Tone for a factor grade. Handles both the legacy F1-F3/F5 vocabulary
 // (STRONG BUY / BUY / NEUTRAL / WEAK / AVOID) and the F4b band vocabulary
 // (Strong Bullish Options … Aggressive Bearish). Never green for a bearish band.
-// Flow Monitor verdict, short form for the F4 row (the only add authority).
-const FLOW_MONITOR_SHORT: Record<string, string> = {
-  ADD_ELIGIBLE: 'Add eligible',
-  ADD_PENDING_GATES: 'Add — pending gates',
-  STARTER: 'Starter / watch',
-  WATCH: 'Watch / no fresh add',
-  CONFLICT: 'Conflict / no chase',
-  MIXED_ABSORPTION: 'Mixed absorption / watch',
-  TRIM_WATCH: 'Trim-watch',
-  AVOID: 'Avoid',
-};
-
 function factorGradeTone(grade: string): string {
   const g = grade.toLowerCase();
   // Bearish first (so "mild bearish" doesn't match a bullish substring).
@@ -670,6 +662,13 @@ function deriveHeadlineAction(
   extensionWashoutData?: ExtensionWashoutResponse,
   section16Track?: TrackType,
 ): { label: string; tone: string } {
+  if (data.etf_branch) {
+    return {
+      label: data.etf_branch.headline_label,
+      tone: data.action_tone,
+    };
+  }
+
   if (data.degraded) {
     return {
       label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',

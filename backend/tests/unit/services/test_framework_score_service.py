@@ -27,10 +27,12 @@ from atlas.schemas.framework9 import (
 )
 from atlas.services.framework_score_service import (
     FrameworkScoreService,
+    _classify_etf_route,
     _compute_final_score,
     _compute_raw_total,
     _is_non_operating_asset,
     _map_action,
+    _prefer_route_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -382,3 +384,331 @@ class TestNonOperatingAssetDetection:
     def test_operating_company_is_not_flagged(self) -> None:
         payload = {"AssetType": "Common Stock", "Name": "Marvell Technology Inc"}
         assert _is_non_operating_asset(payload) is False
+
+
+class TestEtfRouteClassification:
+    def test_routes_dram_to_thematic_branch(self) -> None:
+        assert _classify_etf_route("DRAM", "Roundhill Memory ETF") == "THEMATIC_PROXY_ETF"
+
+    def test_routes_spmo_to_momentum_branch(self) -> None:
+        assert _classify_etf_route("SPMO", "Invesco S&P 500 Momentum ETF") == "MOMENTUM_FACTOR_ETF"
+
+    def test_routes_soxs_to_hedge_branch(self) -> None:
+        assert (
+            _classify_etf_route("SOXS", "Direxion Daily Semiconductor Bear 3X")
+            == "HEDGE_PROTECTIVE_ETF"
+        )
+
+    def test_routes_soxl_to_leveraged_branch(self) -> None:
+        assert (
+            _classify_etf_route("SOXL", "Direxion Daily Semiconductor Bull 3X")
+            == "LEVERAGED_TACTICAL_ETF"
+        )
+
+
+class TestRouteNamePreference:
+    def test_prefers_secondary_when_primary_missing(self) -> None:
+        assert _prefer_route_name("", "Roundhill Memory ETF") == "Roundhill Memory ETF"
+
+    def test_prefers_longer_secondary_label_when_more_descriptive(self) -> None:
+        assert (
+            _prefer_route_name("ETF", "Invesco S&P 500 Momentum ETF")
+            == "Invesco S&P 500 Momentum ETF"
+        )
+
+    def test_keeps_primary_when_it_is_more_descriptive(self) -> None:
+        assert _prefer_route_name("Roundhill Memory ETF", "ETF") == "Roundhill Memory ETF"
+
+
+class _FactorResultStub:
+    def __init__(self, score: int, grade: str) -> None:
+        self.f1_score = score
+        self.f1_grade = grade
+        self.f2_score = score
+        self.f2_grade = grade
+        self.f3_score = score
+        self.f3_grade = grade
+        self.f4_score = score
+        self.f4_grade = grade
+        self.f5_score = score
+        self.f5_grade = grade
+
+
+class TestEtfBranchScoring:
+    @staticmethod
+    def _service() -> FrameworkScoreService:
+        return FrameworkScoreService(
+            polygon_api_key="POLY_KEY",
+            alphavantage_api_key="AV_KEY",
+            transcript_api_key="FMP_KEY",
+            benzinga_api_key="BENZ_KEY",
+            unusual_whales_api_key="UW_KEY",
+            sec_api_key="SEC_KEY",
+        )
+
+    @pytest.mark.asyncio
+    async def test_dram_thematic_branch_outputs_proxy_action(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "THEMATIC_PROXY_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(71, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(68, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("DRAM")
+
+        assert any("thematic equity proxy basket" in flag for flag in result.flags)
+        assert any("Memory / HBM proxy basket" in flag for flag in result.flags)
+        assert result.action.startswith("BULLISH PROXY")
+        assert result.degraded is True
+        assert result.etf_branch is not None
+        assert result.etf_branch.route == "THEMATIC_PROXY_ETF"
+        assert result.etf_branch.label == "Memory / HBM proxy basket"
+        assert result.etf_branch.holdings_driver is not None
+        assert len(result.etf_branch.components) == 5
+
+    @pytest.mark.asyncio
+    async def test_spmo_momentum_branch_has_factor_messaging(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "MOMENTUM_FACTOR_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(78, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(66, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("SPMO")
+
+        assert any("momentum/factor ETF model" in flag for flag in result.flags)
+        assert any("Momentum factor ETF" in flag for flag in result.flags)
+        assert result.action.startswith("CONSTRUCTIVE MOMENTUM ETF")
+        assert result.etf_branch is not None
+        assert result.etf_branch.route == "MOMENTUM_FACTOR_ETF"
+        assert result.etf_branch.label == "Momentum factor ETF"
+
+    @pytest.mark.asyncio
+    async def test_hedge_branch_never_returns_ownership_actions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "HEDGE_PROTECTIVE_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(82, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(72, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("SOXS")
+
+        assert any("hedge/protective instrument model" in flag for flag in result.flags)
+        assert result.action.startswith("HEDGE")
+        assert result.action not in {
+            "LEAPS ELIGIBLE",
+            "CORE POSITION",
+            "GTC ADDS PERMITTED",
+            "SMALL POSITION ONLY",
+            "NO NEW CAPITAL",
+        }
+        assert result.etf_branch is not None
+        assert result.etf_branch.route == "HEDGE_PROTECTIVE_ETF"
+        assert result.etf_branch.hedge_inputs is not None
+        assert result.etf_branch.hedge_inputs.underlying == "SMH"
+        assert "NVDA" in result.etf_branch.hedge_inputs.portfolio_beta_covered
+
+    @pytest.mark.asyncio
+    async def test_leveraged_branch_returns_tactical_label(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "LEVERAGED_TACTICAL_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(74, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(70, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("SOXL")
+
+        assert any("leveraged tactical ETF model" in flag for flag in result.flags)
+        assert not any("hedge/protective" in flag for flag in result.flags)
+        assert result.action.startswith("BULLISH TACTICAL")
+        assert result.etf_branch is not None
+        assert result.etf_branch.route == "LEVERAGED_TACTICAL_ETF"
+        assert result.etf_branch.label == "Leveraged tactical instrument"
+
+    @pytest.mark.asyncio
+    async def test_etf_branch_final_score_applies_f8_bonus(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "THEMATIC_PROXY_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(70, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(65, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {"buying_bonus": 5}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("DRAM")
+
+        assert result.final_score == _compute_final_score(result.raw_total + 5)
+
+    @pytest.mark.asyncio
+    async def test_hedge_branch_uses_ticker_specific_underlying(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return True, "HEDGE_PROTECTIVE_ETF"
+
+        async def _f1(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(82, "BULLISH")
+
+        async def _f2(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f3(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f4(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(72, "Mild Bullish / Supportive")
+
+        async def _f5(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(50, "N/A")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _f1)
+        monkeypatch.setattr(svc, "_fetch_f2", _f2)
+        monkeypatch.setattr(svc, "_fetch_f3", _f3)
+        monkeypatch.setattr(svc, "_fetch_f4", _f4)
+        monkeypatch.setattr(svc, "_fetch_f5", _f5)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("SQQQ")
+
+        assert result.etf_branch is not None
+        assert result.etf_branch.hedge_inputs is not None
+        assert result.etf_branch.hedge_inputs.underlying == "QQQ"

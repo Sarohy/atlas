@@ -24,6 +24,32 @@ export const factorBreakdownSchema = z.object({
   flow_monitor_action: z.string().nullable().optional(),
 });
 
+export const etfBranchComponentSchema = z.object({
+  name: z.string(),
+  weight: z.number().gt(0).lte(1),
+  score: z.number().int().min(0).max(100),
+});
+
+export const etfHedgeInputsSchema = z.object({
+  purpose: z.string(),
+  underlying: z.string(),
+  portfolio_beta_covered: z.array(z.string()).default([]),
+  iv_rank: z.number().min(0).max(100).nullable().default(null),
+  delta: z.number().min(-1).max(1).nullable().default(null),
+  expiry_days: z.number().int().min(0).nullable().default(null),
+  max_hold_days: z.number().int().min(0).nullable().default(null),
+});
+
+export const etfBranchMetadataSchema = z.object({
+  route: z.string(),
+  label: z.string(),
+  headline_label: z.string(),
+  timing_overlay_role: z.string(),
+  holdings_driver: z.string().nullable().default(null),
+  components: z.array(etfBranchComponentSchema).default([]),
+  hedge_inputs: etfHedgeInputsSchema.nullable().default(null),
+});
+
 // ---------------------------------------------------------------------------
 // Top-level response schema
 // ---------------------------------------------------------------------------
@@ -100,6 +126,8 @@ export const frameworkScoreResponseSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** ETF branch metadata from universal router + branch model. */
+  etf_branch: etfBranchMetadataSchema.nullable().default(null),
 });
 
 // ---------------------------------------------------------------------------
@@ -107,4 +135,7 @@ export const frameworkScoreResponseSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export type FactorBreakdown = z.infer<typeof factorBreakdownSchema>;
+export type EtfBranchComponent = z.infer<typeof etfBranchComponentSchema>;
+export type EtfHedgeInputs = z.infer<typeof etfHedgeInputsSchema>;
+export type EtfBranchMetadata = z.infer<typeof etfBranchMetadataSchema>;
 export type FrameworkScoreResponse = z.infer<typeof frameworkScoreResponseSchema>;

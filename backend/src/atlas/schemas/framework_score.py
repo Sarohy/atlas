@@ -71,6 +71,74 @@ class FactorBreakdown(BaseModel):
     )
 
 
+class EtfBranchComponent(BaseModel):
+    """One weighted component used by an ETF branch-specific model."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(description="Component label used in the branch model.")
+    weight: float = Field(gt=0.0, le=1.0, description="Branch weight for this component.")
+    score: int = Field(ge=0, le=100, description="Component score on a 0-100 scale.")
+
+
+class EtfHedgeInputs(BaseModel):
+    """Optional hedge-specific inputs for ETF option protection workflows."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    purpose: str = Field(description="Protective objective of the hedge instrument.")
+    underlying: str = Field(description="Underlying ETF being hedged.")
+    portfolio_beta_covered: list[str] = Field(
+        default_factory=list,
+        description="Representative holdings or sleeves covered by the hedge.",
+    )
+    iv_rank: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="Implied volatility rank when available.",
+    )
+    delta: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=1.0,
+        description="Option delta when available.",
+    )
+    expiry_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Days to expiry for the hedge option contract when available.",
+    )
+    max_hold_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Risk policy max-hold guidance for the hedge setup.",
+    )
+
+
+class EtfBranchMetadata(BaseModel):
+    """Branch-routing metadata for ETF/fund/proxy instruments."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    route: str = Field(description="ETF branch route key.")
+    label: str = Field(description="Human-readable branch label.")
+    headline_label: str = Field(description="Primary UI headline for this branch.")
+    timing_overlay_role: str = Field(description="How F4/timing overlays are used in this branch.")
+    holdings_driver: str | None = Field(
+        default=None,
+        description="Optional holdings driver summary for thematic/factor proxy baskets.",
+    )
+    components: list[EtfBranchComponent] = Field(
+        default_factory=list,
+        description="Component score breakdown for the selected ETF branch model.",
+    )
+    hedge_inputs: EtfHedgeInputs | None = Field(
+        default=None,
+        description="Hedge option inputs when the route is hedge/protective.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level response
 # ---------------------------------------------------------------------------
@@ -168,4 +236,11 @@ class FrameworkScoreResponse(BaseModel):
     f5_debug_bridge: F5DebugBridge | None = Field(
         default=None,
         description="Expanded F5 debug bridge propagated from the fundamental service.",
+    )
+    etf_branch: EtfBranchMetadata | None = Field(
+        default=None,
+        description=(
+            "Populated for ETF/fund/proxy instruments after universal router classification. "
+            "Contains branch-specific model metadata used by UI and diagnostics."
+        ),
     )

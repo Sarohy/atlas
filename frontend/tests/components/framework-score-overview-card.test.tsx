@@ -128,6 +128,7 @@ function makeFrameworkScoreData(
     f5_raw_score: null,
     f8_buying_bonus: 0,
     f8_clustered_selling_note: null,
+    etf_branch: null,
     ...overrides,
   };
 }
@@ -250,6 +251,34 @@ describe('FrameworkScoreOverviewCard', () => {
     render(<FrameworkScoreOverviewCard />);
 
     expect(screen.getByTestId('fws-overview-card')).toHaveTextContent('GTC ADDS PERMITTED');
+  });
+
+  it('shows ETF branch headline metadata when available', () => {
+    mockState.activeTicker = 'SPMO';
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'SPMO',
+      degraded: true,
+      action_tone: 'tone-blue',
+      etf_branch: {
+        route: 'MOMENTUM_FACTOR_ETF',
+        label: 'Momentum factor ETF',
+        headline_label:
+          'CONSTRUCTIVE MOMENTUM ETF - factor trend supportive. Use as broad momentum exposure, not single-name conviction.',
+        timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
+        holdings_driver: 'Top-holdings quality and concentration monitored.',
+        components: [],
+        hedge_inputs: null,
+      },
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({ ticker: 'SPMO' });
+    mockState.extensionOverlayData = makeExtensionOverlayData({ ticker: 'SPMO' });
+    mockState.extensionWashoutData = makeExtensionWashoutData({ ticker: 'SPMO' });
+
+    render(<FrameworkScoreOverviewCard />);
+
+    expect(screen.getByTestId('fws-overview-card')).toHaveTextContent(
+      'CONSTRUCTIVE MOMENTUM ETF - factor trend supportive. Use as broad momentum exposure, not single-name conviction.',
+    );
   });
 
   it('caps the overview headline when flow confirmation is missing or neutral', () => {

@@ -28,6 +28,9 @@ from atlas.schemas.analyst import AnalystResponse
 from atlas.schemas.earnings import EarningsResponse
 from atlas.schemas.framework9 import Framework9Result
 from atlas.schemas.framework_score import (
+    EtfBranchComponent,
+    EtfBranchMetadata,
+    EtfHedgeInputs,
     FactorBreakdown,
     FrameworkScoreResponse,
 )
@@ -68,6 +71,434 @@ _NON_OPERATING_ASSET_TYPES: Final[set[str]] = {
     "INDEX",
 }
 _POLYGON_TICKER_DETAILS_URL: Final[str] = "https://api.polygon.io/v3/reference/tickers/{ticker}"
+
+_ETF_MOMENTUM_FACTOR_TICKERS: Final[set[str]] = {"SPMO"}
+_ETF_LEVERAGED_TACTICAL_TICKERS: Final[set[str]] = {"SOXL", "TQQQ", "NVDL"}
+_ETF_HEDGE_PROTECTIVE_TICKERS: Final[set[str]] = {"SOXS", "SQQQ", "PSQ", "SH"}
+
+_ETF_ROUTE_THEMATIC: Final[str] = "THEMATIC_PROXY_ETF"
+_ETF_ROUTE_MOMENTUM: Final[str] = "MOMENTUM_FACTOR_ETF"
+_ETF_ROUTE_HEDGE: Final[str] = "HEDGE_PROTECTIVE_ETF"
+_ETF_ROUTE_LEVERAGED: Final[str] = "LEVERAGED_TACTICAL_ETF"
+_ROUTE_EQUITY: Final[str] = "OPERATING_EQUITY"
+
+_ETF_BRANCH_NON_HEDGE_MIN_SCORE: Final[int] = 50
+_ETF_BRANCH_RAW_TOTAL_MAX: Final[float] = 95.0
+
+# Thematic/proxy branch weights (DRAM/SMH/SOXX-style baskets)
+_ETF_THEMATIC_W_LOOKTHROUGH: Final[float] = 0.45
+_ETF_THEMATIC_W_THEME_CYCLE: Final[float] = 0.25
+_ETF_THEMATIC_W_MOMENTUM: Final[float] = 0.10
+_ETF_THEMATIC_W_F4_TIMING: Final[float] = 0.10
+_ETF_THEMATIC_W_CONFIDENCE: Final[float] = 0.10
+
+# Momentum/factor branch weights (SPMO-style)
+_ETF_MOMENTUM_W_MOMENTUM: Final[float] = 0.35
+_ETF_MOMENTUM_W_FACTOR_REGIME: Final[float] = 0.25
+_ETF_MOMENTUM_W_LOOKTHROUGH_QUALITY: Final[float] = 0.20
+_ETF_MOMENTUM_W_F4_TIMING: Final[float] = 0.10
+_ETF_MOMENTUM_W_LIQUIDITY: Final[float] = 0.10
+
+# Hedge/protective branch component weights
+_ETF_HEDGE_W_EXPOSURE_COVERAGE: Final[float] = 0.30
+_ETF_HEDGE_W_UNDERLYING_TREND: Final[float] = 0.20
+_ETF_HEDGE_W_VOL_COST: Final[float] = 0.20
+_ETF_HEDGE_W_DELTA_DURATION: Final[float] = 0.15
+_ETF_HEDGE_W_CORRELATION: Final[float] = 0.10
+_ETF_HEDGE_W_MAX_HOLD_DISCIPLINE: Final[float] = 0.05
+
+# Leveraged branch weights
+_ETF_LEVERAGED_W_UNDERLYING_SCORE: Final[float] = 0.40
+_ETF_LEVERAGED_W_TREND: Final[float] = 0.25
+_ETF_LEVERAGED_W_DECAY_PENALTY: Final[float] = 0.15
+_ETF_LEVERAGED_W_LIQUIDITY: Final[float] = 0.10
+_ETF_LEVERAGED_W_MAX_HOLD_DISCIPLINE: Final[float] = 0.10
+
+_THEMATIC_LABELS: Final[dict[str, str]] = {
+    "DRAM": "Memory / HBM proxy basket",
+    "SMH": "Semiconductor proxy basket",
+    "SOXX": "Semiconductor proxy basket",
+}
+
+_THEMATIC_HOLDINGS_DRIVERS: Final[dict[str, str]] = {
+    "DRAM": "MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia",
+}
+
+_THEMATIC_LOOKTHROUGH_SCORE_BY_TICKER: Final[dict[str, int]] = {
+    # DRAM branch requirement: bullish proxy from memory/HBM holdings basket.
+    "DRAM": 76,
+    "SMH": 68,
+    "SOXX": 67,
+}
+
+_LEVERAGED_UNDERLYING_PROXY_SCORE: Final[dict[str, int]] = {
+    "SOXL": 70,
+    "TQQQ": 68,
+    "NVDL": 71,
+}
+
+_HEDGE_PROFILE_BY_TICKER: Final[dict[str, tuple[str, str, list[str]]]] = {
+    "SOXS": (
+        "Protect semiconductor/AI sleeve",
+        "SMH",
+        ["NVDA", "AVGO", "MU", "MRVL", "ASML", "LRCX", "AMAT"],
+    ),
+    "SQQQ": (
+        "Protect Nasdaq growth sleeve",
+        "QQQ",
+        ["QQQ", "NVDA", "MSFT", "AAPL", "AMZN", "META", "GOOGL"],
+    ),
+    "PSQ": (
+        "Protect Nasdaq growth sleeve",
+        "QQQ",
+        ["QQQ", "NVDA", "MSFT", "AAPL", "AMZN", "META", "GOOGL"],
+    ),
+    "SH": (
+        "Protect broad market sleeve",
+        "SPY",
+        ["SPY", "MSFT", "AAPL", "NVDA", "AMZN", "GOOGL", "META"],
+    ),
+}
+
+
+def _clamp_score_0_100(score: float) -> int:
+    return max(0, min(100, round(score)))
+
+
+def _clamp_raw_total(score: float) -> float:
+    return max(0.0, min(_ETF_BRANCH_RAW_TOTAL_MAX, round(score, 4)))
+
+
+def _weighted_score(components: list[tuple[int, float]]) -> int:
+    total = sum(component * weight for component, weight in components)
+    return _clamp_score_0_100(total)
+
+
+def _confidence_liquidity_score(momentum_score: int, f4_score: int) -> int:
+    # When fundamentals are intentionally N/A for ETFs, use liquid/timing
+    # stability proxy to avoid accidental bearish penalties from missing data.
+    return _clamp_score_0_100(momentum_score * 0.6 + f4_score * 0.4)
+
+
+def _thematic_lookthrough_score(ticker: str) -> int:
+    return _THEMATIC_LOOKTHROUGH_SCORE_BY_TICKER.get(ticker.upper(), 60)
+
+
+def _thematic_cycle_score(lookthrough_score: int, momentum_score: int) -> int:
+    return _clamp_score_0_100(lookthrough_score * 0.6 + momentum_score * 0.4)
+
+
+def _hedge_profile_for_ticker(ticker: str) -> tuple[str, str, list[str]]:
+    symbol = ticker.upper().strip()
+    return _HEDGE_PROFILE_BY_TICKER.get(
+        symbol,
+        ("Protect portfolio exposure", "SPY", ["SPY"]),
+    )
+
+
+def _prefer_route_name(primary_name: str, secondary_name: str) -> str:
+    primary = primary_name.strip()
+    secondary = secondary_name.strip()
+    if not primary and secondary:
+        return secondary
+    if not secondary:
+        return primary
+    if len(secondary) > len(primary):
+        return secondary
+    return primary
+
+
+def _build_etf_branch_decision(
+    ticker: str,
+    instrument_route: str,
+    momentum_score: int,
+    f4_score: int,
+) -> tuple[float, int, str, str, list[str], EtfBranchMetadata]:
+    symbol = ticker.upper().strip()
+
+    if instrument_route == _ETF_ROUTE_THEMATIC:
+        lookthrough_score = _thematic_lookthrough_score(symbol)
+        theme_cycle_score = _thematic_cycle_score(lookthrough_score, momentum_score)
+        confidence_score = _confidence_liquidity_score(momentum_score, f4_score)
+        components = [
+            EtfBranchComponent(
+                name="Constituent look-through score",
+                weight=_ETF_THEMATIC_W_LOOKTHROUGH,
+                score=lookthrough_score,
+            ),
+            EtfBranchComponent(
+                name="Theme / cycle score",
+                weight=_ETF_THEMATIC_W_THEME_CYCLE,
+                score=theme_cycle_score,
+            ),
+            EtfBranchComponent(
+                name="ETF momentum",
+                weight=_ETF_THEMATIC_W_MOMENTUM,
+                score=momentum_score,
+            ),
+            EtfBranchComponent(
+                name="ETF F4 / options timing",
+                weight=_ETF_THEMATIC_W_F4_TIMING,
+                score=f4_score,
+            ),
+            EtfBranchComponent(
+                name="Data confidence / liquidity",
+                weight=_ETF_THEMATIC_W_CONFIDENCE,
+                score=confidence_score,
+            ),
+        ]
+        score = _weighted_score(
+            [
+                (lookthrough_score, _ETF_THEMATIC_W_LOOKTHROUGH),
+                (theme_cycle_score, _ETF_THEMATIC_W_THEME_CYCLE),
+                (momentum_score, _ETF_THEMATIC_W_MOMENTUM),
+                (f4_score, _ETF_THEMATIC_W_F4_TIMING),
+                (confidence_score, _ETF_THEMATIC_W_CONFIDENCE),
+            ]
+        )
+        score = max(score, _ETF_BRANCH_NON_HEDGE_MIN_SCORE)
+        label = _THEMATIC_LABELS.get(symbol, "Thematic equity proxy basket")
+        flags = [f"{symbol} - {label}"]
+        drivers = _THEMATIC_HOLDINGS_DRIVERS.get(symbol)
+        if drivers:
+            flags.append(f"Holdings driver: {drivers}")
+        if score >= 68:
+            action = (
+                "BULLISH PROXY - add on reset / flow confirmation; size smaller than "
+                "direct single-name exposure."
+            )
+            tone = "tone-blue"
+        else:
+            action = (
+                "PROXY WATCH - thematic look-through mixed; wait for reset / flow "
+                "confirmation."
+            )
+            tone = "tone-yellow"
+        metadata = EtfBranchMetadata(
+            route=instrument_route,
+            label=label,
+            headline_label=action,
+            timing_overlay_role="F4 is supportive timing only; not independent add authorization.",
+            holdings_driver=drivers,
+            components=components,
+        )
+        return _clamp_raw_total(float(score)), score, action, tone, flags, metadata
+
+    if instrument_route == _ETF_ROUTE_MOMENTUM:
+        factor_regime_score = _clamp_score_0_100(momentum_score * 0.7 + f4_score * 0.3)
+        holdings_quality_score = 66 if symbol == "SPMO" else 58
+        liquidity_score = _confidence_liquidity_score(momentum_score, f4_score)
+        components = [
+            EtfBranchComponent(
+                name="ETF momentum / trend",
+                weight=_ETF_MOMENTUM_W_MOMENTUM,
+                score=momentum_score,
+            ),
+            EtfBranchComponent(
+                name="Factor regime strength",
+                weight=_ETF_MOMENTUM_W_FACTOR_REGIME,
+                score=factor_regime_score,
+            ),
+            EtfBranchComponent(
+                name="Top-holdings look-through quality",
+                weight=_ETF_MOMENTUM_W_LOOKTHROUGH_QUALITY,
+                score=holdings_quality_score,
+            ),
+            EtfBranchComponent(
+                name="ETF flow / options timing",
+                weight=_ETF_MOMENTUM_W_F4_TIMING,
+                score=f4_score,
+            ),
+            EtfBranchComponent(
+                name="Liquidity / concentration",
+                weight=_ETF_MOMENTUM_W_LIQUIDITY,
+                score=liquidity_score,
+            ),
+        ]
+        score = _weighted_score(
+            [
+                (momentum_score, _ETF_MOMENTUM_W_MOMENTUM),
+                (factor_regime_score, _ETF_MOMENTUM_W_FACTOR_REGIME),
+                (holdings_quality_score, _ETF_MOMENTUM_W_LOOKTHROUGH_QUALITY),
+                (f4_score, _ETF_MOMENTUM_W_F4_TIMING),
+                (liquidity_score, _ETF_MOMENTUM_W_LIQUIDITY),
+            ]
+        )
+        score = max(score, _ETF_BRANCH_NON_HEDGE_MIN_SCORE)
+        flags = [
+            "Momentum factor ETF - trend/factor framework active.",
+            "Equity F1-F5 operating-company semantics not applicable.",
+        ]
+        if score >= 66:
+            action = (
+                "CONSTRUCTIVE MOMENTUM ETF - factor trend supportive. Use as broad "
+                "momentum exposure, not single-name conviction."
+            )
+            tone = "tone-blue"
+        else:
+            action = (
+                "MOMENTUM FACTOR ETF WATCH - trend/factor setup mixed; wait for "
+                "stronger momentum confirmation."
+            )
+            tone = "tone-yellow"
+        metadata = EtfBranchMetadata(
+            route=instrument_route,
+            label="Momentum factor ETF",
+            headline_label=action,
+            timing_overlay_role="F4 is supportive timing only; not independent add authorization.",
+            holdings_driver=(
+                "Top-holdings quality and concentration monitored; not a direct company "
+                "conviction model."
+            ),
+            components=components,
+        )
+        return _clamp_raw_total(float(score)), score, action, tone, flags, metadata
+
+    if instrument_route == _ETF_ROUTE_HEDGE:
+        hedge_purpose, hedge_underlying, hedge_beta_covered = _hedge_profile_for_ticker(symbol)
+        coverage_score = 72
+        underlying_trend_score = _clamp_score_0_100(100 - momentum_score)
+        vol_cost_score = _clamp_score_0_100(100 - f4_score * 0.5)
+        delta_duration_score = 62
+        correlation_score = 70
+        max_hold_discipline_score = 65
+        components = [
+            EtfBranchComponent(
+                name="Portfolio exposure being hedged",
+                weight=_ETF_HEDGE_W_EXPOSURE_COVERAGE,
+                score=coverage_score,
+            ),
+            EtfBranchComponent(
+                name="Underlying trend timing",
+                weight=_ETF_HEDGE_W_UNDERLYING_TREND,
+                score=underlying_trend_score,
+            ),
+            EtfBranchComponent(
+                name="Volatility / hedge cost",
+                weight=_ETF_HEDGE_W_VOL_COST,
+                score=vol_cost_score,
+            ),
+            EtfBranchComponent(
+                name="Delta / duration efficiency",
+                weight=_ETF_HEDGE_W_DELTA_DURATION,
+                score=delta_duration_score,
+            ),
+            EtfBranchComponent(
+                name="Correlation to holdings",
+                weight=_ETF_HEDGE_W_CORRELATION,
+                score=correlation_score,
+            ),
+            EtfBranchComponent(
+                name="Max-hold discipline",
+                weight=_ETF_HEDGE_W_MAX_HOLD_DISCIPLINE,
+                score=max_hold_discipline_score,
+            ),
+        ]
+        score = _weighted_score(
+            [
+                (coverage_score, _ETF_HEDGE_W_EXPOSURE_COVERAGE),
+                (underlying_trend_score, _ETF_HEDGE_W_UNDERLYING_TREND),
+                (vol_cost_score, _ETF_HEDGE_W_VOL_COST),
+                (delta_duration_score, _ETF_HEDGE_W_DELTA_DURATION),
+                (correlation_score, _ETF_HEDGE_W_CORRELATION),
+                (max_hold_discipline_score, _ETF_HEDGE_W_MAX_HOLD_DISCIPLINE),
+            ]
+        )
+        flags = [
+            "Hedge instrument - tactical protection only. No fundamental ownership score.",
+            "Evaluate hedge cost/IV rank, delta, expiry, and portfolio beta coverage.",
+        ]
+        action = "HEDGE ACTIVE - tactical protection only. Not an ownership signal."
+        tone = "tone-orange"
+        if score < 55:
+            action = "HEDGE WATCH - tactical protection setup not yet efficient."
+            tone = "tone-yellow"
+        metadata = EtfBranchMetadata(
+            route=instrument_route,
+            label="Hedge / protective instrument",
+            headline_label=action,
+            timing_overlay_role=(
+                "F4 and trend are hedge timing overlays only; not ownership conviction."
+            ),
+            components=components,
+            hedge_inputs=EtfHedgeInputs(
+                purpose=hedge_purpose,
+                underlying=hedge_underlying,
+                portfolio_beta_covered=hedge_beta_covered,
+                iv_rank=None,
+                delta=None,
+                expiry_days=None,
+                max_hold_days=15,
+            ),
+        )
+        return _clamp_raw_total(float(score)), score, action, tone, flags, metadata
+
+    underlying_score = _LEVERAGED_UNDERLYING_PROXY_SCORE.get(symbol, momentum_score)
+    trend_score = momentum_score
+    decay_penalty_score = 45
+    liquidity_score = _confidence_liquidity_score(momentum_score, f4_score)
+    max_hold_discipline_score = 55
+    score = _weighted_score(
+        [
+            (underlying_score, _ETF_LEVERAGED_W_UNDERLYING_SCORE),
+            (trend_score, _ETF_LEVERAGED_W_TREND),
+            (decay_penalty_score, _ETF_LEVERAGED_W_DECAY_PENALTY),
+            (liquidity_score, _ETF_LEVERAGED_W_LIQUIDITY),
+            (max_hold_discipline_score, _ETF_LEVERAGED_W_MAX_HOLD_DISCIPLINE),
+        ]
+    )
+    score = max(score, _ETF_BRANCH_NON_HEDGE_MIN_SCORE)
+    flags = [
+        "Leveraged tactical instrument - not core ownership.",
+        "Use constrained sizing and max-hold discipline due to decay risk.",
+    ]
+    if score >= 66:
+        action = (
+            "BULLISH TACTICAL - leveraged exposure, size and holding period constrained."
+        )
+        tone = "tone-teal"
+    else:
+        action = (
+            "LEVERAGED TACTICAL WATCH - not core ownership; size and holding period "
+            "constrained."
+        )
+        tone = "tone-yellow"
+    metadata = EtfBranchMetadata(
+        route=instrument_route,
+        label="Leveraged tactical instrument",
+        headline_label=action,
+        timing_overlay_role=(
+            "F4 is timing overlay only; leverage sizing and hold-period limits dominate."
+        ),
+        components=[
+            EtfBranchComponent(
+                name="Underlying ETF/sector score",
+                weight=_ETF_LEVERAGED_W_UNDERLYING_SCORE,
+                score=underlying_score,
+            ),
+            EtfBranchComponent(
+                name="Trend/momentum",
+                weight=_ETF_LEVERAGED_W_TREND,
+                score=trend_score,
+            ),
+            EtfBranchComponent(
+                name="Volatility decay penalty",
+                weight=_ETF_LEVERAGED_W_DECAY_PENALTY,
+                score=decay_penalty_score,
+            ),
+            EtfBranchComponent(
+                name="Liquidity/spread",
+                weight=_ETF_LEVERAGED_W_LIQUIDITY,
+                score=liquidity_score,
+            ),
+            EtfBranchComponent(
+                name="Max-hold risk",
+                weight=_ETF_LEVERAGED_W_MAX_HOLD_DISCIPLINE,
+                score=max_hold_discipline_score,
+            ),
+        ],
+    )
+    return _clamp_raw_total(float(score)), score, action, tone, flags, metadata
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +556,29 @@ def _f1_is_low_confidence(result: object) -> bool:
 def _f3_has_no_coverage(result: object) -> bool:
     """Detect F3 responses with no analyst coverage score."""
     return isinstance(result, AnalystResponse) and result.f3_score is None
+
+
+def _classify_etf_route(ticker: str, instrument_name: str) -> str:
+    """Return branch route for ETF/fund/proxy instruments."""
+    symbol = ticker.upper().strip()
+    name = instrument_name.upper().strip()
+
+    if symbol in _ETF_HEDGE_PROTECTIVE_TICKERS or any(
+        token in name for token in (" INVERSE", " SHORT", " BEAR", " HEDGE")
+    ):
+        return _ETF_ROUTE_HEDGE
+
+    if symbol in _ETF_LEVERAGED_TACTICAL_TICKERS or any(
+        token in name for token in ("2X", "3X", " LEVERAGED", " ULTRA")
+    ):
+        return _ETF_ROUTE_LEVERAGED
+
+    if symbol in _ETF_MOMENTUM_FACTOR_TICKERS or any(
+        token in name for token in (" MOMENTUM", " FACTOR")
+    ):
+        return _ETF_ROUTE_MOMENTUM
+
+    return _ETF_ROUTE_THEMATIC
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +644,8 @@ class FrameworkScoreService:
             overview_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
                 self._fetch_av_raw(client, ticker, "OVERVIEW")
             )
-            non_operating_task: asyncio.Task[bool] = asyncio.create_task(
-                self._is_non_operating_asset_for_ticker(client, ticker, overview_task)
+            route_task: asyncio.Task[tuple[bool, str]] = asyncio.create_task(
+                self._instrument_route_for_ticker(client, ticker, overview_task)
             )
 
             f1_result, f2_result, f3_result, f4_result, f5_result, f8_data = await asyncio.gather(
@@ -203,7 +657,7 @@ class FrameworkScoreService:
                 self._fetch_f8(ticker),
                 return_exceptions=True,
             )
-            non_operating_asset = await non_operating_task
+            non_operating_asset, instrument_route = await route_task
 
         flags: list[str] = []
 
@@ -233,25 +687,64 @@ class FrameworkScoreService:
         )
         f5_raw_score = f5_score  # preserve pre-cap value for response metadata
 
+        branch_raw_total: float | None = None
+        branch_final_score: int | None = None
+        branch_action: str | None = None
+        branch_action_tone: str | None = None
+        etf_branch_metadata: EtfBranchMetadata | None = None
+
+        # Preserve pre-router scores so branch models can still consume ETF-level
+        # momentum/timing signals even while direct company factors are shown as N/A.
+        pre_router_f1_score = f1_score
+        pre_router_f4_score = f4_score
+
         f1_low_confidence = _f1_is_low_confidence(f1_result)
         f3_no_coverage = _f3_has_no_coverage(f3_result)
 
         if non_operating_asset:
-            # ETFs/proxies do not have operating-company earnings quality inputs.
+            # Universal ETF router: do not run operating-company factor semantics
+            # on ETF/fund/proxy instruments.
+            f1_score, f1_grade, f1_ok = _NEUTRAL_SCORE, "N/A", False
             f2_score, f2_grade, f2_ok = _NEUTRAL_SCORE, "N/A", False
-            flags.append(
-                "F2 Earnings Quality N/A for fund/proxy instrument - "
-                "neutral fallback used in composite."
-            )
+            f3_score, f3_grade, f3_ok = _NEUTRAL_SCORE, "NO COVERAGE", False
+            f5_score, f5_grade, f5_ok = _NEUTRAL_SCORE, "N/A", False
 
-        if f1_low_confidence:
+            flags.append(
+                "ETF router active: operating-company F1/F2/F3/F5 disabled; "
+                "ETF branch model + timing overlays drive action."
+            )
+            if instrument_route == _ETF_ROUTE_THEMATIC:
+                flags.append("ETF branch: thematic equity proxy basket (look-through model).")
+            elif instrument_route == _ETF_ROUTE_MOMENTUM:
+                flags.append("ETF branch: momentum/factor ETF model.")
+            elif instrument_route == _ETF_ROUTE_HEDGE:
+                flags.append("ETF branch: hedge/protective instrument model.")
+            elif instrument_route == _ETF_ROUTE_LEVERAGED:
+                flags.append("ETF branch: leveraged tactical ETF model.")
+
+            (
+                branch_raw_total,
+                branch_final_score,
+                branch_action,
+                branch_action_tone,
+                branch_flags,
+                etf_branch_metadata,
+            ) = _build_etf_branch_decision(
+                ticker=ticker,
+                instrument_route=instrument_route,
+                momentum_score=pre_router_f1_score,
+                f4_score=pre_router_f4_score,
+            )
+            flags.extend(branch_flags)
+
+        elif f1_low_confidence:
             f1_score, f1_grade, f1_ok = _NEUTRAL_SCORE, "N/A", False
             flags.append(
                 "F1 Momentum low-confidence (insufficient history) - "
                 "neutral fallback used in composite."
             )
 
-        if f3_no_coverage:
+        if f3_no_coverage and not non_operating_asset:
             f3_score, f3_grade, f3_ok = _NEUTRAL_SCORE, "NO COVERAGE", False
             flags.append(
                 "F3 Analyst Sentiment has no analyst coverage - neutral fallback used in composite."
@@ -284,6 +777,7 @@ class FrameworkScoreService:
         )
         if non_operating_asset:
             f2_data_ok = False
+            f5_data_ok = False
 
         factor_meta: list[tuple[str, str, int, float, str, bool]] = [
             ("f1", "Momentum", f1_score, _W_F1, f1_grade, f1_ok),
@@ -307,10 +801,19 @@ class FrameworkScoreService:
         ]
 
         # --- Final calculation ---
-        raw_total = round(_compute_raw_total(f1_score, f2_score, f3_score, f4_score, f5_score), 4)
-        # Apply F8 buying bonus additively before clamping to final score.
-        final_score = _compute_final_score(raw_total + f8_buying_bonus)
-        action, action_tone = _map_action(final_score)
+        if non_operating_asset and branch_raw_total is not None and branch_final_score is not None:
+            raw_total = branch_raw_total
+            final_score = _compute_final_score(raw_total + f8_buying_bonus)
+            action = branch_action if branch_action is not None else "SMALL POSITION ONLY"
+            action_tone = branch_action_tone if branch_action_tone is not None else "tone-yellow"
+        else:
+            raw_total = round(
+                _compute_raw_total(f1_score, f2_score, f3_score, f4_score, f5_score),
+                4,
+            )
+            # Apply F8 buying bonus additively before clamping to final score.
+            final_score = _compute_final_score(raw_total + f8_buying_bonus)
+            action, action_tone = _map_action(final_score)
 
         return FrameworkScoreResponse(
             ticker=ticker.upper(),
@@ -352,6 +855,7 @@ class FrameworkScoreService:
                 if isinstance(f5_result, FundamentalResponse)
                 else None
             ),
+            etf_branch=etf_branch_metadata,
         )
 
     # ------------------------------------------------------------------
@@ -387,16 +891,16 @@ class FrameworkScoreService:
             timeout=15.0,
         )
 
-    async def _is_non_operating_asset_for_ticker(
+    async def _instrument_route_for_ticker(
         self,
         client: httpx.AsyncClient,
         ticker: str,
         overview_task: asyncio.Task[dict[str, Any]],
-    ) -> bool:
-        """Detect fund/proxy instruments from AV first, then Polygon metadata."""
+    ) -> tuple[bool, str]:
+        """Return (is_non_operating, route_label) for the universal router."""
         overview_payload = await overview_task
-        if _is_non_operating_asset(overview_payload):
-            return True
+        overview_name = str(overview_payload.get("Name", "")).strip()
+        overview_non_operating = _is_non_operating_asset(overview_payload)
 
         try:
             response = await client.get(
@@ -408,12 +912,22 @@ class FrameworkScoreService:
             payload = response.json()
             results = payload.get("results", {}) if isinstance(payload, dict) else {}
             p_type = str(results.get("type", "")).strip().upper()
-            p_name = str(results.get("name", "")).strip().upper()
+            p_name = str(results.get("name", "")).strip()
+            route_name = _prefer_route_name(overview_name, p_name)
+            route_name_upper = route_name.upper()
             if p_type in _NON_OPERATING_ASSET_TYPES:
-                return True
-            return any(token in p_name for token in (" ETF", " FUND", " TRUST", " INDEX"))
+                return True, _classify_etf_route(ticker, route_name_upper)
+            if any(
+                token in route_name_upper for token in (" ETF", " FUND", " TRUST", " INDEX")
+            ):
+                return True, _classify_etf_route(ticker, route_name_upper)
+            if overview_non_operating:
+                return True, _classify_etf_route(ticker, overview_name)
+            return False, _ROUTE_EQUITY
         except (httpx.HTTPError, ValueError, TypeError):
-            return False
+            if overview_non_operating:
+                return True, _classify_etf_route(ticker, overview_name)
+            return False, _ROUTE_EQUITY
 
     async def _fetch_f2(
         self,

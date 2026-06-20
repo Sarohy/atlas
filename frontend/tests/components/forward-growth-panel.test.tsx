@@ -12,10 +12,16 @@ function makeWrapper() {
   return Wrapper;
 }
 
-const mocks = vi.hoisted(() => ({ data: null as Record<string, unknown> | null }));
+const mocks = vi.hoisted(() => ({
+  data: null as Record<string, unknown> | null,
+  framework: null as Record<string, unknown> | null,
+}));
 
 vi.mock('@/lib/hooks/use-forward-growth', () => ({
   useForwardGrowth: () => ({ data: mocks.data, isLoading: false, isError: false, error: null }),
+}));
+vi.mock('@/lib/hooks/use-framework-score', () => ({
+  useFrameworkScore: () => ({ data: mocks.framework }),
 }));
 vi.mock('@/lib/hooks/use-fundamental', () => ({
   useFundamental: () => ({ data: { ticker: 'CRDO', f5_score: 60 } }),
@@ -48,6 +54,32 @@ function fgs(overrides: Record<string, unknown> = {}) {
 describe('ForwardGrowthPanel', () => {
   beforeEach(() => {
     mocks.data = fgs();
+    mocks.framework = null;
+  });
+
+  it('suppresses direct FGS and shows look-through growth for an ETF/proxy', async () => {
+    mocks.framework = {
+      ticker: 'CRDO',
+      etf_branch: {
+        route: 'THEMATIC_PROXY_ETF',
+        label: 'Memory / HBM proxy basket',
+        headline_label: 'BULLISH PROXY - add on reset / flow confirmation; size small.',
+        timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
+        holdings_driver: 'MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia',
+        components: [],
+        hedge_inputs: null,
+      },
+    };
+
+    render(<ForwardGrowthPanel ticker="CRDO" atlasScore={70} />, { wrapper: makeWrapper() });
+    await waitFor(() => expect(screen.getByTestId('fgs-etf-content')).toBeInTheDocument());
+
+    expect(screen.getByTestId('fgs-etf-direct-na')).toHaveTextContent('N/A — ETF/proxy instrument');
+    expect(screen.getByText(/Look-through growth/)).toBeInTheDocument();
+    expect(screen.getByText(/Bullish — Memory \/ HBM proxy basket/)).toBeInTheDocument();
+    // Direct FGS bucket / AVOID card must NOT render for a proxy instrument.
+    expect(screen.queryByTestId('fgs-content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fgs-bucket')).not.toBeInTheDocument();
   });
 
   it('renders the FGS score, grade, confidence, sub-factors and bucket', async () => {

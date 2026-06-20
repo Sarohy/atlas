@@ -92,6 +92,12 @@ export const optionsFlowResponseSchema = z.object({
   adjusted_largest_bullish_print_usd: z.number().nullable().optional(),
   f4b_score_input_source: z.string().optional(),
   f4b_universe_source: z.string().optional(),
+  // Source confidence in the official F4 universe: FULL (broad tape) |
+  // PROVISIONAL (narrow flagged-alert universe) | NO_DATA. f4b_provisional is
+  // true whenever the score is degraded-source and must not read as confident.
+  f4b_source_confidence: z.string().default('NO_DATA'),
+  f4b_source_confidence_reason: z.string().default(''),
+  f4b_provisional: z.boolean().default(false),
   f4b_universe_total_alerts: z.number().int().nonnegative().optional(),
   f4b_universe_directional_alerts: z.number().int().nonnegative().optional(),
   f4b_universe_excluded_alerts: z.number().int().nonnegative().optional(),

@@ -11,12 +11,14 @@ import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useMomentum } from '@/lib/hooks/use-momentum';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
+import { useSection16 } from '@/lib/hooks/use-section16';
 import { useFramework8 } from '@/lib/hooks/use-framework8';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
+import type { TrackType } from '@/lib/schemas/section16';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -75,6 +77,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
     rawOptionsFlow?.f4_score ?? null,
   );
   const { data: rawExtensionWashout } = useExtensionWashout(ticker);
+  const { data: rawSection16 } = useSection16(ticker);
   const { data: rawFundamental } = useFundamental(ticker);
   const { data: rawFramework8 } = useFramework8(ticker);
 
@@ -97,6 +100,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
   const optionsFlowData = matchesActive(rawOptionsFlow);
   const extensionOverlayData = matchesActive(rawExtensionOverlay);
   const extensionWashoutData = matchesActive(rawExtensionWashout);
+  const section16Data = matchesActive(rawSection16);
   const fundamentalData = matchesActive(rawFundamental);
   const framework8Data = matchesActive(rawFramework8);
 
@@ -226,6 +230,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             optionsFlowData={optionsFlowData}
             extensionOverlayData={extensionOverlayData}
             extensionWashoutData={extensionWashoutData}
+            section16Track={section16Data?.track}
             f4GapBadge={data?.f4_data_gap_badge ?? null}
             f4GapMessage={data?.f4_data_gap_message ?? null}
           />
@@ -295,6 +300,7 @@ function FrameworkScoreContent({
   optionsFlowData,
   extensionOverlayData,
   extensionWashoutData,
+  section16Track,
   f4GapBadge,
   f4GapMessage,
 }: {
@@ -302,6 +308,7 @@ function FrameworkScoreContent({
   optionsFlowData?: OptionsFlowResponse;
   extensionOverlayData?: ExtensionOverlayResponse;
   extensionWashoutData?: ExtensionWashoutResponse;
+  section16Track?: TrackType;
   f4GapBadge: string | null;
   f4GapMessage: string | null;
 }) {
@@ -325,6 +332,7 @@ function FrameworkScoreContent({
     optionsFlowData,
     extensionOverlayData,
     extensionWashoutData,
+    section16Track,
   );
   const [, scoreTone] = mapAction(displayScore);
   const scoreToneCss = ACTION_TONE_CLASS[scoreTone] ?? 'is-yellow';
@@ -390,6 +398,7 @@ function FrameworkScoreContent({
           <FactorRow
             key={f.key}
             factor={f}
+            degraded={data.degraded}
             f4GapBadge={f.key === 'f4' ? f4GapBadge : null}
             f5CapApplied={null}
             f5RawScore={f.key === 'f5' ? data.f5_raw_score : null}
@@ -556,7 +565,10 @@ function mapAction(finalScore: number): [string, string] {
   return ['BELOW GATE', 'tone-red'];
 }
 
-function shortFlowMonitorLabel(action: string | null | undefined): string {
+function shortFlowMonitorLabel(action: string | null | undefined, degraded = false): string {
+  if (degraded && (action === 'ADD_ELIGIBLE' || action === 'ADD_PENDING_GATES')) {
+    return 'F4 bullish, not independently add-authorizing';
+  }
   switch (action) {
     case 'ADD_ELIGIBLE':
       return 'Add Eligible';
@@ -590,6 +602,7 @@ function buildF4Summary(
   const band = formatF4Band(optionsFlowData?.f4_state ?? f4Factor.grade);
   const flowGate = shortFlowMonitorLabel(
     optionsFlowData?.flow_monitor_action ?? f4Factor.flow_monitor_action,
+    data.degraded,
   );
   return `F4: ${f4Factor.score} - ${band} / ${flowGate}`;
 }
@@ -655,7 +668,15 @@ function deriveHeadlineAction(
   optionsFlowData?: OptionsFlowResponse,
   extensionOverlayData?: ExtensionOverlayResponse,
   extensionWashoutData?: ExtensionWashoutResponse,
+  section16Track?: TrackType,
 ): { label: string; tone: string } {
+  if (data.degraded) {
+    return {
+      label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',
+      tone: 'tone-yellow',
+    };
+  }
+
   if (data.f5_blocked) {
     const flowAction = optionsFlowData?.flow_monitor_action;
     const flowDeteriorating =
@@ -697,6 +718,12 @@ function deriveHeadlineAction(
     finalScore >= ACTION_TIER2_MIN &&
     hasExtensionBlock(extensionOverlayData, extensionWashoutData)
   ) {
+    if (section16Track === 'TRACK_A') {
+      return {
+        label: 'EXTENDED TREND - NO MARKET CHASE; LADDER/PROTECT/VWAP CONFIRM',
+        tone: 'tone-yellow',
+      };
+    }
     return {
       label: 'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
       tone: 'tone-yellow',
@@ -724,12 +751,14 @@ function deriveHeadlineAction(
 
 function FactorRow({
   factor,
+  degraded,
   f4GapBadge,
   f5CapApplied,
   f5RawScore,
   f5CapSource,
 }: {
   factor: FactorBreakdown;
+  degraded: boolean;
   f4GapBadge: string | null;
   f5CapApplied?: number | null;
   f5RawScore?: number | null;
@@ -762,7 +791,7 @@ function FactorRow({
           >
             {' '}
             · Flow Monitor:{' '}
-            {FLOW_MONITOR_SHORT[factor.flow_monitor_action] ?? factor.flow_monitor_action}
+            {shortFlowMonitorLabel(factor.flow_monitor_action, degraded)}
           </span>
         )}
         {!factor.available && <span className="atlas-fws-unavailable-tag"> (unavail.)</span>}

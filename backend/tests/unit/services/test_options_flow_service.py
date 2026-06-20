@@ -230,6 +230,7 @@ def test_build_response_v2_exposes_score_input_source_and_universe_diagnostics()
     )
 
     assert response.f4b_score_input_source == "DEDUP_ALERTS"
+    assert response.f4b_score_input_source != "ADJUSTED"
     assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
     assert response.f4b_universe_total_alerts == 4
     assert response.f4b_universe_directional_alerts == 4
@@ -399,6 +400,7 @@ def test_build_response_v2_dram_etf_proxy_path_surfaces_bearish_live_pulse_diagn
     )
 
     assert response.f4b_score_input_source == "DEDUP_ALERTS"
+    assert response.f4b_score_input_source != "ADJUSTED"
     assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
     assert response.f4b_universe_total_alerts == 2
     assert response.live_pulse_score is not None

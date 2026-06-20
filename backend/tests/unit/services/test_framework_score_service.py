@@ -17,7 +17,6 @@ Integration contracts:
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 
 from atlas.core.scoring import classify_tier
 from atlas.schemas.framework9 import (
@@ -30,6 +29,7 @@ from atlas.services.framework_score_service import (
     FrameworkScoreService,
     _compute_final_score,
     _compute_raw_total,
+    _is_non_operating_asset,
     _map_action,
 )
 
@@ -291,13 +291,15 @@ def _make_f9_result(ticker: str = "TEST", f4_score: float = 41.0) -> Framework9R
 class TestFetchF4UsesFramework9:
     """_fetch_f4 must delegate to evaluate_framework9, not raw OptionsFlowService.
 
-    Framework 9 applies the pre-earnings modifier (e.g. −25%) on top of the
+    Framework 9 applies the pre-earnings modifier (e.g. -25%) on top of the
     raw F4 base score.  Framework 1 must consume the *adjusted* score so the
     final conviction score reflects the timing-risk adjustment.
     """
 
     @pytest.mark.asyncio
-    async def test_fetch_f4_returns_framework9_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fetch_f4_returns_framework9_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """_fetch_f4 must return Framework9Result (pre-earnings modifier baked in)."""
         import atlas.services.framework_score_service as fss_module
 
@@ -366,3 +368,17 @@ class TestFetchF4UsesFramework9:
         assert captured["uw"] == "UW_KEY"
         assert captured["polygon"] == "POLY_KEY"
         assert captured["av"] == "AV_KEY"
+
+
+class TestNonOperatingAssetDetection:
+    def test_detects_etf_asset_type(self) -> None:
+        payload = {"AssetType": "ETF", "Name": "Defiance Daily Target 2X Long MSTR ETF"}
+        assert _is_non_operating_asset(payload) is True
+
+    def test_detects_fund_like_name_when_asset_type_missing(self) -> None:
+        payload = {"AssetType": "", "Name": "Global Semiconductor Index Fund"}
+        assert _is_non_operating_asset(payload) is True
+
+    def test_operating_company_is_not_flagged(self) -> None:
+        payload = {"AssetType": "Common Stock", "Name": "Marvell Technology Inc"}
+        assert _is_non_operating_asset(payload) is False

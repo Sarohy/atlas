@@ -59,6 +59,16 @@ _W_F5: Final[float] = 0.25  # Fundamental Quality
 # Neutral fallback score when a factor service is unavailable.
 _NEUTRAL_SCORE: Final[int] = 50
 
+_NON_OPERATING_ASSET_TYPES: Final[set[str]] = {
+    "ETF",
+    "ETN",
+    "FUND",
+    "MUTUAL FUND",
+    "TRUST",
+    "INDEX",
+}
+_POLYGON_TICKER_DETAILS_URL: Final[str] = "https://api.polygon.io/v3/reference/tickers/{ticker}"
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers — no I/O, no side effects
@@ -91,6 +101,30 @@ def _compute_final_score(raw_total: float) -> int:
     Pure function — no I/O.
     """
     return max(0, min(100, round(raw_total)))
+
+
+def _is_non_operating_asset(overview_payload: dict[str, Any]) -> bool:
+    """Return True when OVERVIEW describes a fund/proxy instrument."""
+    asset_type = str(overview_payload.get("AssetType", "")).strip().upper()
+    if asset_type in _NON_OPERATING_ASSET_TYPES:
+        return True
+
+    name = str(overview_payload.get("Name", "")).strip().upper()
+    if not name:
+        return False
+    return any(token in name for token in (" ETF", " FUND", " TRUST", " INDEX"))
+
+
+def _f1_is_low_confidence(result: object) -> bool:
+    """Detect F1 outputs built from insufficient history fallbacks."""
+    if not isinstance(result, MomentumResponse):
+        return False
+    return result.ma_alignment.label == "INSUFFICIENT_DATA"
+
+
+def _f3_has_no_coverage(result: object) -> bool:
+    """Detect F3 responses with no analyst coverage score."""
+    return isinstance(result, AnalystResponse) and result.f3_score is None
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +190,9 @@ class FrameworkScoreService:
             overview_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
                 self._fetch_av_raw(client, ticker, "OVERVIEW")
             )
+            non_operating_task: asyncio.Task[bool] = asyncio.create_task(
+                self._is_non_operating_asset_for_ticker(client, ticker, overview_task)
+            )
 
             f1_result, f2_result, f3_result, f4_result, f5_result, f8_data = await asyncio.gather(
                 self._fetch_f1(ticker, client),
@@ -166,6 +203,7 @@ class FrameworkScoreService:
                 self._fetch_f8(ticker),
                 return_exceptions=True,
             )
+            non_operating_asset = await non_operating_task
 
         flags: list[str] = []
 
@@ -195,6 +233,30 @@ class FrameworkScoreService:
         )
         f5_raw_score = f5_score  # preserve pre-cap value for response metadata
 
+        f1_low_confidence = _f1_is_low_confidence(f1_result)
+        f3_no_coverage = _f3_has_no_coverage(f3_result)
+
+        if non_operating_asset:
+            # ETFs/proxies do not have operating-company earnings quality inputs.
+            f2_score, f2_grade, f2_ok = _NEUTRAL_SCORE, "N/A", False
+            flags.append(
+                "F2 Earnings Quality N/A for fund/proxy instrument - "
+                "neutral fallback used in composite."
+            )
+
+        if f1_low_confidence:
+            f1_score, f1_grade, f1_ok = _NEUTRAL_SCORE, "N/A", False
+            flags.append(
+                "F1 Momentum low-confidence (insufficient history) - "
+                "neutral fallback used in composite."
+            )
+
+        if f3_no_coverage:
+            f3_score, f3_grade, f3_ok = _NEUTRAL_SCORE, "NO COVERAGE", False
+            flags.append(
+                "F3 Analyst Sentiment has no analyst coverage - neutral fallback used in composite."
+            )
+
         # --- Framework 8 insider buying bonus ---
         # F8 is fetched fresh in parallel above — never cached here.
         if isinstance(f8_data, Exception):
@@ -220,6 +282,8 @@ class FrameworkScoreService:
         f5_data_ok = not (
             isinstance(f5_result, FundamentalResponse) and not f5_result.data_available
         )
+        if non_operating_asset:
+            f2_data_ok = False
 
         factor_meta: list[tuple[str, str, int, float, str, bool]] = [
             ("f1", "Momentum", f1_score, _W_F1, f1_grade, f1_ok),
@@ -258,6 +322,10 @@ class FrameworkScoreService:
             f5_blocked=f5_blocked,
             flags=flags,
             degraded=(
+                non_operating_asset
+                or f1_low_confidence
+                or f3_no_coverage
+                or
                 (isinstance(f2_result, EarningsResponse) and not f2_result.data_available)
                 or (isinstance(f5_result, FundamentalResponse) and not f5_result.data_available)
             ),
@@ -318,6 +386,34 @@ class FrameworkScoreService:
             symbol=ticker,
             timeout=15.0,
         )
+
+    async def _is_non_operating_asset_for_ticker(
+        self,
+        client: httpx.AsyncClient,
+        ticker: str,
+        overview_task: asyncio.Task[dict[str, Any]],
+    ) -> bool:
+        """Detect fund/proxy instruments from AV first, then Polygon metadata."""
+        overview_payload = await overview_task
+        if _is_non_operating_asset(overview_payload):
+            return True
+
+        try:
+            response = await client.get(
+                _POLYGON_TICKER_DETAILS_URL.format(ticker=ticker),
+                params={"apiKey": self._polygon_key},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            results = payload.get("results", {}) if isinstance(payload, dict) else {}
+            p_type = str(results.get("type", "")).strip().upper()
+            p_name = str(results.get("name", "")).strip().upper()
+            if p_type in _NON_OPERATING_ASSET_TYPES:
+                return True
+            return any(token in p_name for token in (" ETF", " FUND", " TRUST", " INDEX"))
+        except (httpx.HTTPError, ValueError, TypeError):
+            return False
 
     async def _fetch_f2(
         self,

@@ -6,10 +6,12 @@ import { useExtensionOverlay } from '@/lib/hooks/use-extension-overlay';
 import { useExtensionWashout } from '@/lib/hooks/use-extension-washout';
 import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
+import { useSection16 } from '@/lib/hooks/use-section16';
 import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
+import type { TrackType } from '@/lib/schemas/section16';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,6 +57,7 @@ export function FrameworkScoreOverviewCard() {
     rawOptionsFlowData?.f4_score ?? null,
   );
   const { data: rawExtensionWashoutData } = useExtensionWashout(activeTicker);
+  const { data: rawSection16Data } = useSection16(activeTicker);
 
   const tickerMatch = activeTicker.trim().toUpperCase();
   const matchesActive = <T extends { ticker: string } | undefined | null>(
@@ -66,6 +69,7 @@ export function FrameworkScoreOverviewCard() {
   const optionsFlowData = matchesActive(rawOptionsFlowData);
   const extensionOverlayData = matchesActive(rawExtensionOverlayData);
   const extensionWashoutData = matchesActive(rawExtensionWashoutData);
+  const section16Data = matchesActive(rawSection16Data);
 
   const toneCss = data ? (ACTION_TONE_CLASS[data.action_tone] ?? 'is-yellow') : 'is-cyan';
 
@@ -92,6 +96,7 @@ export function FrameworkScoreOverviewCard() {
           optionsFlowData={optionsFlowData}
           extensionOverlayData={extensionOverlayData}
           extensionWashoutData={extensionWashoutData}
+          section16Track={section16Data?.track}
         />
       )}
     </article>
@@ -107,11 +112,13 @@ function OverviewCardContent({
   optionsFlowData,
   extensionOverlayData,
   extensionWashoutData,
+  section16Track,
 }: {
   data: FrameworkScoreResponse;
   optionsFlowData?: OptionsFlowResponse;
   extensionOverlayData?: ExtensionOverlayResponse;
   extensionWashoutData?: ExtensionWashoutResponse;
+  section16Track?: TrackType;
 }) {
   const headlineAction = deriveHeadlineAction(
     data.final_score,
@@ -119,6 +126,7 @@ function OverviewCardContent({
     optionsFlowData,
     extensionOverlayData,
     extensionWashoutData,
+    section16Track,
   );
   const actionToneCss = ACTION_TONE_CLASS[headlineAction.tone] ?? 'is-yellow';
   const f1 = data.factors.find((f) => f.key === 'f1');
@@ -230,7 +238,15 @@ function deriveHeadlineAction(
   optionsFlowData?: OptionsFlowResponse,
   extensionOverlayData?: ExtensionOverlayResponse,
   extensionWashoutData?: ExtensionWashoutResponse,
+  section16Track?: TrackType,
 ): { label: string; tone: string } {
+  if (data.degraded) {
+    return {
+      label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',
+      tone: 'tone-yellow',
+    };
+  }
+
   if (data.f5_blocked) {
     const flowAction = optionsFlowData?.flow_monitor_action;
     const flowDeteriorating =
@@ -272,6 +288,12 @@ function deriveHeadlineAction(
     finalScore >= ACTION_TIER2_MIN &&
     hasExtensionBlock(extensionOverlayData, extensionWashoutData)
   ) {
+    if (section16Track === 'TRACK_A') {
+      return {
+        label: 'EXTENDED TREND - NO MARKET CHASE; LADDER/PROTECT/VWAP CONFIRM',
+        tone: 'tone-yellow',
+      };
+    }
     return {
       label: 'HOLD / WATCH - EXTENSION BLOCK / NO FRESH ADD',
       tone: 'tone-yellow',

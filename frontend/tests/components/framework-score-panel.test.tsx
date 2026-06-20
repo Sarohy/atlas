@@ -843,4 +843,44 @@ describe('FrameworkScorePanel', () => {
     expect(screen.getByTestId('fws-score')).toHaveTextContent('70');
     expect(screen.queryByTestId('fws-degraded')).not.toBeInTheDocument();
   });
+
+  it('relabels the ETF composite as Proxy Composite and shows look-through components', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'DRAM',
+      final_score: 70,
+      raw_total: 70,
+      degraded: true,
+      action_tone: 'tone-blue',
+      etf_branch: {
+        route: 'THEMATIC_PROXY_ETF',
+        label: 'Memory / HBM proxy basket',
+        headline_label: 'BULLISH PROXY - memory/HBM basket exposure.',
+        timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
+        holdings_driver: 'MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia',
+        components: [
+          { name: 'Constituent look-through score', weight: 0.45, score: 76 },
+          { name: 'ETF F4 / options timing', weight: 0.1, score: 65 },
+        ],
+        hedge_inputs: null,
+      },
+      flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
+    });
+    mockState.optionsFlowData = makeOptionsFlowData({ ticker: 'DRAM', f4_score: 65 });
+    mockState.fundamentalData = { ticker: 'DRAM', f5_score: 50, f5_grade: 'N/A' };
+
+    render(<FrameworkScorePanel ticker="DRAM" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    // Title + footer use "Proxy Composite", not "Framework 1" / "Framework score".
+    expect(screen.getAllByText('Proxy Composite').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('Framework score')).not.toBeInTheDocument();
+    // Direct F1–F5 disclosure + look-through components reconcile to the score.
+    expect(screen.getByTestId('fws-etf-direct-na')).toHaveTextContent('Direct company score: N/A');
+    expect(screen.getAllByTestId('fws-etf-component').length).toBe(2);
+  });
 });

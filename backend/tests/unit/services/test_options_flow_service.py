@@ -12,6 +12,7 @@ from atlas.services.options_flow_service import (
     _dark_pool_confidence,
     _dark_pool_settlement_ratio,
     _f4_add_impact,
+    _f4b_source_confidence,
     _f4_state_label,
     _live_tape_state,
     _multi_window_score,
@@ -239,6 +240,63 @@ def test_build_response_v2_exposes_score_input_source_and_universe_diagnostics()
     assert response.raw_call_bid_premium_usd == pytest.approx(1_000_000.0)
     assert response.raw_put_ask_premium_usd == pytest.approx(2_000_000.0)
     assert response.raw_put_bid_premium_usd == pytest.approx(4_000_000.0)
+
+
+def test_f4b_source_confidence_levels() -> None:
+    # Flagged-alert universe → PROVISIONAL / degraded-source disclosure.
+    level, provisional, reason = _f4b_source_confidence(
+        "UW_ALERTS_2_SESSION", window_empty=False
+    )
+    assert level == "PROVISIONAL"
+    assert provisional is True
+    assert "alert universe" in reason.lower() or "flagged-alert" in reason.lower()
+
+    # Broad options tape → FULL confidence, not provisional.
+    level, provisional, _ = _f4b_source_confidence("UW_TAPE_2_SESSION", window_empty=False)
+    assert level == "FULL"
+    assert provisional is False
+
+    # No universe → NO_DATA.
+    level, provisional, _ = _f4b_source_confidence("NONE", window_empty=False)
+    assert level == "NO_DATA"
+    assert provisional is False
+
+
+def test_build_response_v2_alert_universe_score_is_flagged_provisional() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[_atm("call", ask=10_000_000.0)],
+    )
+
+    # The official F4 source is the alert universe → it must NOT present as a
+    # fully-confident source: it is disclosed as PROVISIONAL / degraded.
+    assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
+    assert response.f4b_source_confidence == "PROVISIONAL"
+    assert response.f4b_provisional is True
+    assert response.f4b_source_confidence_reason
+
+
+def test_build_response_v2_tape_fallback_is_full_confidence() -> None:
+    response = _build_response_v2(
+        ticker="ABC",
+        market_cap=10_000_000_000.0,
+        dp_prints=None,
+        opt_trades=None,
+        opt_tape=[
+            {
+                "option_type": "call",
+                "side": "ASK",
+                "executed_at": "2026-06-15T15:00:00Z",
+                "premium": 5_000_000.0,
+            }
+        ],
+    )
+
+    assert response.f4b_universe_source == "UW_TAPE_2_SESSION"
+    assert response.f4b_source_confidence == "FULL"
+    assert response.f4b_provisional is False
 
 
 def test_build_response_v2_exposes_tactical_live_pulse_as_separate_chip() -> None:

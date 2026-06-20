@@ -1084,6 +1084,53 @@ def _dark_pool_confidence(sessions_covered: int | None, window: int, truncated: 
     return "Medium — partial coverage"
 
 
+# F4b source-confidence labels. The flow-ALERTS universe (UW_ALERTS_2_SESSION)
+# only captures UW-flagged unusual sweeps/blocks/repeated-hits — a NARROWER
+# slice than the full per-ticker options tape. A score built from it is real but
+# PROVISIONAL: it must never present as a fully-confident official F4 source
+# without this degraded disclosure. The broad tape (UW_TAPE_2_SESSION) is the
+# full-confidence universe; NONE means no options universe was available.
+_F4B_CONFIDENCE_FULL: Final[str] = "FULL"
+_F4B_CONFIDENCE_PROVISIONAL: Final[str] = "PROVISIONAL"
+_F4B_CONFIDENCE_NO_DATA: Final[str] = "NO_DATA"
+
+
+def _f4b_source_confidence(universe_source: str, *, window_empty: bool) -> tuple[str, bool, str]:
+    """Map the F4b scoring universe to a (confidence, provisional, reason) triple.
+
+    The flow-alert universe is calibrated but narrow (UW-flagged events only), so
+    a score sourced from it is PROVISIONAL and must carry a degraded label rather
+    than masquerade as a fully-confident official F4. The broad options tape is
+    FULL confidence; no universe at all is NO_DATA. Pure function — no I/O.
+    """
+    if universe_source == "UW_ALERTS_2_SESSION":
+        if window_empty:
+            return (
+                _F4B_CONFIDENCE_PROVISIONAL,
+                True,
+                "Provisional — no flagged-alert flow in the window; alert universe only "
+                "(UW sweeps/blocks), not the full options tape.",
+            )
+        return (
+            _F4B_CONFIDENCE_PROVISIONAL,
+            True,
+            "Provisional — scored from the UW flagged-alert universe (sweeps/blocks/"
+            "repeated hits) only, a narrower slice than the full per-ticker options tape.",
+        )
+    if universe_source == "UW_TAPE_2_SESSION":
+        return (
+            _F4B_CONFIDENCE_FULL,
+            False,
+            "Full — scored from the broad per-ticker options tape (all flow, not just "
+            "flagged alerts).",
+        )
+    return (
+        _F4B_CONFIDENCE_NO_DATA,
+        False,
+        "No data — no options universe available; F4 withheld at neutral baseline.",
+    )
+
+
 def _group_by_session(
     records: list[dict[str, Any]], timestamp_key: str
 ) -> list[list[dict[str, Any]]]:
@@ -2106,6 +2153,18 @@ def _build_response_v2(
             f"covers {dp_sessions_covered} of {_F4_LOOKBACK_SESSIONS}."
         )
 
+    # F4b source confidence: the official F4 score must disclose when it was built
+    # from the narrow flagged-alert universe (PROVISIONAL) rather than the full
+    # options tape (FULL). A DATA_GAP source is NO_DATA regardless of universe.
+    if source == _F4_SOURCE_DATA_GAP:
+        f4b_source_confidence, f4b_provisional, f4b_source_confidence_reason = (
+            _f4b_source_confidence("NONE", window_empty=opt_window_empty)
+        )
+    else:
+        f4b_source_confidence, f4b_provisional, f4b_source_confidence_reason = (
+            _f4b_source_confidence(f4b_universe_source, window_empty=opt_window_empty)
+        )
+
     # Settlement ratio — computed from the same windowed set used for the chips.
     dp_settlement_ratio: float | None = (
         _dark_pool_settlement_ratio(windowed_dp) if windowed_dp else None
@@ -2159,6 +2218,9 @@ def _build_response_v2(
         adjusted_largest_bullish_print_usd=adjusted_largest_bullish_print,
         f4b_score_input_source=f4b_score_input_source,
         f4b_universe_source=f4b_universe_source,
+        f4b_source_confidence=f4b_source_confidence,
+        f4b_source_confidence_reason=f4b_source_confidence_reason,
+        f4b_provisional=f4b_provisional,
         f4b_universe_total_alerts=f4b_universe_total_alerts,
         f4b_universe_directional_alerts=f4b_universe_directional_alerts,
         f4b_universe_excluded_alerts=f4b_universe_excluded_alerts,

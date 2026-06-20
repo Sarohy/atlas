@@ -14,7 +14,11 @@ import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
 import { useSection16 } from '@/lib/hooks/use-section16';
 import { useFramework8 } from '@/lib/hooks/use-framework8';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
-import type { FactorBreakdown, FrameworkScoreResponse } from '@/lib/schemas/framework-score';
+import type {
+  EtfBranchMetadata,
+  FactorBreakdown,
+  FrameworkScoreResponse,
+} from '@/lib/schemas/framework-score';
 import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
 import type { OptionsFlowResponse } from '@/lib/schemas/options-flow';
@@ -208,8 +212,14 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
       </div>
 
       <header className="atlas-frameworks-panel-header atlas-fws-panel-header">
-        <h2 className="atlas-frameworks-panel-title">Framework 1</h2>
-        <span className="atlas-fws-subtitle">F1 · F2 · F3 · F4 · F5 → Conviction</span>
+        <h2 className="atlas-frameworks-panel-title">
+          {data?.etf_branch ? 'Proxy Composite' : 'Framework 1'}
+        </h2>
+        <span className="atlas-fws-subtitle">
+          {data?.etf_branch
+            ? 'Look-through proxy basket → conviction (direct F1–F5 N/A)'
+            : 'F1 · F2 · F3 · F4 · F5 → Conviction'}
+        </span>
       </header>
 
       <div className="atlas-fws-panel-body">
@@ -339,6 +349,7 @@ function FrameworkScoreContent({
   const actionToneCss = ACTION_TONE_CLASS[headlineAction.tone] ?? 'is-yellow';
   const filledSegs = Math.round(displayScore / SCORE_BAR_SEGMENTS);
   const f4Summary = buildF4Summary(data, optionsFlowData);
+  const etf = data.etf_branch;
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
@@ -388,23 +399,32 @@ function FrameworkScoreContent({
 
       {/* ── Factor breakdown table ── */}
       <div className="atlas-fws-breakdown">
-        <div className="atlas-fws-breakdown-header">
-          <span>Factor</span>
-          <span>Score</span>
-          <span>Weight</span>
-          <span>Contribution</span>
-        </div>
-        {data.factors.map((f) => (
-          <FactorRow
-            key={f.key}
-            factor={f}
-            degraded={data.degraded}
-            f4GapBadge={f.key === 'f4' ? f4GapBadge : null}
-            f5CapApplied={null}
-            f5RawScore={f.key === 'f5' ? data.f5_raw_score : null}
-            f5CapSource={null}
-          />
-        ))}
+        {etf ? (
+          // ETF/proxy: direct operating-company F1–F5 are disabled. Show the
+          // proxy look-through components that actually reconcile to the score,
+          // not the misleading neutral-50 F1–F5 rows.
+          <EtfProxyBreakdown etf={etf} f4Score={optionsFlowData?.f4_score ?? null} />
+        ) : (
+          <>
+            <div className="atlas-fws-breakdown-header">
+              <span>Factor</span>
+              <span>Score</span>
+              <span>Weight</span>
+              <span>Contribution</span>
+            </div>
+            {data.factors.map((f) => (
+              <FactorRow
+                key={f.key}
+                factor={f}
+                degraded={data.degraded}
+                f4GapBadge={f.key === 'f4' ? f4GapBadge : null}
+                f5CapApplied={null}
+                f5RawScore={f.key === 'f5' ? data.f5_raw_score : null}
+                f5CapSource={null}
+              />
+            ))}
+          </>
+        )}
 
         {/* ── F8 clustered selling note ── */}
         {data.f8_clustered_selling_note != null && (
@@ -422,7 +442,7 @@ function FrameworkScoreContent({
           </div>
         )}
         <div className="atlas-fws-calc-row">
-          <span className="atlas-fws-calc-label">Raw total</span>
+          <span className="atlas-fws-calc-label">{etf ? 'Proxy raw total' : 'Raw total'}</span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
         </div>
         {/* ── F8 buying bonus note ── */}
@@ -432,7 +452,7 @@ function FrameworkScoreContent({
           </div>
         )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
-          <span className="atlas-fws-calc-label">Framework score</span>
+          <span className="atlas-fws-calc-label">{etf ? 'Proxy Composite' : 'Framework score'}</span>
           <span
             className={cn('atlas-fws-calc-value', scoreToneCss)}
             data-testid="fws-final-score-calc"
@@ -742,6 +762,65 @@ function deriveHeadlineAction(
 
   const [label, tone] = mapAction(finalScore);
   return { label, tone };
+}
+
+// ---------------------------------------------------------------------------
+// ETF / proxy breakdown
+// ---------------------------------------------------------------------------
+
+/**
+ * Proxy look-through breakdown for ETF/fund instruments. Direct operating-company
+ * F1–F5 are disabled by the universal router, so this renders the branch-model
+ * components that actually reconcile to the Proxy Composite score — plus an
+ * explicit "Direct company score: N/A" disclosure so the number is never read as
+ * a normal equity F1–F5 composite.
+ */
+function EtfProxyBreakdown({
+  etf,
+  f4Score,
+}: {
+  etf: EtfBranchMetadata;
+  f4Score: number | null;
+}) {
+  return (
+    <div data-testid="fws-etf-breakdown">
+      <p className="atlas-fws-state-msg" data-testid="fws-etf-direct-na">
+        Direct company score: N/A — operating-company F1–F5 disabled (ETF/proxy).
+      </p>
+      <p className="atlas-fws-state-msg" data-testid="fws-etf-label">
+        Proxy look-through: {etf.label}
+        {etf.holdings_driver ? ` · ${etf.holdings_driver}` : ''}
+      </p>
+
+      <div className="atlas-fws-breakdown-header">
+        <span>Proxy component</span>
+        <span>Score</span>
+        <span>Weight</span>
+        <span>Contribution</span>
+      </div>
+      {etf.components.map((c) => {
+        const isTiming = /f4|option/i.test(c.name);
+        return (
+          <div className="atlas-fws-factor-row" key={c.name} data-testid="fws-etf-component">
+            <span className="atlas-fws-factor-name">
+              {c.name}
+              {isTiming && (
+                <span className="atlas-fws-f4-flow-monitor"> · timing only</span>
+              )}
+            </span>
+            <span className="atlas-fws-factor-score">{c.score}</span>
+            <span className="atlas-fws-factor-weight">{(c.weight * 100).toFixed(0)}%</span>
+            <span className="atlas-fws-factor-contribution">{(c.score * c.weight).toFixed(2)}</span>
+          </div>
+        );
+      })}
+
+      <p className="atlas-fws-state-msg" data-testid="fws-etf-timing-role">
+        {etf.timing_overlay_role}
+        {f4Score != null ? ` (ETF F4: ${f4Score})` : ''}
+      </p>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

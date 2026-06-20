@@ -115,6 +115,19 @@ const HEDGE_TONE: Record<string, string> = {
   NONE: 'is-muted',
 };
 
+// F4b source confidence — the official F4 score must disclose when it was built
+// from the narrow flagged-alert universe (PROVISIONAL) vs the full options tape.
+const SOURCE_CONFIDENCE_LABEL: Record<string, string> = {
+  FULL: 'F4 source: FULL',
+  PROVISIONAL: 'F4 source: PROVISIONAL',
+  NO_DATA: 'F4 source: NO DATA',
+};
+const SOURCE_CONFIDENCE_TONE: Record<string, string> = {
+  FULL: 'is-green',
+  PROVISIONAL: 'is-orange',
+  NO_DATA: 'is-muted',
+};
+
 // ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
@@ -317,7 +330,25 @@ function OptionsFlowContent({ data }: { data: OptionsFlowResponse }) {
         >
           {data.lookback_sessions}-session rolling
         </span>
+        <span
+          className={cn(
+            'atlas-frameworks-pill atlas-f4-tier-pill',
+            SOURCE_CONFIDENCE_TONE[data.f4b_source_confidence] ?? 'is-muted',
+          )}
+          data-testid="f4-source-confidence"
+        >
+          {SOURCE_CONFIDENCE_LABEL[data.f4b_source_confidence] ?? data.f4b_source_confidence}
+        </span>
       </div>
+
+      {data.f4b_provisional && (
+        <p
+          className="atlas-f4-state-msg atlas-f4-state-msg--warn"
+          data-testid="f4-source-confidence-reason"
+        >
+          Degraded source: {data.f4b_source_confidence_reason}
+        </p>
+      )}
 
       {data.data_gap_reason && (
         <p className="atlas-f4-state-msg atlas-f4-state-msg--warn" data-testid="f4-data-gap-reason">
@@ -590,6 +621,7 @@ function F4bDebugCard({ data }: { data: OptionsFlowResponse }) {
           <DebugRow label="Final F4b Score" value={String(data.f4_score)} />
           <DebugRow label="Final score input" value={data.f4b_score_input_source ?? '—'} />
           <DebugRow label="Universe source" value={data.f4b_universe_source ?? '—'} />
+          <DebugRow label="Source confidence" value={data.f4b_source_confidence ?? '—'} />
           <DebugRow
             label="Universe alerts"
             value={

@@ -2,8 +2,10 @@
 
 import { cn } from '@/lib/utils';
 import { useForwardGrowth } from '@/lib/hooks/use-forward-growth';
+import { useFrameworkScore } from '@/lib/hooks/use-framework-score';
 import { useFundamental } from '@/lib/hooks/use-fundamental';
 import { useOptionsFlow } from '@/lib/hooks/use-options-flow';
+import type { EtfBranchMetadata } from '@/lib/schemas/framework-score';
 import type {
   FgsGrade,
   ForwardGrowthResponse,
@@ -90,6 +92,14 @@ export function ForwardGrowthPanel({ ticker, atlasScore }: ForwardGrowthPanelPro
     f4,
     atlas: atlasScore,
   });
+  // ETF/proxy detection: when the universal router classified this ticker as a
+  // non-operating instrument, the DIRECT FGS is not applicable — suppress it and
+  // show a look-through label instead of a misleading "AVOID — no edge" card.
+  const { data: frameworkScore } = useFrameworkScore(ticker);
+  const etfBranch =
+    frameworkScore?.ticker?.toUpperCase() === ticker.trim().toUpperCase()
+      ? (frameworkScore?.etf_branch ?? undefined)
+      : undefined;
   const hasData = ticker.trim().length > 0 && data !== undefined;
   const errorMsg = error instanceof Error ? error.message : 'Failed to load forward-growth data.';
 
@@ -103,13 +113,25 @@ export function ForwardGrowthPanel({ ticker, atlasScore }: ForwardGrowthPanelPro
           <h2 className="atlas-frameworks-panel-title">Forward Growth</h2>
           <span className="atlas-fws-subtitle">FGS · growth potential (parallel axis)</span>
         </div>
-        {hasData && (
+        {etfBranch ? (
           <span
-            className={cn('atlas-frameworks-pill atlas-fws-action-pill', GRADE_TONE[data.fgs_grade])}
+            className="atlas-frameworks-pill atlas-fws-action-pill is-teal"
             data-testid="fgs-grade-chip"
           >
-            {data.fgs_grade}
+            PROXY
           </span>
+        ) : (
+          hasData && (
+            <span
+              className={cn(
+                'atlas-frameworks-pill atlas-fws-action-pill',
+                GRADE_TONE[data.fgs_grade],
+              )}
+              data-testid="fgs-grade-chip"
+            >
+              {data.fgs_grade}
+            </span>
+          )
         )}
       </header>
 
@@ -124,8 +146,9 @@ export function ForwardGrowthPanel({ ticker, atlasScore }: ForwardGrowthPanelPro
             {errorMsg}
           </p>
         )}
-        {!isLoading && !isError && hasData && <FgsContent data={data} />}
-        {!isLoading && !isError && !hasData && ticker.trim().length > 0 && (
+        {!isLoading && !isError && etfBranch && <EtfFgsView etfBranch={etfBranch} />}
+        {!isLoading && !isError && !etfBranch && hasData && <FgsContent data={data} />}
+        {!isLoading && !isError && !etfBranch && !hasData && ticker.trim().length > 0 && (
           <p className="atlas-fws-state-msg" data-testid="fgs-empty">
             No forward-growth data available for {ticker}.
           </p>
@@ -148,6 +171,40 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: stri
   );
 }
 
+/**
+ * ETF/proxy view: the DIRECT Forward Growth Score is not applicable to a
+ * fund/basket instrument, so suppress it (it would otherwise read "AVOID — no
+ * edge" off neutral fallbacks) and show the look-through growth label derived
+ * from the ETF branch model instead.
+ */
+function EtfFgsView({ etfBranch }: { etfBranch: EtfBranchMetadata }) {
+  const bullish = /bullish/i.test(etfBranch.headline_label);
+  const lookThrough = bullish ? 'Bullish' : 'Mixed / watch';
+  const tone = bullish ? 'is-green' : 'is-yellow';
+  return (
+    <div data-testid="fgs-etf-content">
+      <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
+        <span className="atlas-fws-calc-label">Direct FGS</span>
+        <span className="atlas-fws-calc-value is-muted" data-testid="fgs-etf-direct-na">
+          N/A — ETF/proxy instrument
+        </span>
+      </div>
+      <Row
+        label="Look-through growth"
+        value={`${lookThrough} — ${etfBranch.label}`}
+        tone={tone}
+      />
+      {etfBranch.holdings_driver && (
+        <Row label="Holdings driver" value={etfBranch.holdings_driver} />
+      )}
+      <p className="atlas-fws-state-msg" data-testid="fgs-etf-note">
+        Direct company growth factors do not apply to a basket instrument — growth is assessed
+        through the proxy look-through model, not a single-name FGS.
+      </p>
+    </div>
+  );
+}
+
 function FgsContent({ data }: { data: ForwardGrowthResponse }) {
   const ra = data.revenue_acceleration;
   // Annotate provenance: DATA_GAP → "(gap)", transcript heuristic → "(est)".
@@ -166,6 +223,26 @@ function FgsContent({ data }: { data: ForwardGrowthResponse }) {
         </span>
       </div>
       <Row label="Confidence (axes measured)" value={`${data.confidence_pct}%`} />
+
+      {/* F5 ↔ FGS bridge: these are SEPARATE axes, not the same number. F5
+          (Fundamental Quality) measures current survivability/quality; FGS
+          measures forward growth potential. They diverge by design — a gap is
+          expected, not a bug. */}
+      {data.f5_score != null && (
+        <>
+          <Row
+            label="F5 fundamental quality (separate axis)"
+            value={`${data.f5_score}/100 · Δ ${
+              data.fgs_score - data.f5_score >= 0 ? '+' : ''
+            }${data.fgs_score - data.f5_score} vs FGS`}
+          />
+          <p className="atlas-fws-state-msg" data-testid="fgs-f5-bridge">
+            FGS (forward growth) and F5 (current fundamental quality) are separate axes — a
+            gap between them is expected, not a scoring error. FGS is never blended into F5 or
+            the ATLAS framework score.
+          </p>
+        </>
+      )}
 
       <div className="atlas-fws-breakdown-divider" />
 

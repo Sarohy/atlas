@@ -181,6 +181,24 @@ class OptionsFlowResponse(BaseModel):
         default="NONE",
         description="Universe source used for F4b scoring diagnostics.",
     )
+    f4b_source_confidence: str = Field(
+        default="NO_DATA",
+        description=(
+            "Confidence in the official F4b source universe: FULL (broad options "
+            "tape) | PROVISIONAL (narrow UW flagged-alert universe) | NO_DATA."
+        ),
+    )
+    f4b_source_confidence_reason: str = Field(
+        default="",
+        description="Human-readable explanation of the F4b source-confidence level.",
+    )
+    f4b_provisional: bool = Field(
+        default=False,
+        description=(
+            "True when the official F4 score was built from the narrow flagged-alert "
+            "universe and must be treated as provisional / degraded-source."
+        ),
+    )
     f4b_universe_total_alerts: int = Field(
         default=0,
         description="Total candidate options alerts in the active F4b universe window.",

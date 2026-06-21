@@ -32,7 +32,7 @@ const ACTION_LABEL: Record<OverlayAction, string> = {
   STARTER_WATCH: 'STARTER / WATCH — ADD ON FLOW',
   BUY_ON_PULLBACK: 'BUY ON PULLBACK',
   HOLD_TRIM: 'CORE HOLD / TRIM IF OVERWEIGHT',
-  TRIM_HEDGE: 'TRIM / HEDGE',
+  TRIM_HEDGE: 'NO FRESH ADD — TRIM / HEDGE IF OVERWEIGHT',
   AVOID: 'AVOID',
 };
 
@@ -43,7 +43,9 @@ const ACTION_TONE: Record<OverlayAction, string> = {
   BUY_ON_PULLBACK: 'is-yellow',
   // Amber, not red — "core hold / don't chase" is a wait-for-entry, not a sell.
   HOLD_TRIM: 'is-yellow',
-  TRIM_HEDGE: 'is-red',
+  // Orange, not red — "no fresh add; trim/hedge only if overweight" is sizing
+  // discipline on an extended name, not a mandatory bearish sell.
+  TRIM_HEDGE: 'is-orange',
   AVOID: 'is-red',
 };
 

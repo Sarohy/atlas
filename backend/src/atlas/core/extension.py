@@ -423,9 +423,14 @@ _HIGH_CONVICTION_ACTIONS: Final[dict[str, tuple[str, str]]] = {
         "position; trim only into strength if position size is above target. "
         "Add on pullback, VWAP reset, or post-event confirmation.",
     ),
+    # Extremely extended high-conviction name. The gate is "no fresh add", and
+    # trim/hedge is sizing discipline (only if the position is above target) —
+    # NOT a mandatory bearish sell. Re-add on reset / flow confirmation.
     ExtensionFlag.EXTREME_RED: (
         OverlayAction.TRIM_HEDGE,
-        "Extremely extended — trim / hedge; no new capital.",
+        "Extremely extended — no fresh add. Trim / hedge only if the position is "
+        "above target (overweight); this is sizing discipline, not a mandatory "
+        "sell. Re-add on a reset / VWAP hold / flow (F4) confirmation.",
     ),
 }
 

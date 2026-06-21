@@ -43,6 +43,9 @@ class GrowthBucket:
     QUALITY_HOLD: Final[str] = "QUALITY_HOLD"
     GROWTH_TACTICAL: Final[str] = "GROWTH_TACTICAL"
     STORY_RISK: Final[str] = "STORY_RISK"
+    # Real forward growth, but adds blocked by weak/provisional flow or extension.
+    # NOT avoid — avoid is reserved for broken thesis / weak fundamentals.
+    ADD_BLOCKED: Final[str] = "ADD_BLOCKED"
     AVOID: Final[str] = "AVOID"
 
 
@@ -52,6 +55,7 @@ NEUTRAL_SCORE: Final[int] = 50
 # Matrix thresholds.
 _F5_HIGH_MIN: Final[int] = 70      # F5 >= 70 → durable
 _FGS_HIGH_MIN: Final[int] = 75     # FGS >= 75 → strong forward growth
+_FGS_MEANINGFUL_MIN: Final[int] = 70  # FGS >= 70 (HIGH grade) → real forward growth
 _F4_CONFIRMING_MIN: Final[int] = 60  # F4 >= 60 → BUY/STRONG BUY confirming
 
 # FGS grade bands.
@@ -387,4 +391,14 @@ def classify_bucket(
             "Tempting but dangerous — story strong, flow not confirming; watch only",
         )
 
-    return GrowthBucket.AVOID, "No edge — avoid"
+    # Neither strictly high. Real forward growth (HIGH grade FGS) that is blocked
+    # only by weak/provisional flow or extension is ADD-BLOCKED, never AVOID —
+    # the thesis is intact, the entry is just gated. AVOID stays reserved for a
+    # broken thesis: no forward growth AND weak fundamentals.
+    if fgs_score >= _FGS_MEANINGFUL_MIN:
+        return (
+            GrowthBucket.ADD_BLOCKED,
+            "High growth, adds blocked — no fresh add; wait for reset and F4 confirmation",
+        )
+
+    return GrowthBucket.AVOID, "No edge / weak fundamentals — avoid"

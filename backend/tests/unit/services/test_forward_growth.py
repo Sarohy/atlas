@@ -113,6 +113,18 @@ class TestActionMatrix:
     def test_avoid_when_both_low(self) -> None:
         assert fg.classify_bucket(40, 40, 30)[0] == GrowthBucket.AVOID
 
+    def test_add_blocked_when_real_growth_but_flow_extension_block(self) -> None:
+        # MRVL-shaped: high FGS grade (72) + mediocre F5 (57) + weak F4 → real
+        # forward growth, adds blocked. Must be ADD_BLOCKED, never AVOID.
+        bucket, action = fg.classify_bucket(57, 72, 40)
+        assert bucket == GrowthBucket.ADD_BLOCKED
+        assert action is not None and "no fresh add" in action.lower()
+        assert "avoid" not in action.lower()
+
+    def test_meaningful_growth_never_avoids_even_with_low_f5(self) -> None:
+        # FGS at the HIGH-grade floor (70) rescues the name from AVOID.
+        assert fg.classify_bucket(45, 70, None)[0] == GrowthBucket.ADD_BLOCKED
+
     def test_none_f5_yields_no_bucket(self) -> None:
         assert fg.classify_bucket(None, 80, 70) == (None, None)
 

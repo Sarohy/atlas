@@ -28,6 +28,7 @@ const BUCKET_LABEL: Record<GrowthBucket, string> = {
   QUALITY_HOLD: 'QUALITY HOLD',
   GROWTH_TACTICAL: 'GROWTH TACTICAL',
   STORY_RISK: 'STORY RISK',
+  ADD_BLOCKED: 'HIGH GROWTH — ADD BLOCKED',
   AVOID: 'AVOID',
 };
 
@@ -36,6 +37,7 @@ const BUCKET_TONE: Record<GrowthBucket, string> = {
   QUALITY_HOLD: 'is-teal',
   GROWTH_TACTICAL: 'is-yellow',
   STORY_RISK: 'is-red',
+  ADD_BLOCKED: 'is-yellow',
   AVOID: 'is-red',
 };
 

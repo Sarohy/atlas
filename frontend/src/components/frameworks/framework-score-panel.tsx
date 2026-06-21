@@ -18,6 +18,7 @@ import type {
   EtfBranchMetadata,
   FactorBreakdown,
   FrameworkScoreResponse,
+  IntlBranchMetadata,
 } from '@/lib/schemas/framework-score';
 import type { ExtensionOverlayResponse } from '@/lib/schemas/extension-overlay';
 import type { ExtensionWashoutResponse } from '@/lib/schemas/extension-washout';
@@ -213,12 +214,18 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
 
       <header className="atlas-frameworks-panel-header atlas-fws-panel-header">
         <h2 className="atlas-frameworks-panel-title">
-          {data?.etf_branch ? 'Proxy Composite' : 'Framework 1'}
+          {data?.etf_branch
+            ? 'Proxy Composite'
+            : data?.intl_branch
+              ? 'INTL Framework'
+              : 'Framework 1'}
         </h2>
         <span className="atlas-fws-subtitle">
           {data?.etf_branch
             ? 'Look-through proxy basket → conviction (direct F1–F5 N/A)'
-            : 'F1 · F2 · F3 · F4 · F5 → Conviction'}
+            : data?.intl_branch
+              ? 'INTL-3F · International operating company (domestic F1–F5 N/A)'
+              : 'F1 · F2 · F3 · F4 · F5 → Conviction'}
         </span>
       </header>
 
@@ -231,7 +238,7 @@ export function FrameworkScorePanel({ ticker, onPreviewDetails }: FrameworkScore
             }
           />
         )}
-        {!isLoading && !isError && data && data.degraded && !data.etf_branch && (
+        {!isLoading && !isError && data && data.degraded && !data.etf_branch && !data.intl_branch && (
           <DegradedBanner flags={data.flags} factors={data.factors.filter((f) => !f.available)} />
         )}
         {!isLoading && !isError && displayData && (
@@ -350,6 +357,7 @@ function FrameworkScoreContent({
   const filledSegs = Math.round(displayScore / SCORE_BAR_SEGMENTS);
   const f4Summary = buildF4Summary(data, optionsFlowData);
   const etf = data.etf_branch;
+  const intl = data.intl_branch;
 
   return (
     <div className="atlas-fws-content" data-testid="fws-content">
@@ -399,7 +407,11 @@ function FrameworkScoreContent({
 
       {/* ── Factor breakdown table ── */}
       <div className="atlas-fws-breakdown">
-        {etf ? (
+        {intl ? (
+          // International / ADR / OTC operating company: domestic F1–F5 do not
+          // apply. Show the INTL-3F model + coverage labels + missing-data tasks.
+          <IntlBranchBreakdown intl={intl} />
+        ) : etf ? (
           // ETF/proxy: direct operating-company F1–F5 are disabled. Show the
           // proxy look-through components that actually reconcile to the score,
           // not the misleading neutral-50 F1–F5 rows.
@@ -442,7 +454,9 @@ function FrameworkScoreContent({
           </div>
         )}
         <div className="atlas-fws-calc-row">
-          <span className="atlas-fws-calc-label">{etf ? 'Proxy raw total' : 'Raw total'}</span>
+          <span className="atlas-fws-calc-label">
+            {etf ? 'Proxy raw total' : intl ? 'INTL-3F raw total' : 'Raw total'}
+          </span>
           <span className="atlas-fws-calc-value">{data.raw_total.toFixed(2)}</span>
         </div>
         {/* ── F8 buying bonus note ── */}
@@ -452,7 +466,9 @@ function FrameworkScoreContent({
           </div>
         )}
         <div className="atlas-fws-calc-row atlas-fws-calc-row--total">
-          <span className="atlas-fws-calc-label">{etf ? 'Proxy Composite' : 'Framework score'}</span>
+          <span className="atlas-fws-calc-label">
+            {etf ? 'Proxy Composite' : intl ? 'INTL-3F Composite' : 'Framework score'}
+          </span>
           <span
             className={cn('atlas-fws-calc-value', scoreToneCss)}
             data-testid="fws-final-score-calc"
@@ -480,7 +496,7 @@ function buildDisplayFrameworkScore(
   data: FrameworkScoreResponse,
   scoreOverrides: Partial<Record<FactorBreakdown['key'], number | null | undefined>>,
 ): FrameworkScoreResponse {
-  if (data.etf_branch) {
+  if (data.etf_branch || data.intl_branch) {
     return data;
   }
 
@@ -689,6 +705,13 @@ function deriveHeadlineAction(
     };
   }
 
+  if (data.intl_branch) {
+    return {
+      label: data.intl_branch.headline_label,
+      tone: data.action_tone,
+    };
+  }
+
   if (data.degraded) {
     return {
       label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',
@@ -846,6 +869,90 @@ function EtfProxyBreakdown({
               {etf.coverage_note}
             </p>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * INTL-3F breakdown for international / ADR / OTC operating companies. Domestic
+ * F1–F5 do not apply; this shows the I1/I2/I3 model on available data, the
+ * coverage label, the missing-data task list, and the explicit "F4 N/A — no
+ * U.S. flow (not bearish)" disclosure so a foreign name is never punished for a
+ * U.S. data gap.
+ */
+function IntlBranchBreakdown({ intl }: { intl: IntlBranchMetadata }) {
+  const coverageTone =
+    intl.coverage_label === 'INTL-OK'
+      ? 'is-green'
+      : intl.coverage_label === 'INTL-PARTIAL'
+        ? 'is-yellow'
+        : 'is-orange';
+  return (
+    <div data-testid="fws-intl-breakdown">
+      <p className="atlas-fws-state-msg" data-testid="fws-intl-kind">
+        {intl.label} · {intl.instrument_kind}
+      </p>
+      <p className="atlas-fws-state-msg" data-testid="fws-intl-domestic-na">
+        {intl.domestic_note}
+      </p>
+
+      {/* Status labels (INTL-PARTIAL, NO-US-FLOW, OTC-LIQUIDITY-RISK, …) */}
+      <div className="atlas-fws-signal-row" data-testid="fws-intl-labels">
+        <span className={cn('atlas-frameworks-pill', coverageTone)}>{intl.coverage_label}</span>
+        {intl.labels
+          .filter((l) => l !== intl.coverage_label)
+          .map((label) => (
+            <span key={label} className="atlas-frameworks-pill is-muted">
+              {label}
+            </span>
+          ))}
+      </div>
+
+      <div className="atlas-fws-breakdown-header">
+        <span>INTL factor</span>
+        <span>Score</span>
+        <span>Source</span>
+        <span>Coverage</span>
+      </div>
+      {intl.factors.map((f) => (
+        <div className="atlas-fws-factor-row" key={f.key} data-testid="fws-intl-factor">
+          <span className="atlas-fws-factor-name">
+            <span className="atlas-fws-factor-key">{f.key.toUpperCase()}</span> {f.name}
+          </span>
+          <span className={cn('atlas-fws-factor-score', f.available ? '' : 'is-muted')}>
+            {f.available ? f.score : '—'}
+          </span>
+          <span className="atlas-fws-factor-weight">{f.source}</span>
+          <span className="atlas-fws-factor-contribution">{f.available ? 'scored' : 'gap'}</span>
+        </div>
+      ))}
+
+      <p className="atlas-fws-state-msg" data-testid="fws-intl-f4-note">
+        {intl.f4_note}
+      </p>
+
+      {intl.data_tasks.length > 0 && (
+        <div data-testid="fws-intl-data-tasks">
+          <div className="atlas-fws-breakdown-divider" />
+          <div className="atlas-fws-calc-row">
+            <span className="atlas-fws-calc-label">Missing-data tasks</span>
+            <span className="atlas-fws-calc-value">{intl.data_tasks.length}</span>
+          </div>
+          {intl.data_tasks.map((t) => (
+            <div className="atlas-fws-factor-row" key={t.item} data-testid="fws-intl-data-task">
+              <span className="atlas-fws-factor-name">{t.item}</span>
+              <span
+                className={cn(
+                  'atlas-fws-factor-contribution',
+                  t.status === 'MISSING' ? 'is-orange' : 'is-muted',
+                )}
+              >
+                {t.status}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

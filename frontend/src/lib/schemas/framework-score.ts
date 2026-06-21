@@ -47,6 +47,34 @@ export const etfConstituentSchema = z.object({
   note: z.string().nullable().default(null),
 });
 
+export const intlFactorSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  score: z.number().int().min(0).max(100),
+  available: z.boolean(),
+  source: z.string(),
+});
+
+export const intlDataTaskSchema = z.object({
+  item: z.string(),
+  status: z.string(),
+});
+
+export const intlBranchMetadataSchema = z.object({
+  route: z.string(),
+  label: z.string(),
+  headline_label: z.string(),
+  instrument_kind: z.string(),
+  coverage_label: z.string(),
+  domestic_note: z.string().default('Domestic F1–F5 not applicable.'),
+  f4_note: z.string().default('F4 N/A — no U.S. flow coverage (unavailable, not bearish).'),
+  rank_pending: z.boolean().default(false),
+  size_capped: z.boolean().default(false),
+  factors: z.array(intlFactorSchema).default([]),
+  labels: z.array(z.string()).default([]),
+  data_tasks: z.array(intlDataTaskSchema).default([]),
+});
+
 export const etfBranchMetadataSchema = z.object({
   route: z.string(),
   label: z.string(),
@@ -138,6 +166,8 @@ export const frameworkScoreResponseSchema = z.object({
     .optional(),
   /** ETF branch metadata from universal router + branch model. */
   etf_branch: etfBranchMetadataSchema.nullable().default(null),
+  /** INTL-3F branch metadata for foreign/ADR/OTC operating companies. */
+  intl_branch: intlBranchMetadataSchema.nullable().default(null),
 });
 
 // ---------------------------------------------------------------------------
@@ -149,4 +179,7 @@ export type EtfBranchComponent = z.infer<typeof etfBranchComponentSchema>;
 export type EtfConstituent = z.infer<typeof etfConstituentSchema>;
 export type EtfHedgeInputs = z.infer<typeof etfHedgeInputsSchema>;
 export type EtfBranchMetadata = z.infer<typeof etfBranchMetadataSchema>;
+export type IntlFactor = z.infer<typeof intlFactorSchema>;
+export type IntlDataTask = z.infer<typeof intlDataTaskSchema>;
+export type IntlBranchMetadata = z.infer<typeof intlBranchMetadataSchema>;
 export type FrameworkScoreResponse = z.infer<typeof frameworkScoreResponseSchema>;

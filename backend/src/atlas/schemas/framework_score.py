@@ -187,6 +187,79 @@ class EtfBranchMetadata(BaseModel):
     )
 
 
+class IntlFactor(BaseModel):
+    """One INTL-3F factor (I1/I2/I3) for international operating companies."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str = Field(description="INTL factor identifier: 'i1' | 'i2' | 'i3'.")
+    name: str = Field(description="Human-readable INTL factor name.")
+    score: int = Field(ge=0, le=100, description="Factor score on a 0-100 scale.")
+    available: bool = Field(
+        description="False when no usable international data exists for this factor.",
+    )
+    source: str = Field(
+        description="Provenance of the factor (e.g. 'fundamental', 'momentum', 'DATA_GAP').",
+    )
+
+
+class IntlDataTask(BaseModel):
+    """A missing-data task for an international name (what ATLAS still needs)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    item: str = Field(description="Missing data item, e.g. 'local financials'.")
+    status: str = Field(description="MISSING | PARTIAL.")
+
+
+class IntlBranchMetadata(BaseModel):
+    """Routing metadata for international / ADR / OTC operating companies.
+
+    These names are NOT scored on the domestic F1-F5 model: missing U.S. data
+    feeds must not be read as bad fundamentals. The INTL-3F model (I1 business,
+    I2 market, I3 external confirmation) ranks them on available data only, and
+    missing U.S. options/flow is surfaced as N/A (never bearish / auto-avoid).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    route: str = Field(description="INTL route key (INTL_OPERATING).")
+    label: str = Field(description="Branch label, e.g. 'INTL-3F — International Operating Company'.")
+    headline_label: str = Field(description="Primary UI headline / action for this branch.")
+    instrument_kind: str = Field(
+        description="ADR | OTC foreign ordinary | Foreign operating company.",
+    )
+    coverage_label: str = Field(description="INTL-OK | INTL-PARTIAL | INTL-DATA-GAP.")
+    domestic_note: str = Field(
+        default="Domestic F1–F5 not applicable.",
+        description="Disclosure that domestic factors do not apply.",
+    )
+    f4_note: str = Field(
+        default="F4 N/A — no U.S. flow coverage (unavailable, not bearish).",
+        description="How missing U.S. options/dark-pool flow is treated.",
+    )
+    rank_pending: bool = Field(
+        default=False,
+        description="True when coverage is partial/absent and the rank is provisional.",
+    )
+    size_capped: bool = Field(
+        default=False,
+        description="True when liquidity/coverage warrants a capped position size.",
+    )
+    factors: list[IntlFactor] = Field(
+        default_factory=list,
+        description="INTL-3F factor breakdown (I1/I2/I3).",
+    )
+    labels: list[str] = Field(
+        default_factory=list,
+        description="Status labels (INTL-PARTIAL, NO-US-FLOW, OTC-LIQUIDITY-RISK, …).",
+    )
+    data_tasks: list[IntlDataTask] = Field(
+        default_factory=list,
+        description="Visible list of missing-data tasks for this ticker.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level response
 # ---------------------------------------------------------------------------
@@ -290,5 +363,12 @@ class FrameworkScoreResponse(BaseModel):
         description=(
             "Populated for ETF/fund/proxy instruments after universal router classification. "
             "Contains branch-specific model metadata used by UI and diagnostics."
+        ),
+    )
+    intl_branch: IntlBranchMetadata | None = Field(
+        default=None,
+        description=(
+            "Populated for international / ADR / OTC operating companies routed to INTL-3F. "
+            "Domestic F1-F5 are suppressed; carries coverage labels and missing-data tasks."
         ),
     )

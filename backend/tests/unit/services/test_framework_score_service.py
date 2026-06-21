@@ -494,6 +494,80 @@ class TestEtfBranchScoring:
         assert len(result.etf_branch.components) == 5
 
     @pytest.mark.asyncio
+    async def test_intl_full_coverage_routes_to_intl3f(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return False, "INTL_OPERATING"
+
+        async def _factor(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            return _FactorResultStub(72, "GOOD")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _factor)
+        monkeypatch.setattr(svc, "_fetch_f2", _factor)
+        monkeypatch.setattr(svc, "_fetch_f3", _factor)
+        monkeypatch.setattr(svc, "_fetch_f4", _factor)
+        monkeypatch.setattr(svc, "_fetch_f5", _factor)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("KXIAY")
+
+        assert result.intl_branch is not None
+        assert result.etf_branch is None
+        # Missing-data must NOT mark the name degraded or AVOID.
+        assert result.degraded is False
+        assert "AVOID" not in result.action.upper()
+        assert result.intl_branch.coverage_label == "INTL-OK"
+        assert result.intl_branch.instrument_kind == "ADR"
+        assert "NO-US-FLOW" in result.intl_branch.labels
+        # Domestic factors are suppressed; F4 is N/A, never bearish.
+        f4 = next(f for f in result.factors if f.key == "f4")
+        assert f4.available is False
+        assert "N/A" in f4.grade
+
+    @pytest.mark.asyncio
+    async def test_intl_data_gap_is_rank_pending_not_avoid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return False, "INTL_OPERATING"
+
+        async def _missing(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            raise RuntimeError("no U.S. data feed")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _missing)
+        monkeypatch.setattr(svc, "_fetch_f2", _missing)
+        monkeypatch.setattr(svc, "_fetch_f3", _missing)
+        monkeypatch.setattr(svc, "_fetch_f4", _missing)
+        monkeypatch.setattr(svc, "_fetch_f5", _missing)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+
+        result = await svc.compute_framework_score("LPKFF")
+
+        assert result.intl_branch is not None
+        assert result.degraded is False
+        assert result.intl_branch.coverage_label == "INTL-DATA-GAP"
+        assert result.intl_branch.rank_pending is True
+        assert result.intl_branch.size_capped is True
+        assert "RANK PENDING" in result.action
+        assert "AVOID" not in result.action.upper()
+        # OTC foreign ordinary → liquidity cap + missing-data tasks surfaced.
+        assert "OTC-LIQUIDITY-RISK" in result.intl_branch.labels
+        assert any(t.item == "local financials" for t in result.intl_branch.data_tasks)
+
+    @pytest.mark.asyncio
     async def test_spmo_momentum_branch_has_factor_messaging(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

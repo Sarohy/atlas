@@ -129,6 +129,7 @@ function makeFrameworkScoreData(
     f8_buying_bonus: 0,
     f8_clustered_selling_note: null,
     etf_branch: null,
+    intl_branch: null,
     ...overrides,
   };
 }

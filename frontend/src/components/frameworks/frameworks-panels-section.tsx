@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { useTickers } from '@/lib/hooks/use-tickers';
 import { useFrameworkStore } from '@/lib/stores/framework-store';
@@ -92,7 +92,12 @@ export function FrameworksPanelsSection() {
   // so F3 bands are always evaluated against the exact number shown in F1.
   // The raw frameworkScoreData is still fetched here so FrameworkScorePanel's
   // own hook hits the TanStack Query cache instead of making a second request.
-  useFrameworkScore(activeTicker);
+  // We also read it to detect ETF/proxy routing so the detail modal can mask
+  // the direct company F1-F5 cards (they are N/A for a proxy basket).
+  const { data: hoistedFrameworkScore } = useFrameworkScore(activeTicker);
+  const isEtfProxy =
+    Boolean(hoistedFrameworkScore?.etf_branch) &&
+    hoistedFrameworkScore?.ticker?.toUpperCase() === activeTicker.trim().toUpperCase();
 
   // Hoist the Framework 2 regime rule so Framework 4 uses the same value
   // the investor is seeing in the regime panel — no second independent fetch
@@ -282,9 +287,11 @@ export function FrameworksPanelsSection() {
             <div>
               <h2 className="atlas-frameworks-details-title">Framework Detail Cards</h2>
               <p className="atlas-frameworks-details-subtitle">
-                {activeTicker !== EMPTY_TICKER
-                  ? `Showing the current F1-F5 breakdown for ${activeTicker}.`
-                  : 'Showing the current F1-F5 breakdown.'}
+                {isEtfProxy
+                  ? `${activeTicker} is an ETF / proxy basket — the direct company F1–F5 cards below are NOT part of the Proxy Composite score (reference only).`
+                  : activeTicker !== EMPTY_TICKER
+                    ? `Showing the current F1-F5 breakdown for ${activeTicker}.`
+                    : 'Showing the current F1-F5 breakdown.'}
               </p>
             </div>
             <button
@@ -298,15 +305,57 @@ export function FrameworksPanelsSection() {
           </div>
 
           <div className="atlas-frameworks-details-grid">
-            <F1MomentumPanel ticker={activeTicker} />
-            <F2EarningsPanel ticker={activeTicker} />
+            {/* For ETF/proxy tickers, direct operating-company factors are N/A —
+                mask F1/F2/F3/F5 so a value like "F2 30 Weak" is not mistaken for
+                part of the Proxy Composite. F4 stays unmasked: it is the
+                supportive timing factor the proxy branch legitimately uses. */}
+            <EtfDirectFactorMask active={isEtfProxy}>
+              <F1MomentumPanel ticker={activeTicker} />
+            </EtfDirectFactorMask>
+            <EtfDirectFactorMask active={isEtfProxy}>
+              <F2EarningsPanel ticker={activeTicker} />
+            </EtfDirectFactorMask>
             <div className="atlas-frameworks-details-row">
-              <F3AnalystPanel ticker={activeTicker} />
+              <EtfDirectFactorMask active={isEtfProxy}>
+                <F3AnalystPanel ticker={activeTicker} />
+              </EtfDirectFactorMask>
               <F4OptionsPanel ticker={activeTicker} />
             </div>
-            <F5FundamentalPanel ticker={activeTicker} />
+            <EtfDirectFactorMask active={isEtfProxy}>
+              <F5FundamentalPanel ticker={activeTicker} />
+            </EtfDirectFactorMask>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ETF/proxy direct-factor mask
+// ---------------------------------------------------------------------------
+
+/**
+ * Dims and watermarks a direct company-factor card when the active ticker is an
+ * ETF/proxy basket. The card stays visible (for reference) but is clearly
+ * flagged as NOT part of the Proxy Composite score, so a value like
+ * "F2 30 Weak" is never read as a real input. Pass `active={false}` for normal
+ * equities and the children render untouched.
+ */
+function EtfDirectFactorMask({ active, children }: { active: boolean; children: ReactNode }) {
+  if (!active) {
+    return <>{children}</>;
+  }
+  return (
+    <div className="atlas-frameworks-etf-mask" data-testid="etf-direct-factor-mask">
+      <div className="atlas-frameworks-etf-mask-content" aria-hidden>
+        {children}
+      </div>
+      <div className="atlas-frameworks-etf-mask-overlay">
+        <span className="atlas-frameworks-pill is-muted atlas-frameworks-etf-mask-tag">
+          Direct company factor — N/A for ETF / proxy. Not part of the Proxy Composite score
+          (reference only).
+        </span>
       </div>
     </div>
   );

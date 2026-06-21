@@ -95,6 +95,26 @@ class TestResolutionTable:
         )
 
 
+def test_neutral_constructive_reads_constructive_not_no_edge() -> None:
+    # 55-59 with non-bullish equity: the tape leans modestly bullish but is below
+    # the supportive threshold → "constructive but provisional", NOT "no edge".
+    res = resolve_flow_monitor(
+        FlowMonitorInputs(f4b_score=57, f4b_live_state="Mixed / structured", f4a_state="NEUTRAL")
+    )
+    assert res.action == FlowMonitorAction.WATCH
+    assert "constructive but provisional" in res.reason.lower()
+    assert "no clear options edge" not in res.reason.lower()
+
+
+def test_balanced_neutral_still_reads_no_clear_edge() -> None:
+    # 50-54 with non-bullish equity is genuinely balanced → keep "no clear edge".
+    res = resolve_flow_monitor(
+        FlowMonitorInputs(f4b_score=52, f4b_live_state="Mixed / structured", f4a_state="NEUTRAL")
+    )
+    assert res.action == FlowMonitorAction.WATCH
+    assert "no clear options edge" in res.reason.lower()
+
+
 def test_flow_monitor_never_emits_buy_text() -> None:
     # The Monitor's reasons must never read as a bare BUY.
     for score in range(0, 101, 5):

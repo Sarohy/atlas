@@ -247,6 +247,13 @@ function deriveHeadlineAction(
     };
   }
 
+  if (data.intl_branch) {
+    return {
+      label: data.intl_branch.headline_label,
+      tone: data.action_tone,
+    };
+  }
+
   if (data.degraded) {
     return {
       label: 'DEGRADED / LOW-CONFIDENCE COMPOSITE - NO FULL EQUITY SIZING',

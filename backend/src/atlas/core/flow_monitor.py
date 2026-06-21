@@ -44,6 +44,7 @@ class FlowMonitorAction:
 
 # F4b band → directional class.
 _F4B_SUPPORTIVE_MIN: Final[int] = 60  # Constructive (60) and up
+_F4B_NEUTRAL_CONSTRUCTIVE_MIN: Final[int] = 55  # neutral-constructive (55-59)
 _F4B_NEUTRAL_MIN: Final[int] = 50  # Neutral / neutral-constructive (50-59)
 _F4B_AGGRESSIVE_BEAR_MAX: Final[int] = 34  # aggressive bearish
 
@@ -211,6 +212,17 @@ def resolve_flow_monitor(inp: FlowMonitorInputs) -> FlowMonitorResult:
                 FlowMonitorAction.STARTER,
                 "Neutral options with equity accumulation — starter-watch only; "
                 "equity alone does not create a full add.",
+                gates,
+            )
+        # Neutral-constructive (55-59): the options tape leans modestly bullish but
+        # sits below the supportive (60+) threshold — a constructive-but-provisional
+        # edge, not "no edge". Distinguish it from a genuinely balanced tape (50-54)
+        # so the wording matches a positive bull share / hedged-bullish context.
+        if inp.f4b_score >= _F4B_NEUTRAL_CONSTRUCTIVE_MIN:
+            return FlowMonitorResult(
+                FlowMonitorAction.WATCH,
+                "Constructive but provisional options edge — no fresh add until "
+                "extension / gates clear.",
                 gates,
             )
         return FlowMonitorResult(

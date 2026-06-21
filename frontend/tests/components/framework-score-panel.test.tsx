@@ -171,6 +171,7 @@ function makeFrameworkScoreData(
     f8_buying_bonus: mockState.f8BuyingBonus,
     f8_clustered_selling_note: null,
     etf_branch: null,
+    intl_branch: null,
     flags: [],
     degraded: false,
     f4_data_gap_badge: null,
@@ -813,6 +814,9 @@ describe('FrameworkScorePanel', () => {
         timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
         holdings_driver: 'MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia',
         components: [],
+        constituents: [],
+        scored_coverage_pct: null,
+        coverage_note: null,
         hedge_inputs: null,
       },
       flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
@@ -861,6 +865,13 @@ describe('FrameworkScorePanel', () => {
           { name: 'Constituent look-through score', weight: 0.45, score: 76 },
           { name: 'ETF F4 / options timing', weight: 0.1, score: 65 },
         ],
+        constituents: [
+          { symbol: 'MU', weight_pct: 20, scored: true, note: null },
+          { symbol: 'SK Hynix', weight_pct: 18, scored: false, note: 'foreign-listed' },
+          { symbol: 'SNDK', weight_pct: 12, scored: true, note: null },
+        ],
+        scored_coverage_pct: 56,
+        coverage_note: 'Scored coverage ~56% of basket weight. Weights are approximate / curated.',
         hedge_inputs: null,
       },
       flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
@@ -882,5 +893,64 @@ describe('FrameworkScorePanel', () => {
     // Direct F1–F5 disclosure + look-through components reconcile to the score.
     expect(screen.getByTestId('fws-etf-direct-na')).toHaveTextContent('Direct company score: N/A');
     expect(screen.getAllByTestId('fws-etf-component').length).toBe(2);
+    // Scored holdings coverage % + per-constituent scored/not-scored breakdown.
+    expect(screen.getByTestId('fws-etf-coverage-pct')).toHaveTextContent('56% of basket weight');
+    expect(screen.getAllByTestId('fws-etf-constituent').length).toBe(3);
+    expect(screen.getByTestId('fws-etf-coverage-note')).toHaveTextContent('approximate / curated');
+  });
+
+  it('renders the INTL-3F branch for foreign/OTC names without a degraded/avoid banner', async () => {
+    mockState.frameworkScoreData = makeFrameworkScoreData({
+      ticker: 'LPKFF',
+      final_score: 50,
+      raw_total: 50,
+      degraded: false,
+      action: 'INTL-3F — RANK PENDING / manual review (insufficient international data)',
+      action_tone: 'tone-yellow',
+      intl_branch: {
+        route: 'INTL_OPERATING',
+        label: 'INTL-3F — International Operating Company',
+        headline_label:
+          'INTL-3F — RANK PENDING / manual review (insufficient international data)',
+        instrument_kind: 'OTC foreign ordinary',
+        coverage_label: 'INTL-DATA-GAP',
+        domestic_note: 'Domestic F1–F5 not applicable.',
+        f4_note: 'F4 N/A — no U.S. flow coverage (unavailable, not bearish).',
+        rank_pending: true,
+        size_capped: true,
+        factors: [
+          { key: 'i1', name: 'Business / Forward Fundamentals', score: 50, available: false, source: 'DATA_GAP' },
+          { key: 'i2', name: 'Market / Momentum / Liquidity', score: 50, available: false, source: 'DATA_GAP' },
+          { key: 'i3', name: 'External Confirmation', score: 50, available: false, source: 'DATA_GAP' },
+        ],
+        labels: ['INTL-DATA-GAP', 'NO-US-FLOW', 'FOREIGN-SOURCE-NEEDED', 'OTC-LIQUIDITY-RISK'],
+        data_tasks: [
+          { item: 'local financials', status: 'MISSING' },
+          { item: 'options / flow availability (U.S.)', status: 'MISSING' },
+        ],
+      },
+      flags: ['INTL router active: domestic F1–F5 not applicable; INTL-3F model drives action.'],
+    });
+
+    render(<FrameworkScorePanel ticker="LPKFF" onPreviewDetails={() => {}} />, {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fws-content')).toBeInTheDocument();
+    });
+
+    // Title is INTL Framework, not Framework 1; no degraded/avoid banner.
+    expect(screen.getByText('INTL Framework')).toBeInTheDocument();
+    expect(screen.queryByText('Framework 1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fws-degraded')).not.toBeInTheDocument();
+    // Headline = rank pending (never AVOID from missing data).
+    expect(screen.getByTestId('fws-action')).toHaveTextContent('RANK PENDING');
+    // INTL-3F breakdown: domestic-N/A note, labels, F4 N/A note, data tasks.
+    expect(screen.getByTestId('fws-intl-domestic-na')).toHaveTextContent('Domestic F1–F5 not applicable');
+    expect(screen.getByTestId('fws-intl-f4-note')).toHaveTextContent('not bearish');
+    expect(screen.getAllByTestId('fws-intl-factor').length).toBe(3);
+    expect(screen.getAllByTestId('fws-intl-data-task').length).toBe(2);
+    expect(within(screen.getByTestId('fws-intl-labels')).getByText('NO-US-FLOW')).toBeInTheDocument();
   });
 });

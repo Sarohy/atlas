@@ -819,6 +819,35 @@ function EtfProxyBreakdown({
         {etf.timing_overlay_role}
         {f4Score != null ? ` (ETF F4: ${f4Score})` : ''}
       </p>
+
+      {etf.scored_coverage_pct != null && (
+        <div data-testid="fws-etf-coverage">
+          <div className="atlas-fws-breakdown-divider" />
+          <div className="atlas-fws-calc-row">
+            <span className="atlas-fws-calc-label">Scored holdings coverage</span>
+            <span className="atlas-fws-calc-value" data-testid="fws-etf-coverage-pct">
+              {etf.scored_coverage_pct.toFixed(0)}% of basket weight
+            </span>
+          </div>
+          {etf.constituents.map((c) => (
+            <div className="atlas-fws-factor-row" key={c.symbol} data-testid="fws-etf-constituent">
+              <span className="atlas-fws-factor-name">
+                {c.symbol}
+                <span className={cn('atlas-fws-f4-flow-monitor', c.scored ? 'is-green' : 'is-muted')}>
+                  {' '}
+                  · {c.scored ? 'scored' : 'not scored'}
+                </span>
+              </span>
+              <span className="atlas-fws-factor-contribution">{c.weight_pct.toFixed(0)}%</span>
+            </div>
+          ))}
+          {etf.coverage_note && (
+            <p className="atlas-fws-state-msg" data-testid="fws-etf-coverage-note">
+              {etf.coverage_note}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -30,6 +30,7 @@ from atlas.schemas.framework9 import Framework9Result
 from atlas.schemas.framework_score import (
     EtfBranchComponent,
     EtfBranchMetadata,
+    EtfConstituent,
     EtfHedgeInputs,
     FactorBreakdown,
     FrameworkScoreResponse,
@@ -124,6 +125,23 @@ _THEMATIC_HOLDINGS_DRIVERS: Final[dict[str, str]] = {
     "DRAM": "MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia",
 }
 
+# Curated look-through constituents per thematic basket: (symbol, approx weight %,
+# scored). ``scored`` is True for US-listed operating companies ATLAS can run
+# F1-F5 on; False for foreign-listed names (KRX/TSE) the engine does not directly
+# score. Weights are approximate/curated — the whole proxy model is curated per
+# the ATLAS spec — and are used only to express scored-coverage of the basket.
+_THEMATIC_CONSTITUENTS: Final[dict[str, list[tuple[str, float, bool]]]] = {
+    "DRAM": [
+        ("MU", 20.0, True),
+        ("SK Hynix", 18.0, False),
+        ("Samsung", 16.0, False),
+        ("SNDK", 12.0, True),
+        ("STX", 12.0, True),
+        ("WDC", 12.0, True),
+        ("Kioxia", 10.0, False),
+    ],
+}
+
 _THEMATIC_LOOKTHROUGH_SCORE_BY_TICKER: Final[dict[str, int]] = {
     # DRAM branch requirement: bullish proxy from memory/HBM holdings basket.
     "DRAM": 76,
@@ -186,6 +204,46 @@ def _thematic_lookthrough_score(ticker: str) -> int:
 
 def _thematic_cycle_score(lookthrough_score: int, momentum_score: int) -> int:
     return _clamp_score_0_100(lookthrough_score * 0.6 + momentum_score * 0.4)
+
+
+def _thematic_coverage(
+    ticker: str,
+) -> tuple[list[EtfConstituent], float | None, str | None]:
+    """Return (constituents, scored_coverage_pct, note) for a thematic basket.
+
+    Coverage = share of total (curated) basket weight made up of names ATLAS
+    directly scores. Returns ([], None, None) when no curated table exists.
+    Pure function — no I/O.
+    """
+    rows = _THEMATIC_CONSTITUENTS.get(ticker.upper())
+    if not rows:
+        return [], None, None
+
+    constituents = [
+        EtfConstituent(
+            symbol=symbol,
+            weight_pct=weight,
+            scored=scored,
+            note=None if scored else "foreign-listed — not directly scored",
+        )
+        for symbol, weight, scored in rows
+    ]
+    total_weight = sum(weight for _, weight, _ in rows)
+    if total_weight <= 0:
+        return constituents, None, None
+    scored_weight = sum(weight for _, weight, scored in rows if scored)
+    coverage_pct = round(scored_weight / total_weight * 100.0, 1)
+
+    scored_names = [symbol for symbol, _, scored in rows if scored]
+    unscored_names = [symbol for symbol, _, scored in rows if not scored]
+    note = (
+        f"Scored coverage ~{coverage_pct:.0f}% of basket weight: "
+        f"{', '.join(scored_names)} are ATLAS-scored"
+    )
+    if unscored_names:
+        note += f"; {', '.join(unscored_names)} are foreign-listed and not directly scored"
+    note += ". Weights are approximate / curated."
+    return constituents, coverage_pct, note
 
 
 def _hedge_profile_for_ticker(ticker: str) -> tuple[str, str, list[str]]:
@@ -274,6 +332,9 @@ def _build_etf_branch_decision(
                 "confirmation."
             )
             tone = "tone-yellow"
+        constituents, coverage_pct, coverage_note = _thematic_coverage(symbol)
+        if coverage_note:
+            flags.append(coverage_note)
         metadata = EtfBranchMetadata(
             route=instrument_route,
             label=label,
@@ -281,6 +342,9 @@ def _build_etf_branch_decision(
             timing_overlay_role="F4 is supportive timing only; not independent add authorization.",
             holdings_driver=drivers,
             components=components,
+            constituents=constituents,
+            scored_coverage_pct=coverage_pct,
+            coverage_note=coverage_note,
         )
         return _clamp_raw_total(float(score)), score, action, tone, flags, metadata
 

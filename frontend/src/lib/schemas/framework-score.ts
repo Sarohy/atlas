@@ -40,6 +40,13 @@ export const etfHedgeInputsSchema = z.object({
   max_hold_days: z.number().int().min(0).nullable().default(null),
 });
 
+export const etfConstituentSchema = z.object({
+  symbol: z.string(),
+  weight_pct: z.number().min(0).max(100),
+  scored: z.boolean(),
+  note: z.string().nullable().default(null),
+});
+
 export const etfBranchMetadataSchema = z.object({
   route: z.string(),
   label: z.string(),
@@ -47,6 +54,9 @@ export const etfBranchMetadataSchema = z.object({
   timing_overlay_role: z.string(),
   holdings_driver: z.string().nullable().default(null),
   components: z.array(etfBranchComponentSchema).default([]),
+  constituents: z.array(etfConstituentSchema).default([]),
+  scored_coverage_pct: z.number().min(0).max(100).nullable().default(null),
+  coverage_note: z.string().nullable().default(null),
   hedge_inputs: etfHedgeInputsSchema.nullable().default(null),
 });
 
@@ -136,6 +146,7 @@ export const frameworkScoreResponseSchema = z.object({
 
 export type FactorBreakdown = z.infer<typeof factorBreakdownSchema>;
 export type EtfBranchComponent = z.infer<typeof etfBranchComponentSchema>;
+export type EtfConstituent = z.infer<typeof etfConstituentSchema>;
 export type EtfHedgeInputs = z.infer<typeof etfHedgeInputsSchema>;
 export type EtfBranchMetadata = z.infer<typeof etfBranchMetadataSchema>;
 export type FrameworkScoreResponse = z.infer<typeof frameworkScoreResponseSchema>;

@@ -267,6 +267,9 @@ describe('FrameworkScoreOverviewCard', () => {
         timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
         holdings_driver: 'Top-holdings quality and concentration monitored.',
         components: [],
+        constituents: [],
+        scored_coverage_pct: null,
+        coverage_note: null,
         hedge_inputs: null,
       },
     });

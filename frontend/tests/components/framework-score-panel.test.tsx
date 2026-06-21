@@ -813,6 +813,9 @@ describe('FrameworkScorePanel', () => {
         timing_overlay_role: 'F4 is supportive timing only; not independent add authorization.',
         holdings_driver: 'MU, SNDK, SK Hynix, Samsung, STX, WDC, Kioxia',
         components: [],
+        constituents: [],
+        scored_coverage_pct: null,
+        coverage_note: null,
         hedge_inputs: null,
       },
       flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
@@ -861,6 +864,13 @@ describe('FrameworkScorePanel', () => {
           { name: 'Constituent look-through score', weight: 0.45, score: 76 },
           { name: 'ETF F4 / options timing', weight: 0.1, score: 65 },
         ],
+        constituents: [
+          { symbol: 'MU', weight_pct: 20, scored: true, note: null },
+          { symbol: 'SK Hynix', weight_pct: 18, scored: false, note: 'foreign-listed' },
+          { symbol: 'SNDK', weight_pct: 12, scored: true, note: null },
+        ],
+        scored_coverage_pct: 56,
+        coverage_note: 'Scored coverage ~56% of basket weight. Weights are approximate / curated.',
         hedge_inputs: null,
       },
       flags: ['ETF branch: thematic equity proxy basket (look-through model).'],
@@ -882,5 +892,9 @@ describe('FrameworkScorePanel', () => {
     // Direct F1–F5 disclosure + look-through components reconcile to the score.
     expect(screen.getByTestId('fws-etf-direct-na')).toHaveTextContent('Direct company score: N/A');
     expect(screen.getAllByTestId('fws-etf-component').length).toBe(2);
+    // Scored holdings coverage % + per-constituent scored/not-scored breakdown.
+    expect(screen.getByTestId('fws-etf-coverage-pct')).toHaveTextContent('56% of basket weight');
+    expect(screen.getAllByTestId('fws-etf-constituent').length).toBe(3);
+    expect(screen.getByTestId('fws-etf-coverage-note')).toHaveTextContent('approximate / curated');
   });
 });

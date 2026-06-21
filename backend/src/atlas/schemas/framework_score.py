@@ -81,6 +81,34 @@ class EtfBranchComponent(BaseModel):
     score: int = Field(ge=0, le=100, description="Component score on a 0-100 scale.")
 
 
+class EtfConstituent(BaseModel):
+    """One curated constituent of a thematic/proxy basket for look-through.
+
+    Weights are approximate/curated (the whole proxy look-through model is
+    curated per the ATLAS spec), used only to express how much of the basket
+    ATLAS can directly score through to.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str = Field(description="Constituent ticker or name.")
+    weight_pct: float = Field(
+        ge=0.0,
+        le=100.0,
+        description="Approximate (curated) share of basket weight, in percent.",
+    )
+    scored: bool = Field(
+        description=(
+            "True when ATLAS directly scores this name (US-listed operating "
+            "company with F1-F5 coverage); False for foreign/untracked names."
+        ),
+    )
+    note: str | None = Field(
+        default=None,
+        description="Optional note (e.g. 'foreign-listed — not directly scored').",
+    )
+
+
 class EtfHedgeInputs(BaseModel):
     """Optional hedge-specific inputs for ETF option protection workflows."""
 
@@ -132,6 +160,26 @@ class EtfBranchMetadata(BaseModel):
     components: list[EtfBranchComponent] = Field(
         default_factory=list,
         description="Component score breakdown for the selected ETF branch model.",
+    )
+    constituents: list[EtfConstituent] = Field(
+        default_factory=list,
+        description=(
+            "Curated look-through constituents (thematic/proxy baskets only). "
+            "Weights are approximate; used to express scored-coverage."
+        ),
+    )
+    scored_coverage_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Approximate share of basket weight made up of ATLAS-scored names. "
+            "Null when no curated constituent table is available."
+        ),
+    )
+    coverage_note: str | None = Field(
+        default=None,
+        description="Human-readable explanation of the scored-coverage figure.",
     )
     hedge_inputs: EtfHedgeInputs | None = Field(
         default=None,

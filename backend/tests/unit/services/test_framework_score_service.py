@@ -508,6 +508,9 @@ class TestEtfBranchScoring:
         async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
             return {}
 
+        async def _no_intl(*_args: object, **_kwargs: object) -> None:
+            return None  # exercise the US-fallback path (no foreign feed)
+
         monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
         monkeypatch.setattr(svc, "_fetch_f1", _factor)
         monkeypatch.setattr(svc, "_fetch_f2", _factor)
@@ -515,6 +518,7 @@ class TestEtfBranchScoring:
         monkeypatch.setattr(svc, "_fetch_f4", _factor)
         monkeypatch.setattr(svc, "_fetch_f5", _factor)
         monkeypatch.setattr(svc, "_fetch_f8", _f8)
+        monkeypatch.setattr(svc, "_fetch_intl", _no_intl)
 
         result = await svc.compute_framework_score("KXIAY")
 
@@ -546,6 +550,9 @@ class TestEtfBranchScoring:
         async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
             return {}
 
+        async def _no_intl(*_args: object, **_kwargs: object) -> None:
+            return None  # foreign feeds also empty → genuine data gap
+
         monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
         monkeypatch.setattr(svc, "_fetch_f1", _missing)
         monkeypatch.setattr(svc, "_fetch_f2", _missing)
@@ -553,6 +560,7 @@ class TestEtfBranchScoring:
         monkeypatch.setattr(svc, "_fetch_f4", _missing)
         monkeypatch.setattr(svc, "_fetch_f5", _missing)
         monkeypatch.setattr(svc, "_fetch_f8", _f8)
+        monkeypatch.setattr(svc, "_fetch_intl", _no_intl)
 
         result = await svc.compute_framework_score("LPKFF")
 
@@ -566,6 +574,52 @@ class TestEtfBranchScoring:
         # OTC foreign ordinary → liquidity cap + missing-data tasks surfaced.
         assert "OTC-LIQUIDITY-RISK" in result.intl_branch.labels
         assert any(t.item == "local financials" for t in result.intl_branch.data_tasks)
+
+    @pytest.mark.asyncio
+    async def test_intl_uses_foreign_feed_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from atlas.services.intl_data_service import IntlData, IntlFactorData
+
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return False, "INTL_OPERATING"
+
+        async def _missing(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            raise RuntimeError("no U.S. data feed")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        async def _intl(*_args: object, **_kwargs: object) -> IntlData:
+            # Foreign feeds DO resolve even though every U.S. factor is missing.
+            return IntlData(
+                i1=IntlFactorData(score=80, available=True, source="fmp-financials"),
+                i2=IntlFactorData(score=70, available=True, source="polygon"),
+                i3=IntlFactorData(score=50, available=False, source="DATA_GAP"),
+            )
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        monkeypatch.setattr(svc, "_fetch_f1", _missing)
+        monkeypatch.setattr(svc, "_fetch_f2", _missing)
+        monkeypatch.setattr(svc, "_fetch_f3", _missing)
+        monkeypatch.setattr(svc, "_fetch_f4", _missing)
+        monkeypatch.setattr(svc, "_fetch_f5", _missing)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+        monkeypatch.setattr(svc, "_fetch_intl", _intl)
+
+        result = await svc.compute_framework_score("SIVEF")
+
+        assert result.intl_branch is not None
+        # Foreign feeds gave 2/3 axes → PARTIAL, sourced from the foreign feeds.
+        assert result.intl_branch.coverage_label == "INTL-PARTIAL"
+        by_key = {f.key: f for f in result.intl_branch.factors}
+        assert by_key["i1"].available and by_key["i1"].source == "fmp-financials"
+        assert by_key["i2"].available and by_key["i2"].source == "polygon"
+        assert by_key["i3"].available is False
+        assert result.degraded is False
+        assert "AVOID" not in result.action.upper()
 
     @pytest.mark.asyncio
     async def test_spmo_momentum_branch_has_factor_messaging(

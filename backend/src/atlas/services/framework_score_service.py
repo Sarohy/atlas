@@ -45,6 +45,7 @@ from atlas.services.earnings_service import EarningsService
 from atlas.services.framework8_service import Framework8Service
 from atlas.services.framework9_service import evaluate_framework9
 from atlas.services.fundamental_service import FundamentalService
+from atlas.services.intl_data_service import IntlData, IntlDataService, IntlFactorData
 from atlas.services.momentum_service import MomentumService
 from atlas.services.options_flow_service import f4_framework_row_label
 from atlas.services.provider_response_cache import fetch_alpha_vantage_cached
@@ -723,9 +724,7 @@ def _is_international_operating(
 
     # Fallback only when neither provider resolved any data for this symbol.
     overview_empty = not overview_payload
-    if not polygon_resolved and overview_empty and _looks_like_foreign_otc_symbol(symbol):
-        return True
-    return False
+    return not polygon_resolved and overview_empty and _looks_like_foreign_otc_symbol(symbol)
 
 
 def _intl_instrument_kind(ticker: str, *, polygon_type: str, polygon_market: str) -> str:
@@ -743,51 +742,43 @@ def _intl_is_otc(ticker: str, *, polygon_market: str) -> bool:
     return polygon_market == "OTC" or ticker.upper().strip().endswith("F")
 
 
+def _intl_axis(
+    resolved: IntlFactorData | None,
+    fallback: tuple[int, bool, str],
+) -> tuple[int, bool, str]:
+    """Pick the foreign-capable INTL feed when it has data, else the fallback.
+
+    ``resolved`` is the provider-sourced factor (Polygon/FMP); ``fallback`` is
+    the (score, available, source) derived from any domestic factor that
+    happened to resolve. Pure function — no I/O.
+    """
+    if resolved is not None and resolved.available:
+        return resolved.score, True, resolved.source
+    return fallback
+
+
 def _build_intl_branch_decision(
     ticker: str,
     *,
     instrument_kind: str,
     is_otc: bool,
-    f1_score: int,
-    f1_ok: bool,
-    f2_score: int,
-    f2_ok: bool,
-    f3_score: int,
-    f3_ok: bool,
-    f5_score: int,
-    f5_ok: bool,
+    i1: tuple[int, bool, str],
+    i2: tuple[int, bool, str],
+    i3: tuple[int, bool, str],
 ) -> tuple[float, int, str, str, list[str], IntlBranchMetadata]:
     """Score an international operating company on the INTL-3F model.
 
-    I1 Business/Forward Fundamentals (F5 + F2), I2 Market/Momentum/Liquidity
-    (F1), I3 External Confirmation (F3). Scored only over factors with real
-    data; missing U.S. flow is NEVER bearish, and missing data NEVER triggers a
-    bare AVOID — only genuinely weak *present* data does. Mirrors the ETF branch
+    I1 Business/Forward Fundamentals, I2 Market/Momentum/Liquidity, I3 External
+    Confirmation — each passed in as a resolved ``(score, available, source)``
+    triple from foreign-capable feeds (Polygon OTC bars + FMP), with U.S.-fed
+    fallbacks applied by the caller. Scored only over factors with real data;
+    missing U.S. flow is NEVER bearish, and missing data NEVER triggers a bare
+    AVOID — only genuinely weak *present* data does. Mirrors the ETF branch
     tuple contract: (raw_total, final_score, action, tone, flags, metadata).
     """
-    symbol = ticker.upper().strip()
-
-    # --- I1 Business / forward fundamentals (F5 fundamentals + F2 earnings) ---
-    i1_available = f5_ok or f2_ok
-    if f5_ok and f2_ok:
-        i1_score = _clamp_score_0_100(f5_score * 0.6 + f2_score * 0.4)
-        i1_source = "fundamental+earnings"
-    elif f5_ok:
-        i1_score, i1_source = f5_score, "fundamental"
-    elif f2_ok:
-        i1_score, i1_source = f2_score, "earnings"
-    else:
-        i1_score, i1_source = _NEUTRAL_SCORE, "DATA_GAP"
-
-    # --- I2 Market / momentum / liquidity (F1 momentum) ---
-    i2_available = f1_ok
-    i2_score = f1_score if f1_ok else _NEUTRAL_SCORE
-    i2_source = "momentum" if f1_ok else "DATA_GAP"
-
-    # --- I3 External confirmation (F3 analyst coverage) ---
-    i3_available = f3_ok
-    i3_score = f3_score if f3_ok else _NEUTRAL_SCORE
-    i3_source = "analyst" if f3_ok else "DATA_GAP"
+    i1_score, i1_available, i1_source = i1
+    i2_score, i2_available, i2_source = i2
+    i3_score, i3_available, i3_source = i3
 
     factors = [
         IntlFactor(key="i1", name="Business / Forward Fundamentals", score=i1_score,
@@ -848,13 +839,11 @@ def _build_intl_branch_decision(
         labels.append(_INTL_LABEL_OTC_LIQ)
 
     data_tasks: list[IntlDataTask] = []
-    if not (f5_ok or f2_ok):
+    if not i1_available:
         data_tasks.append(IntlDataTask(item="local financials", status="MISSING"))
-    elif not (f5_ok and f2_ok):
-        data_tasks.append(IntlDataTask(item="local financials", status="PARTIAL"))
-    if not f3_ok:
+    if not i3_available:
         data_tasks.append(IntlDataTask(item="local analyst estimates", status="MISSING"))
-    if not f1_ok:
+    if not i2_available:
         data_tasks.append(IntlDataTask(item="local price history", status="MISSING"))
     data_tasks.append(IntlDataTask(item="local exchange mapping", status="MISSING"))
     if is_otc:
@@ -964,6 +953,13 @@ class FrameworkScoreService:
             )
             non_operating_asset, instrument_route = await route_task
 
+            # International / ADR / OTC operating names get their I1/I2/I3 from
+            # foreign-capable feeds (Polygon OTC bars + FMP), fetched only on the
+            # INTL route so domestic names pay no extra cost.
+            intl_data: IntlData | None = None
+            if (not non_operating_asset) and instrument_route == _ROUTE_INTL:
+                intl_data = await self._fetch_intl(client, ticker)
+
         flags: list[str] = []
 
         # --- Extract factor scores with graceful fallback ---
@@ -1055,6 +1051,32 @@ class FrameworkScoreService:
             f5_data_available = not (
                 isinstance(f5_result, FundamentalResponse) and not f5_result.data_available
             )
+            # Prefer the foreign-capable INTL feeds; fall back to any domestic
+            # factor that happened to resolve. Missing → unavailable (not bearish).
+            if f5_ok and f2_data_available and f2_ok:
+                i1_fallback_score = _clamp_score_0_100(f5_score * 0.6 + f2_score * 0.4)
+                i1_fallback = (i1_fallback_score, True, "fundamental+earnings (US fallback)")
+            elif f5_ok and f5_data_available:
+                i1_fallback = (f5_score, True, "fundamental (US fallback)")
+            elif f2_ok and f2_data_available:
+                i1_fallback = (f2_score, True, "earnings (US fallback)")
+            else:
+                i1_fallback = (_NEUTRAL_SCORE, False, "DATA_GAP")
+            i2_fallback = (
+                (pre_router_f1_score, True, "momentum (US fallback)")
+                if (f1_ok and not f1_low_confidence)
+                else (_NEUTRAL_SCORE, False, "DATA_GAP")
+            )
+            i3_fallback = (
+                (f3_score, True, "analyst (US fallback)")
+                if (f3_ok and not f3_no_coverage)
+                else (_NEUTRAL_SCORE, False, "DATA_GAP")
+            )
+
+            i1_triple = _intl_axis(intl_data.i1 if intl_data else None, i1_fallback)
+            i2_triple = _intl_axis(intl_data.i2 if intl_data else None, i2_fallback)
+            i3_triple = _intl_axis(intl_data.i3 if intl_data else None, i3_fallback)
+
             (
                 branch_raw_total,
                 branch_final_score,
@@ -1066,14 +1088,9 @@ class FrameworkScoreService:
                 ticker=ticker,
                 instrument_kind=_intl_instrument_kind(ticker, polygon_type="", polygon_market=""),
                 is_otc=_intl_is_otc(ticker, polygon_market=""),
-                f1_score=pre_router_f1_score,
-                f1_ok=f1_ok and not f1_low_confidence,
-                f2_score=f2_score,
-                f2_ok=f2_ok and f2_data_available,
-                f3_score=f3_score,
-                f3_ok=f3_ok and not f3_no_coverage,
-                f5_score=f5_score,
-                f5_ok=f5_ok and f5_data_available,
+                i1=i1_triple,
+                i2=i2_triple,
+                i3=i3_triple,
             )
             # Suppress domestic factors for display — they do not apply.
             f1_score, f1_grade, f1_ok = _NEUTRAL_SCORE, "N/A", False
@@ -1305,6 +1322,27 @@ class FrameworkScoreService:
             ):
                 return False, _ROUTE_INTL
             return False, _ROUTE_EQUITY
+
+    async def _fetch_intl(
+        self, client: httpx.AsyncClient, ticker: str
+    ) -> IntlData | None:
+        """Resolve INTL-3F I1/I2/I3 from foreign-capable feeds (Polygon + FMP).
+
+        Returns None on any unexpected failure so the INTL branch falls back to
+        whatever domestic factors resolved (and to a clean data-gap otherwise).
+        """
+        try:
+            service = IntlDataService(
+                polygon_api_key=self._polygon_key,
+                fmp_api_key=self._transcript_key,
+            )
+            return await service.compute_intl(client, ticker)
+        except Exception as exc:  # never let INTL enrichment break the score
+            logger.warning(
+                "INTL data fetch failed - falling back to domestic factors",
+                extra={"ticker": ticker, "error": repr(exc)},
+            )
+            return None
 
     async def _fetch_f2(
         self,

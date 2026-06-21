@@ -33,7 +33,14 @@ export const forwardGrowthResponseSchema = z.object({
   f4_score: z.number().int().nullable().optional(),
   atlas_score: z.number().int().nullable().optional(),
   bucket: z
-    .enum(['CORE_COMPOUNDER', 'QUALITY_HOLD', 'GROWTH_TACTICAL', 'STORY_RISK', 'AVOID'])
+    .enum([
+      'CORE_COMPOUNDER',
+      'QUALITY_HOLD',
+      'GROWTH_TACTICAL',
+      'STORY_RISK',
+      'ADD_BLOCKED',
+      'AVOID',
+    ])
     .nullable()
     .optional(),
   action: z.string().nullable().optional(),

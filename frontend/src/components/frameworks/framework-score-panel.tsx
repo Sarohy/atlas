@@ -814,6 +814,12 @@ function EtfProxyBreakdown({
         Proxy look-through: {etf.label}
         {etf.holdings_driver ? ` · ${etf.holdings_driver}` : ''}
       </p>
+      {etf.scored_coverage_pct != null && (
+        <p className="atlas-fws-state-msg" data-testid="fws-etf-coverage-summary">
+          Coverage: {etf.scored_coverage_pct >= 100 ? 'full' : 'partial'} —{' '}
+          {etf.scored_coverage_pct.toFixed(0)}% scored / foreign constituents approximated.
+        </p>
+      )}
 
       <div className="atlas-fws-breakdown-header">
         <span>Proxy component</span>

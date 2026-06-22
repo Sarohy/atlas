@@ -30,10 +30,81 @@ from atlas.services.framework_score_service import (
     _classify_etf_route,
     _compute_final_score,
     _compute_raw_total,
+    _is_international_operating,
     _is_non_operating_asset,
     _map_action,
     _prefer_route_name,
 )
+
+
+class TestInternationalDetection:
+    """US-exchange listing (incl. ADRs) → domestic; OTC/foreign → INTL-3F."""
+
+    def test_us_listed_adr_is_domestic_not_intl(self) -> None:
+        # TSM: ADR on NYSE with full U.S. options/dark-pool → score as normal.
+        assert (
+            _is_international_operating(
+                "TSM",
+                polygon_type="ADRC",
+                polygon_market="STOCKS",
+                polygon_locale="US",
+                overview_payload={"Exchange": "NYSE", "Country": "Taiwan"},
+                polygon_resolved=True,
+            )
+            is False
+        )
+
+    def test_us_listed_adr_domestic_even_when_polygon_unresolved(self) -> None:
+        assert (
+            _is_international_operating(
+                "TSM",
+                polygon_type="",
+                polygon_market="",
+                polygon_locale="",
+                overview_payload={"Exchange": "NYSE", "Country": "Taiwan"},
+                polygon_resolved=False,
+            )
+            is False
+        )
+
+    def test_otc_foreign_ordinary_is_intl(self) -> None:
+        assert (
+            _is_international_operating(
+                "LPKFF",
+                polygon_type="",
+                polygon_market="OTC",
+                polygon_locale="",
+                overview_payload={},
+                polygon_resolved=True,
+            )
+            is True
+        )
+
+    def test_otc_traded_adr_is_intl(self) -> None:
+        assert (
+            _is_international_operating(
+                "KXIAY",
+                polygon_type="ADRC",
+                polygon_market="OTC",
+                polygon_locale="US",
+                overview_payload={},
+                polygon_resolved=True,
+            )
+            is True
+        )
+
+    def test_known_foreign_name_routes_intl_without_provider_data(self) -> None:
+        assert (
+            _is_international_operating(
+                "SIVEF",
+                polygon_type="",
+                polygon_market="",
+                polygon_locale="",
+                overview_payload={},
+                polygon_resolved=False,
+            )
+            is True
+        )
 
 # ---------------------------------------------------------------------------
 # classify_tier — ATLAS v7.3.3 Section 13.3

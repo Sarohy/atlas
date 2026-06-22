@@ -103,6 +103,19 @@ _INTL_KNOWN_TICKERS: Final[set[str]] = {
 }
 # Polygon types that denote an ADR (foreign company listed in the U.S. via depositary receipt).
 _INTL_ADR_TYPES: Final[set[str]] = {"ADRC", "ADRP", "ADRR", "ADRW"}
+# Major U.S. exchanges. A name listed here (incl. ADRs like TSM / ASML / BABA)
+# has full U.S. options + dark-pool coverage and MUST be scored as a normal
+# domestic name — ADR status / foreign HQ alone never routes it to INTL-3F.
+_US_EXCHANGES: Final[set[str]] = {
+    "NYSE",
+    "NASDAQ",
+    "NYSE ARCA",
+    "NYSE AMERICAN",
+    "NYSE MKT",
+    "AMEX",
+    "BATS",
+    "CBOE",
+}
 
 # INTL-3F factor weights (renormalized over whatever coverage is available).
 _INTL_W_I1: Final[float] = 0.50  # Business / forward fundamentals
@@ -706,29 +719,33 @@ def _is_international_operating(
 ) -> bool:
     """Return True when *ticker* is a foreign/ADR/OTC operating company (INTL-3F).
 
-    Detection precedence: explicit known set → Polygon ADR type / OTC market /
-    non-US locale → foreign Exchange in OVERVIEW → (only when provider data is
-    absent) the 5-char F/Y symbol convention. ETF/fund detection runs earlier,
-    so this is reached only for operating instruments.
+    The decisive question is U.S. tradability, NOT corporate domicile: a name
+    listed on a major U.S. exchange has full U.S. options + dark-pool coverage
+    and is scored as a normal domestic name — even an ADR (TSM, ASML, BABA) or a
+    foreign-HQ company. Only OTC / foreign-listed names (no/thin U.S. flow) route
+    to INTL-3F. ETF/fund detection runs earlier, so this is reached only for
+    operating instruments. Pure function — no I/O.
     """
     symbol = ticker.upper().strip()
+    exchange = str(overview_payload.get("Exchange", "")).strip().upper()
+
+    # US-exchange listing → full U.S. flow coverage → normal domestic scoring.
+    # This guard takes precedence over ADR type / foreign HQ.
+    if polygon_market == "STOCKS":
+        return False
+    if exchange in _US_EXCHANGES:
+        return False
+
+    # From here the name is OTC, foreign-listed, or unresolved.
     if symbol in _INTL_KNOWN_TICKERS:
-        return True
-    if polygon_type in _INTL_ADR_TYPES:
         return True
     if polygon_market == "OTC":
         return True
-    if polygon_locale and polygon_locale not in ("US", "USA"):
-        return True
-
-    exchange = str(overview_payload.get("Exchange", "")).strip().upper()
-    country = str(overview_payload.get("Country", "")).strip().upper()
     if exchange in ("OTC", "PINK", "OTC MARKETS"):
         return True
-    if country and country not in ("USA", "US", "UNITED STATES", ""):
-        return True
 
-    # Fallback only when neither provider resolved any data for this symbol.
+    # Fallback only when neither provider resolved any data for this symbol
+    # (and it looks like an OTC foreign ordinary / ADR by symbol convention).
     overview_empty = not overview_payload
     return not polygon_resolved and overview_empty and _looks_like_foreign_otc_symbol(symbol)
 

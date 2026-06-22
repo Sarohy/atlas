@@ -121,6 +121,7 @@ _INTL_LABEL_DATA_GAP: Final[str] = "INTL-DATA-GAP"
 _INTL_LABEL_OTC_LIQ: Final[str] = "OTC-LIQUIDITY-RISK"
 _INTL_LABEL_NO_US_FLOW: Final[str] = "NO-US-FLOW"
 _INTL_LABEL_FOREIGN_SRC: Final[str] = "FOREIGN-SOURCE-NEEDED"
+_INTL_LABEL_DATA_INCOMPLETE: Final[str] = "DATA-INCOMPLETE"
 
 _ETF_BRANCH_NON_HEDGE_MIN_SCORE: Final[int] = 50
 _ETF_BRANCH_RAW_TOTAL_MAX: Final[float] = 95.0
@@ -832,7 +833,9 @@ def _build_intl_branch_decision(
         action = "INTL PARTIAL — no fresh add until local data confirms; size capped"
         tone = "tone-yellow"
     elif i1_weak:
-        action = "INTL-3F — WEAK FUNDAMENTAL SETUP / avoid (confirmed on local data)"
+        # Weak fundamentals → AVOID, but flag that the read is on AVAILABLE data:
+        # missing local data is still a factor and could change the picture.
+        action = "INTL-3F — AVOID / DATA-INCOMPLETE — weak fundamentals on available data"
         tone = "tone-red"
     elif composite >= 70:
         action = f"INTL-3F — CONSTRUCTIVE / international operating company{cap_suffix}"
@@ -844,6 +847,11 @@ def _build_intl_branch_decision(
     labels = [coverage_label, _INTL_LABEL_NO_US_FLOW]
     if rank_pending:
         labels.append(_INTL_LABEL_FOREIGN_SRC)
+    # An AVOID on weak fundamentals is still judged on AVAILABLE foreign data —
+    # local financials/exchange mapping are always outstanding for INTL names, so
+    # surface DATA-INCOMPLETE so a local-data update can revisit the call.
+    if i1_weak:
+        labels.append(_INTL_LABEL_DATA_INCOMPLETE)
     if is_otc:
         labels.append(_INTL_LABEL_OTC_LIQ)
 

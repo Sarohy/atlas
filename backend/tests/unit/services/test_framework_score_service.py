@@ -698,7 +698,10 @@ class TestEtfBranchScoring:
         assert result.intl_branch is not None
         assert result.intl_branch.coverage_label == "INTL-OK"
         assert "avoid" in result.action.lower()
-        assert "confirmed on local data" in result.action.lower()
+        # AVOID must flag that it is judged on available (incomplete) data.
+        assert "data-incomplete" in result.action.lower()
+        assert "available data" in result.action.lower()
+        assert "DATA-INCOMPLETE" in result.intl_branch.labels
 
     @pytest.mark.asyncio
     async def test_spmo_momentum_branch_has_factor_messaging(

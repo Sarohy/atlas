@@ -98,6 +98,13 @@ export const optionsFlowResponseSchema = z.object({
   f4b_source_confidence: z.string().default('NO_DATA'),
   f4b_source_confidence_reason: z.string().default(''),
   f4b_provisional: z.boolean().default(false),
+  // Full-tape candidate (diagnostic) — FULL-coverage read scored in parallel,
+  // shown beside the authoritative provisional alert score for validation.
+  f4b_full_tape_score: z.number().int().min(0).max(100).nullable().default(null),
+  f4b_full_tape_source: z.string().default('NONE'),
+  f4b_full_tape_confidence: z.string().default('NO_DATA'),
+  f4b_full_tape_bullish_share: z.number().nullable().default(null),
+  f4b_full_tape_net_flow_usd: z.number().nullable().default(null),
   f4b_universe_total_alerts: z.number().int().nonnegative().optional(),
   f4b_universe_directional_alerts: z.number().int().nonnegative().optional(),
   f4b_universe_excluded_alerts: z.number().int().nonnegative().optional(),

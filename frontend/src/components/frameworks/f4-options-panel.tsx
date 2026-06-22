@@ -622,6 +622,17 @@ function F4bDebugCard({ data }: { data: OptionsFlowResponse }) {
           <DebugRow label="Final score input" value={data.f4b_score_input_source ?? '—'} />
           <DebugRow label="Universe source" value={data.f4b_universe_source ?? '—'} />
           <DebugRow label="Source confidence" value={data.f4b_source_confidence ?? '—'} />
+          {data.f4b_full_tape_score !== null && data.f4b_full_tape_score !== undefined && (
+            <DebugRow
+              label="Full-tape candidate (FULL coverage)"
+              value={`${data.f4b_full_tape_score} · ${data.f4b_full_tape_source} · ${
+                data.f4b_full_tape_bullish_share !== null &&
+                data.f4b_full_tape_bullish_share !== undefined
+                  ? `${Math.round(data.f4b_full_tape_bullish_share * 100)}% bull share`
+                  : '—'
+              }`}
+            />
+          )}
           <DebugRow
             label="Universe alerts"
             value={

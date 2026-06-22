@@ -2100,6 +2100,28 @@ def _build_response_v2(
         opt_score = None
         opt_net_flow = None
 
+    # --- Full-tape candidate (diagnostic) --------------------------------------
+    # When the FULL per-ticker tape is available, score it in parallel with the
+    # coarse net-flow primitives and surface it as a FULL-coverage candidate
+    # beside the authoritative (provisional, alert-universe) score. This lets the
+    # full-tape source be validated before it is promoted to authoritative — it
+    # does NOT change f4_score. When the tape IS already the scored source
+    # (alerts unavailable), the candidate simply mirrors it at FULL confidence.
+    f4b_full_tape_score: int | None = None
+    f4b_full_tape_source = "NONE"
+    f4b_full_tape_confidence = _F4B_CONFIDENCE_NO_DATA
+    f4b_full_tape_bullish_share: float | None = None
+    f4b_full_tape_net_flow_usd: float | None = None
+    if opt_tape is not None:
+        cand_windowed = _filter_to_recent_sessions(opt_tape, timestamp_key="executed_at")
+        if cand_windowed:
+            cand_net_flow, _cand_largest = _decay_weighted_tape(cand_windowed)
+            f4b_full_tape_net_flow_usd = cand_net_flow
+            f4b_full_tape_bullish_share = _full_tape_bullish_share(cand_windowed)
+            f4b_full_tape_score = _map_net_flow_to_score(cand_net_flow, tier)
+            f4b_full_tape_source = "UW_TAPE_2_SESSION"
+            f4b_full_tape_confidence = _F4B_CONFIDENCE_FULL
+
     # F4b = the classified multi-window OPTIONS score. Per the final scoring rule,
     # F4a equity/dark-pool is NOT scored into F4b — it is a separate confirmation
     # that the (deferred) Flow Monitor uses to gate ACTION, surfaced here only via
@@ -2221,6 +2243,11 @@ def _build_response_v2(
         f4b_source_confidence=f4b_source_confidence,
         f4b_source_confidence_reason=f4b_source_confidence_reason,
         f4b_provisional=f4b_provisional,
+        f4b_full_tape_score=f4b_full_tape_score,
+        f4b_full_tape_source=f4b_full_tape_source,
+        f4b_full_tape_confidence=f4b_full_tape_confidence,
+        f4b_full_tape_bullish_share=f4b_full_tape_bullish_share,
+        f4b_full_tape_net_flow_usd=f4b_full_tape_net_flow_usd,
         f4b_universe_total_alerts=f4b_universe_total_alerts,
         f4b_universe_directional_alerts=f4b_universe_directional_alerts,
         f4b_universe_excluded_alerts=f4b_universe_excluded_alerts,
@@ -2327,13 +2354,14 @@ class OptionsFlowService:
                 if opt_alerts is None:
                     opt_alerts = await _fetch_option_flow_alerts(client, ticker, self._uw_headers)
 
-        # Fallback: only when the alerts feed hard-errored do we reach for the
-        # raw per-trade tape (undersampled/uncalibrated) so a transient alerts
-        # outage degrades to a coarse reading instead of a flat DATA_GAP.
+        # Full per-ticker tape. Always fetched (cached per ticker per load) so the
+        # FULL-coverage candidate score can be surfaced beside the authoritative
+        # alert-universe score for validation. It is ALSO the fallback the scorer
+        # falls back to when the alerts feed hard-errored (a transient alerts
+        # outage degrades to a coarse tape reading instead of a flat DATA_GAP).
         opt_tape: list[dict[str, Any]] | None = None
-        if opt_alerts is None:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                opt_tape = await _fetch_option_trades_tape_cached(client, ticker, self._uw_headers)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            opt_tape = await _fetch_option_trades_tape_cached(client, ticker, self._uw_headers)
 
         # Step 3: aggregate + score + build response.
         result = _build_response_v2(

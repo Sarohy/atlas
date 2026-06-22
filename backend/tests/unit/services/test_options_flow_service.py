@@ -99,6 +99,55 @@ def test_build_response_v2_score_43_is_bearish_not_neutral() -> None:
     assert "buy" not in response.f4_add_impact.lower()
 
 
+def _tape(opt_type: str, side: str, premium: float, *, executed_at: str = "2026-06-18T15:00:00Z") -> dict:
+    # Normalized per-trade tape record (post _normalize_tape_record shape).
+    return {
+        "option_type": opt_type,
+        "side": side,
+        "premium": premium,
+        "executed_at": executed_at,
+        "expiry": "2026-08-15",
+        "strike": 50,
+        "underlying_price": 50,
+    }
+
+
+def test_build_response_v2_surfaces_full_tape_candidate_beside_provisional_alerts() -> None:
+    # Authoritative score from the alert universe (PROVISIONAL); a full-tape
+    # candidate (FULL coverage) is surfaced in parallel without changing it.
+    response = _build_response_v2(
+        ticker="MRVL",
+        market_cap=80_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[_atm("call", ask=4_000_000.0), _atm("put", ask=1_000_000.0)],
+        opt_tape=[
+            _tape("call", "ASK", 6_000_000.0),
+            _tape("put", "BID", 2_000_000.0),
+        ],
+    )
+    # Authoritative source stays the provisional alert universe.
+    assert response.f4b_universe_source == "UW_ALERTS_2_SESSION"
+    assert response.f4b_provisional is True
+    assert response.f4b_source_confidence == "PROVISIONAL"
+    # Full-tape candidate is populated at FULL confidence, in parallel.
+    assert response.f4b_full_tape_score is not None
+    assert response.f4b_full_tape_source == "UW_TAPE_2_SESSION"
+    assert response.f4b_full_tape_confidence == "FULL"
+    assert response.f4b_full_tape_bullish_share is not None
+
+
+def test_build_response_v2_no_tape_leaves_candidate_empty() -> None:
+    response = _build_response_v2(
+        ticker="MRVL",
+        market_cap=80_000_000_000.0,
+        dp_prints=None,
+        opt_trades=[_atm("call", ask=4_000_000.0)],
+    )
+    assert response.f4b_full_tape_score is None
+    assert response.f4b_full_tape_source == "NONE"
+    assert response.f4b_full_tape_confidence == "NO_DATA"
+
+
 def _atm(opt_type: str, *, ask: float = 0.0, bid: float = 0.0) -> dict:
     # ATM (strike == spot), ~60 DTE → moneyness x expiry weight = 1.0.
     return {

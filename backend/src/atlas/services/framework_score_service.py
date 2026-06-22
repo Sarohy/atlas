@@ -103,11 +103,29 @@ _INTL_KNOWN_TICKERS: Final[set[str]] = {
 }
 # Polygon types that denote an ADR (foreign company listed in the U.S. via depositary receipt).
 _INTL_ADR_TYPES: Final[set[str]] = {"ADRC", "ADRP", "ADRR", "ADRW"}
+# Major U.S. exchanges. A name listed here (incl. ADRs like TSM / ASML / BABA)
+# has full U.S. options + dark-pool coverage and MUST be scored as a normal
+# domestic name — ADR status / foreign HQ alone never routes it to INTL-3F.
+_US_EXCHANGES: Final[set[str]] = {
+    "NYSE",
+    "NASDAQ",
+    "NYSE ARCA",
+    "NYSE AMERICAN",
+    "NYSE MKT",
+    "AMEX",
+    "BATS",
+    "CBOE",
+}
 
 # INTL-3F factor weights (renormalized over whatever coverage is available).
 _INTL_W_I1: Final[float] = 0.50  # Business / forward fundamentals
 _INTL_W_I2: Final[float] = 0.30  # Market / momentum / liquidity
 _INTL_W_I3: Final[float] = 0.20  # External confirmation
+
+# INTL AVOID gate: only a genuinely weak FUNDAMENTAL read (I1) with real data
+# earns an AVOID. A low blended composite from missing flow / thin momentum /
+# data gaps caps sizing — it never creates an AVOID label.
+_INTL_WEAK_FUNDAMENTAL_MAX: Final[int] = 45
 
 # INTL coverage / status labels (handoff §Required labels).
 _INTL_LABEL_OK: Final[str] = "INTL-OK"
@@ -116,6 +134,7 @@ _INTL_LABEL_DATA_GAP: Final[str] = "INTL-DATA-GAP"
 _INTL_LABEL_OTC_LIQ: Final[str] = "OTC-LIQUIDITY-RISK"
 _INTL_LABEL_NO_US_FLOW: Final[str] = "NO-US-FLOW"
 _INTL_LABEL_FOREIGN_SRC: Final[str] = "FOREIGN-SOURCE-NEEDED"
+_INTL_LABEL_DATA_INCOMPLETE: Final[str] = "DATA-INCOMPLETE"
 
 _ETF_BRANCH_NON_HEDGE_MIN_SCORE: Final[int] = 50
 _ETF_BRANCH_RAW_TOTAL_MAX: Final[float] = 95.0
@@ -700,29 +719,33 @@ def _is_international_operating(
 ) -> bool:
     """Return True when *ticker* is a foreign/ADR/OTC operating company (INTL-3F).
 
-    Detection precedence: explicit known set → Polygon ADR type / OTC market /
-    non-US locale → foreign Exchange in OVERVIEW → (only when provider data is
-    absent) the 5-char F/Y symbol convention. ETF/fund detection runs earlier,
-    so this is reached only for operating instruments.
+    The decisive question is U.S. tradability, NOT corporate domicile: a name
+    listed on a major U.S. exchange has full U.S. options + dark-pool coverage
+    and is scored as a normal domestic name — even an ADR (TSM, ASML, BABA) or a
+    foreign-HQ company. Only OTC / foreign-listed names (no/thin U.S. flow) route
+    to INTL-3F. ETF/fund detection runs earlier, so this is reached only for
+    operating instruments. Pure function — no I/O.
     """
     symbol = ticker.upper().strip()
+    exchange = str(overview_payload.get("Exchange", "")).strip().upper()
+
+    # US-exchange listing → full U.S. flow coverage → normal domestic scoring.
+    # This guard takes precedence over ADR type / foreign HQ.
+    if polygon_market == "STOCKS":
+        return False
+    if exchange in _US_EXCHANGES:
+        return False
+
+    # From here the name is OTC, foreign-listed, or unresolved.
     if symbol in _INTL_KNOWN_TICKERS:
-        return True
-    if polygon_type in _INTL_ADR_TYPES:
         return True
     if polygon_market == "OTC":
         return True
-    if polygon_locale and polygon_locale not in ("US", "USA"):
-        return True
-
-    exchange = str(overview_payload.get("Exchange", "")).strip().upper()
-    country = str(overview_payload.get("Country", "")).strip().upper()
     if exchange in ("OTC", "PINK", "OTC MARKETS"):
         return True
-    if country and country not in ("USA", "US", "UNITED STATES", ""):
-        return True
 
-    # Fallback only when neither provider resolved any data for this symbol.
+    # Fallback only when neither provider resolved any data for this symbol
+    # (and it looks like an OTC foreign ordinary / ADR by symbol convention).
     overview_empty = not overview_payload
     return not polygon_resolved and overview_empty and _looks_like_foreign_otc_symbol(symbol)
 
@@ -813,28 +836,39 @@ def _build_intl_branch_decision(
     rank_pending = coverage_label != _INTL_LABEL_OK
     size_capped = is_otc or rank_pending
 
-    # --- Action: missing data → rank pending (never AVOID). Only fully-covered,
-    #     genuinely weak present data may resolve to a reduce/avoid signal. ---
+    # --- Action: missing data / partial coverage → size-capped watch, NEVER
+    #     AVOID. AVOID requires the fundamentals axis (I1) to be present AND
+    #     genuinely weak — bad fundamentals, not a thin/absent feed. ---
     cap_suffix = "; size capped" if size_capped else ""
+    i1_weak = i1_available and i1_score < _INTL_WEAK_FUNDAMENTAL_MAX
     if coverage_label == _INTL_LABEL_DATA_GAP:
-        action = "INTL-3F — RANK PENDING / manual review (insufficient international data)"
+        action = (
+            "INTL-3F — DATA GAP / RANK PENDING — small starter only; size capped"
+        )
         tone = "tone-yellow"
     elif coverage_label == _INTL_LABEL_PARTIAL:
-        action = f"INTL-3F — PARTIAL COVERAGE / rank pending{cap_suffix}"
+        action = "INTL PARTIAL — no fresh add until local data confirms; size capped"
         tone = "tone-yellow"
+    elif i1_weak:
+        # Weak fundamentals → AVOID, but flag that the read is on AVAILABLE data:
+        # missing local data is still a factor and could change the picture.
+        action = "INTL-3F — AVOID / DATA-INCOMPLETE — weak fundamentals on available data"
+        tone = "tone-red"
     elif composite >= 70:
         action = f"INTL-3F — CONSTRUCTIVE / international operating company{cap_suffix}"
         tone = "tone-blue"
-    elif composite >= 55:
+    else:
         action = f"INTL-3F — NEUTRAL / small starter only{cap_suffix}"
         tone = "tone-yellow"
-    else:
-        action = "INTL-3F — WEAK FUNDAMENTAL SETUP / avoid (confirmed on available data)"
-        tone = "tone-red"
 
     labels = [coverage_label, _INTL_LABEL_NO_US_FLOW]
     if rank_pending:
         labels.append(_INTL_LABEL_FOREIGN_SRC)
+    # An AVOID on weak fundamentals is still judged on AVAILABLE foreign data —
+    # local financials/exchange mapping are always outstanding for INTL names, so
+    # surface DATA-INCOMPLETE so a local-data update can revisit the call.
+    if i1_weak:
+        labels.append(_INTL_LABEL_DATA_INCOMPLETE)
     if is_otc:
         labels.append(_INTL_LABEL_OTC_LIQ)
 

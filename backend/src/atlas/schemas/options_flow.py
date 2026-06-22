@@ -199,6 +199,33 @@ class OptionsFlowResponse(BaseModel):
             "universe and must be treated as provisional / degraded-source."
         ),
     )
+    # --- Full-tape candidate (diagnostic; NOT the authoritative score) ---------
+    # Parallel read from the FULL per-ticker options tape (FULL coverage), scored
+    # with the coarse net-flow primitives. Surfaced beside the authoritative
+    # provisional alert score so the full-tape source can be validated before it
+    # is promoted to authoritative. None when no tape is available.
+    f4b_full_tape_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Full-tape candidate F4 score (FULL coverage, coarse net-flow scoring).",
+    )
+    f4b_full_tape_source: str = Field(
+        default="NONE",
+        description="Full-tape candidate universe source (UW_TAPE_2_SESSION | NONE).",
+    )
+    f4b_full_tape_confidence: str = Field(
+        default="NO_DATA",
+        description="Confidence of the full-tape candidate universe (FULL | NO_DATA).",
+    )
+    f4b_full_tape_bullish_share: float | None = Field(
+        default=None,
+        description="Bullish share from the full options tape candidate.",
+    )
+    f4b_full_tape_net_flow_usd: float | None = Field(
+        default=None,
+        description="Net options flow (USD) from the full-tape candidate.",
+    )
     f4b_universe_total_alerts: int = Field(
         default=0,
         description="Total candidate options alerts in the active F4b universe window.",

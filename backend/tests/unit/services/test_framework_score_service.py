@@ -619,7 +619,86 @@ class TestEtfBranchScoring:
         assert by_key["i2"].available and by_key["i2"].source == "polygon"
         assert by_key["i3"].available is False
         assert result.degraded is False
+        # Partial coverage caps sizing — it must NOT read as AVOID.
         assert "AVOID" not in result.action.upper()
+        assert "no fresh add until local data confirms" in result.action.lower()
+
+    @pytest.mark.asyncio
+    async def test_intl_full_coverage_weak_composite_is_not_avoid_unless_fundamentals_weak(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from atlas.services.intl_data_service import IntlData, IntlFactorData
+
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return False, "INTL_OPERATING"
+
+        async def _missing(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            raise RuntimeError("no U.S. data feed")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        async def _intl(*_args: object, **_kwargs: object) -> IntlData:
+            # Full coverage, low blended composite — but fundamentals (I1) are
+            # fine; the drag is thin momentum/confirmation. Must NOT be AVOID.
+            return IntlData(
+                i1=IntlFactorData(score=66, available=True, source="fmp-financials"),
+                i2=IntlFactorData(score=42, available=True, source="polygon"),
+                i3=IntlFactorData(score=40, available=True, source="fmp-ratings"),
+            )
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        for name in ("_fetch_f1", "_fetch_f2", "_fetch_f3", "_fetch_f4", "_fetch_f5"):
+            monkeypatch.setattr(svc, name, _missing)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+        monkeypatch.setattr(svc, "_fetch_intl", _intl)
+
+        result = await svc.compute_framework_score("AIXXF")
+
+        assert result.intl_branch is not None
+        assert result.intl_branch.coverage_label == "INTL-OK"
+        assert "AVOID" not in result.action.upper()
+        assert "small starter only" in result.action.lower()
+
+    @pytest.mark.asyncio
+    async def test_intl_avoid_only_when_fundamentals_genuinely_weak(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from atlas.services.intl_data_service import IntlData, IntlFactorData
+
+        svc = self._service()
+
+        async def _route(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            return False, "INTL_OPERATING"
+
+        async def _missing(*_args: object, **_kwargs: object) -> _FactorResultStub:
+            raise RuntimeError("no U.S. data feed")
+
+        async def _f8(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        async def _intl(*_args: object, **_kwargs: object) -> IntlData:
+            # Full coverage AND a genuinely weak fundamental read → AVOID is valid.
+            return IntlData(
+                i1=IntlFactorData(score=30, available=True, source="fmp-financials"),
+                i2=IntlFactorData(score=35, available=True, source="polygon"),
+                i3=IntlFactorData(score=30, available=True, source="fmp-ratings"),
+            )
+
+        monkeypatch.setattr(svc, "_instrument_route_for_ticker", _route)
+        for name in ("_fetch_f1", "_fetch_f2", "_fetch_f3", "_fetch_f4", "_fetch_f5"):
+            monkeypatch.setattr(svc, name, _missing)
+        monkeypatch.setattr(svc, "_fetch_f8", _f8)
+        monkeypatch.setattr(svc, "_fetch_intl", _intl)
+
+        result = await svc.compute_framework_score("BADCO")
+
+        assert result.intl_branch is not None
+        assert result.intl_branch.coverage_label == "INTL-OK"
+        assert "avoid" in result.action.lower()
+        assert "confirmed on local data" in result.action.lower()
 
     @pytest.mark.asyncio
     async def test_spmo_momentum_branch_has_factor_messaging(

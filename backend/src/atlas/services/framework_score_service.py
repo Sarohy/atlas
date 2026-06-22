@@ -109,6 +109,11 @@ _INTL_W_I1: Final[float] = 0.50  # Business / forward fundamentals
 _INTL_W_I2: Final[float] = 0.30  # Market / momentum / liquidity
 _INTL_W_I3: Final[float] = 0.20  # External confirmation
 
+# INTL AVOID gate: only a genuinely weak FUNDAMENTAL read (I1) with real data
+# earns an AVOID. A low blended composite from missing flow / thin momentum /
+# data gaps caps sizing — it never creates an AVOID label.
+_INTL_WEAK_FUNDAMENTAL_MAX: Final[int] = 45
+
 # INTL coverage / status labels (handoff §Required labels).
 _INTL_LABEL_OK: Final[str] = "INTL-OK"
 _INTL_LABEL_PARTIAL: Final[str] = "INTL-PARTIAL"
@@ -813,24 +818,28 @@ def _build_intl_branch_decision(
     rank_pending = coverage_label != _INTL_LABEL_OK
     size_capped = is_otc or rank_pending
 
-    # --- Action: missing data → rank pending (never AVOID). Only fully-covered,
-    #     genuinely weak present data may resolve to a reduce/avoid signal. ---
+    # --- Action: missing data / partial coverage → size-capped watch, NEVER
+    #     AVOID. AVOID requires the fundamentals axis (I1) to be present AND
+    #     genuinely weak — bad fundamentals, not a thin/absent feed. ---
     cap_suffix = "; size capped" if size_capped else ""
+    i1_weak = i1_available and i1_score < _INTL_WEAK_FUNDAMENTAL_MAX
     if coverage_label == _INTL_LABEL_DATA_GAP:
-        action = "INTL-3F — RANK PENDING / manual review (insufficient international data)"
+        action = (
+            "INTL-3F — DATA GAP / RANK PENDING — small starter only; size capped"
+        )
         tone = "tone-yellow"
     elif coverage_label == _INTL_LABEL_PARTIAL:
-        action = f"INTL-3F — PARTIAL COVERAGE / rank pending{cap_suffix}"
+        action = "INTL PARTIAL — no fresh add until local data confirms; size capped"
         tone = "tone-yellow"
+    elif i1_weak:
+        action = "INTL-3F — WEAK FUNDAMENTAL SETUP / avoid (confirmed on local data)"
+        tone = "tone-red"
     elif composite >= 70:
         action = f"INTL-3F — CONSTRUCTIVE / international operating company{cap_suffix}"
         tone = "tone-blue"
-    elif composite >= 55:
+    else:
         action = f"INTL-3F — NEUTRAL / small starter only{cap_suffix}"
         tone = "tone-yellow"
-    else:
-        action = "INTL-3F — WEAK FUNDAMENTAL SETUP / avoid (confirmed on available data)"
-        tone = "tone-red"
 
     labels = [coverage_label, _INTL_LABEL_NO_US_FLOW]
     if rank_pending:
